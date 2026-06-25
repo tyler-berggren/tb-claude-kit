@@ -1,6 +1,6 @@
 # TB Claude Kit
 
-A reusable Claude Code workflow kit — skills, brain DB, session hooks, MCP configs, and cowork structure. Sync into any project for structured AI-assisted development.
+A reusable project kit to give Claude Code a brain, eyes, and a brainstorm/research > plan > implement workflow
 
 Developed through ongoing trial and error by [Tyler Berggren](https://github.com/tyler-berggren).
 
