@@ -78,8 +78,8 @@ KEEP_COUNT=0
 
 drift_stats() {
   local added removed
-  added=$(diff "$1" "$2" | grep -c '^>' 2>/dev/null || echo 0)
-  removed=$(diff "$1" "$2" | grep -c '^<' 2>/dev/null || echo 0)
+  added=$({ diff "$1" "$2" || true; } | grep -c '^>' 2>/dev/null || echo 0)
+  removed=$({ diff "$1" "$2" || true; } | grep -c '^<' 2>/dev/null || echo 0)
   echo "+${added}/-${removed}"
 }
 
@@ -155,7 +155,7 @@ handle_drift() {
 install_file() {
   local src="$1" dst="$2" label="$3" strategy="${4:-kit}"
 
-  [ -f "$src" ] || return
+  [ -f "$src" ] || return 0
   mkdir -p "$(dirname "$dst")"
 
   if [ "$src" = "$dst" ]; then
