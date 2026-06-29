@@ -15,6 +15,7 @@ This project uses Claude Code skills for structured workflows:
 - `/push` — Commit and push to remote.
 - `/research` — Web and project research with numbered reports in `cowork/research/`.
 - `/vibe-audit` — Codebase health and security audit with self-learning pattern database.
+- `/video-editor` — Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption.
 
 ## Brain System
 

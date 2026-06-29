@@ -250,10 +250,14 @@ echo "Skills:"
 for skill_dir in "$KIT_DIR/.claude/skills"/*/; do
   [ -d "$skill_dir" ] || continue
   skill_name=$(basename "$skill_dir")
-  install_file \
-    "$skill_dir/SKILL.md" \
-    "$TARGET_DIR/.claude/skills/$skill_name/SKILL.md" \
-    "$skill_name"
+  for skill_file in "$skill_dir"*; do
+    [ -f "$skill_file" ] || continue
+    fname=$(basename "$skill_file")
+    install_file \
+      "$skill_file" \
+      "$TARGET_DIR/.claude/skills/$skill_name/$fname" \
+      "$skill_name/$fname"
+  done
 done
 
 # --- Hooks ---
@@ -294,6 +298,7 @@ echo "Cowork:"
 mkdir -p "$TARGET_DIR/cowork/brain"
 mkdir -p "$TARGET_DIR/cowork/plans"
 mkdir -p "$TARGET_DIR/cowork/research"
+mkdir -p "$TARGET_DIR/cowork/video"
 mkdir -p "$TARGET_DIR/cowork/vibe-audit"
 mkdir -p "$TARGET_DIR/cowork/setup"
 

@@ -6,7 +6,7 @@ Developed through ongoing trial and error by [Tyler Berggren](https://github.com
 
 ## What's Included
 
-### Skills (9)
+### Skills (10)
 
 | Skill | Purpose |
 |---|---|
@@ -19,6 +19,7 @@ Developed through ongoing trial and error by [Tyler Berggren](https://github.com
 | `/push` | Commit and push to remote. |
 | `/research` | Web research with parallel agents (Brave, Exa, WebSearch). Numbered reports. |
 | `/vibe-audit` | Codebase health + security audit with self-learning Bayesian pattern tracking. |
+| `/video-editor` | Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption. |
 
 ### Infrastructure
 
@@ -134,6 +135,7 @@ cowork/
     GUARDRAILS.md     # Architecture checklist (customize per project)
     schema.sql        # Audit DB schema
     seed.sql          # Builtin scan patterns
+  video/              # Video editing projects (transcripts, scripts, artifacts)
   staged.json         # Changelog entries awaiting release
 ```
 
@@ -209,6 +211,83 @@ Default values (`0px`, `auto`, `static`, `visible`, `normal`, `none`, `start`) a
 - `puppeteer` installed in your project (`npm install puppeteer`)
 - The server script at `scripts/puppeteer-server.cjs` (included in the kit)
 
+## Video Editing (`/video-editor`)
+
+Transcript-based video editing that lets Claude edit videos with clean sentence-boundary cuts, fades, and burned-in captions — all driven from a reviewable markdown script.
+
+### How it works
+
+The skill uses a **script-first** approach: no edits touch the timeline until you review and approve a markdown document showing exactly what will be kept and cut.
+
+```
+/video-editor ~/Downloads/my-recording.mp4
+  → Transcribes with mlx-whisper (accurate word-level timestamps)
+  → Generates cowork/video/<project>/script.md
+  → STOPS — you review and edit the script
+
+/video-editor apply
+  → Parses your approved script
+  → Executes cuts, fades, and captions in Palmier Pro
+  → Runs caption cleanup (brand names, filler removal)
+```
+
+### The pipeline
+
+1. **Transcribe** — mlx-whisper (large-v3-turbo) runs locally on Apple Silicon. Produces word-level timestamps with real silence gaps between phrases. This is critical — Palmier's built-in transcription reports 0ms gaps between adjacent words, making it unusable for determining where to cut.
+
+2. **Script** — The transcript is parsed into numbered sentences with gap data. Claude selects sentences that tell the story, groups them into scenes, and writes a markdown script. Every scene starts and ends on a complete sentence — no mid-word or mid-sentence cuts.
+
+3. **Edit** — The script is parsed back into frame ranges. Cuts are executed via Palmier's `ripple_delete_ranges`. Video opacity fades (133ms in, 67ms out) and audio volume fades (67ms in, 100ms out) are applied to every clip independently — video fades create visual transitions, audio fades prevent clicks at cut points.
+
+4. **Polish** — Captions are auto-generated, then cleaned up using a `caption-dictionary.json` that handles brand name capitalization (e.g., "brand" → "Brand"), phrase corrections (e.g., "air table" → "Airtable"), and filler word removal ("um", "uh").
+
+### Best practices (backed by research)
+
+These are encoded into the skill's procedure, derived from analysis of 17 sources including video-use (11.6K stars), auto-editor, Descript community, and peer-reviewed linguistics research:
+
+- **Cut at sentence boundaries, not silence boundaries.** Silence-based cutting breaks phrases. Sentence boundaries from the transcript are the only reliable cut points.
+- **Padding absorbs timestamp drift.** Whisper timestamps are ~50-120ms off from actual word boundaries. The skill adds 83ms lead padding and up to 300ms tail padding (capped at the gap to the next word minus a safety margin).
+- **600ms is the most natural pause duration** between joined segments (PMC/NIH linguistics research). Below 200ms feels rushed; above 2400ms feels awkward.
+- **Audio and video fades are separate concerns.** Video opacity fades (6-8 frames) create visual scene transitions. Audio volume fades (4-6 frames) prevent clicks/pops at cut points. Different durations, different purpose.
+- **The script catches bad edits before they happen.** Reading "So we're going to get all this data pulled out of" immediately reveals a mid-sentence cut that would sound terrible — but only if you see it as text before it's applied to the timeline.
+
+### Dependencies
+
+**Palmier Pro** (required) — AI-native video editor for macOS with a built-in MCP server. Open source, YC-backed.
+- Install: https://github.com/palmier-io/palmier-pro
+- Must be running with its MCP server connected before using the skill
+- Add to your project: `claude mcp add --transport http palmier-pro http://127.0.0.1:19789/mcp`
+
+**mlx-whisper** (auto-installed) — Apple Silicon-optimized Whisper for accurate word-level transcription. The skill creates a Python venv on first run and installs mlx-whisper automatically (~3 minutes, cached for future sessions). Requires Python 3.
+
+**Why not Palmier's built-in transcription?** Palmier uses on-device speech recognition that assigns timestamps with zero gaps between adjacent words — every word's end timestamp equals the next word's start timestamp. This makes it impossible to identify natural pauses for cut-point decisions. mlx-whisper with forced alignment captures real silence gaps (100ms–3000ms+) between phrases.
+
+### Caption dictionary
+
+The skill ships with `caption-dictionary.json` in the skill folder (`.claude/skills/video-editor/caption-dictionary.json`). Customize it for your project:
+
+```json
+{
+  "replacements": {
+    "mug.org": "mug.work",
+    "air table": "Airtable"
+  },
+  "capitalize": ["Mug", "Airtable", "Claude"],
+  "remove_fillers": ["uh,", "um,", "Uh,", "Um,"]
+}
+```
+
+- **replacements** — exact phrase swaps (whisper often mis-transcribes brand names)
+- **capitalize** — case-insensitive whole-word matching (e.g., any "mug" becomes "Mug")
+- **remove_fillers** — standalone filler captions deleted entirely
+
+### Output
+
+All artifacts land in `cowork/video/<project-name>/`:
+- `whisper-transcript.json` — raw word-level timestamps
+- `sentences.txt` — sentence index with gap data
+- `script.md` — the reviewable/editable cut script
+
 ## Customization
 
 ### MCP Servers
@@ -225,6 +304,15 @@ The installer can configure these MCP servers for `/research` and general web ac
 - Requires API key in `.mcp.json`
 - Best for: Reddit/HN content, news, community discussions
 - Get a key at: https://brave.com/search/api/
+
+Palmier Pro is an open source video editor designed to be driven by AI agents.
+
+**Palmier Pro (video editing)**
+- HTTP transport: `http://127.0.0.1:19789/mcp`
+- Requires Palmier Pro running locally (macOS only)
+- Best for: `/video-editor` — transcript-based video cutting, fades, captions
+- Install: https://github.com/palmier-io/palmier-pro
+- Add: `claude mcp add --transport http palmier-pro http://127.0.0.1:19789/mcp`
 
 ### Per-project skills to add
 
