@@ -1,18 +1,19 @@
 # TB Claude Kit
 
-A reusable project kit to give Claude Code a brain, eyes, and a brainstorm/research > plan > implement workflow
+A reusable project kit to give Claude Code a brain, eyes, video editing, and a brainstorm/research > plan > implement workflow
 
 Developed through ongoing trial and error by [Tyler Berggren](https://github.com/tyler-berggren).
 
 ## What's Included
 
-### Skills (10)
+### Skills (11)
 
 | Skill | Purpose |
 |---|---|
 | `/brain` | Project knowledge DB — decisions, tasks, questions, insights, milestones. Single source of truth. |
 | `/brainstorm` | Conversational idea development with live brain DB capture. |
 | `/commit` | Stage all files and commit with auto-generated message. |
+| `/cto` | Architecture observatory — scans codebase, maps components/relationships into SQLite, generates HTML with Mermaid C4 diagrams. Delta tracking across runs. |
 | `/kill` | Kill dev processes (servers, watchers) without touching Claude. |
 | `/look` | Inspect Chrome viewport via Puppeteer — DOM-first, not screenshot-first. |
 | `/plan` | Multi-phased project planning with fresh-eyes reconciliation. |
@@ -23,7 +24,7 @@ Developed through ongoing trial and error by [Tyler Berggren](https://github.com
 
 ### Infrastructure
 
-- **Session hooks** — Brain DB state loaded on start, session timestamps on end
+- **Session hooks** — Brain DB state loaded on start, session timestamps on end, compound lesson prompt
 - **MCP servers** — Exa (semantic search) + Brave Search (keyword + Reddit/HN access)
 - **Cowork structure** — Brain DB, plans, research, vibe-audit databases
 - **CLAUDE.md template** — Project documentation with mantra block
@@ -52,6 +53,12 @@ Not every task needs the full loop:
 - **Exploratory question:** `/brainstorm` (done — insights saved to brain)
 - **Technology decision:** `/research` → `/brainstorm` (discuss findings) → decision logged
 - **Bug fix:** just fix it → `/commit`
+
+### Compound lessons
+
+At the end of substantive sessions, the session-start hook prompts Claude to consider whether a reusable lesson or pattern emerged. If one did, it's written as a brain insight tagged `lesson` — one sentence stating the rule, then why it matters and how to apply it. If nothing novel was learned, the step is skipped entirely. Over time, these accumulate into a searchable catalog of meta-learning: not just what happened, but what to do differently next time.
+
+Inspired by the "compound step" from [Every Inc's Compound Engineering](https://github.com/everyinc/compound-engineering-plugin) methodology.
 
 ### What ties it together
 
@@ -94,7 +101,8 @@ bash /path/to/tb-claude-kit/install.sh --dry-run
 1. Edit `.mcp.json` — add your Brave API key
 2. Edit `CLAUDE.md` — describe your project
 3. Edit `cowork/vibe-audit/GUARDRAILS.md` — customize for your architecture
-4. Edit `.claude/skills/kill/SKILL.md` — set your dev server ports
+4. Edit `cowork/architecture/seed.sql` — define your project's subsystems for `/cto`
+5. Edit `.claude/skills/kill/SKILL.md` — set your dev server ports
 
 ## Brain DB
 
@@ -129,6 +137,13 @@ cowork/
     USAGE.md          # Schema reference and common queries
   plans/              # Numbered plan files (NNN_YYYY-MM-DD_topic.md)
   research/           # Numbered research reports (NNN_YYYY-MM-DD_topic.md)
+  architecture/
+    CTO.db            # Architecture observatory database (created on first /cto run)
+    PROCEDURE.md      # Full scan/synthesize/output procedure
+    schema.sql        # CTO.db schema
+    seed.sql          # Project-specific context (edit per project)
+    architecture.html # Generated HTML with Mermaid diagrams (output)
+    YYYY-MM-DD_*.md   # Dated markdown summaries (accumulate over runs)
   vibe-audit/
     VIBE-AUDIT.db     # Self-learning audit database
     PROCEDURE.md      # Full audit procedure
@@ -287,6 +302,69 @@ All artifacts land in `cowork/video/<project-name>/`:
 - `whisper-transcript.json` — raw word-level timestamps
 - `sentences.txt` — sentence index with gap data
 - `script.md` — the reviewable/editable cut script
+
+## Architecture Observatory (`/cto`)
+
+A re-runnable skill that scans your codebase, maps its architecture into a SQLite database, and generates a self-contained HTML document with Mermaid C4 diagrams. Running it again produces a delta report showing what changed — new components, removed files, LOC growth, shifting complexity hotspots.
+
+### How it works
+
+Three automated phases, no interaction required:
+
+1. **Scan** — Structural analysis via grep/regex. Discovers subsystems from directory structure and deploy configs, parses import graphs, computes complexity metrics (LOC, fan-in/fan-out), gathers git history (change frequency, code age). All data goes into `CTO.db`.
+
+2. **Synthesize** — Fans out subagents per subsystem. Each reads key files and produces a 2-3 sentence description. Generates Mermaid diagrams at C4 levels (Context, Container, Component).
+
+3. **Output** — Generates `cowork/architecture/architecture.html` (dark-themed, self-contained, Mermaid.js from CDN) and `cowork/architecture/YYYY-MM-DD_architecture-summary.md` (git-diffable, accumulates over runs).
+
+### First run
+
+```
+/cto
+```
+
+On first run, CTO.db is created from `schema.sql` and `seed.sql`. Edit `seed.sql` first to define your project's subsystems — the scan discovers files automatically, but subsystem descriptions help Claude classify and summarize what it finds.
+
+### Re-running
+
+Each run creates a new entry in the `runs` table with the current git SHA. The delta report shows:
+- **New** components (files added since last run)
+- **Removed** components (files deleted since last run)
+- **Changed** components (LOC delta, with ↑↓ indicators)
+- **Subsystem growth** (LOC trends per subsystem)
+
+### Output
+
+| File | Purpose |
+|---|---|
+| `cowork/architecture/CTO.db` | Structured data — components, relationships, metrics, history |
+| `cowork/architecture/architecture.html` | Visual artifact — open in any browser, share with collaborators |
+| `cowork/architecture/YYYY-MM-DD_architecture-summary.md` | Dated markdown — git-diffable, visible in Obsidian |
+
+### Customizing for your project
+
+Edit `cowork/architecture/seed.sql` to define subsystems and patterns:
+
+```sql
+INSERT INTO context (key, value, source) VALUES
+  ('subsystem.api', 'Backend API — REST endpoints, auth, database.', 'user'),
+  ('subsystem.web', 'Frontend SPA — React with TypeScript.', 'user'),
+  ('subsystem.shared', 'Shared types and utilities.', 'user');
+```
+
+The scan adapts to your project's language automatically — the procedure includes patterns for TypeScript, Python, Go, and Rust.
+
+### What it produces
+
+The HTML document has 7 sections:
+
+1. **Executive Summary** — stats grid, one-paragraph overview
+2. **System Context** — Mermaid C4 Level 0 diagram (system boundary + external actors)
+3. **Architecture Overview** — per-subsystem cards with descriptions and LOC
+4. **Deploy Topology** — what ships where, service bindings
+5. **Complexity Hotspots** — top 15 files by composite score (LOC × 0.4 + fan_out × 50 + change_frequency × 10)
+6. **Git Intelligence** — most-changed files in the last 90 days
+7. **Delta Report** — changes since last run
 
 ## Customization
 
