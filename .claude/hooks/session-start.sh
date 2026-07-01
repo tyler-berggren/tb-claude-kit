@@ -89,7 +89,10 @@ fi
 
 CTX="$CTX
 ### Recent Entries
-$RECENT"
+$RECENT
+
+### Compound Lesson
+Before wrapping up a substantive session, consider: did a reusable lesson or pattern emerge? If yes, write it as a brain insight tagged 'lesson' — one sentence stating the rule, then Why and How to apply. If nothing novel was learned, skip this entirely."
 
 # Escape for JSON
 CTX_ESCAPED=$(printf '%s' "$CTX" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
