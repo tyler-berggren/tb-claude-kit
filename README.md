@@ -16,16 +16,16 @@ Developed through ongoing trial and error by [Tyler Berggren](https://github.com
 | `/cto` | Architecture observatory — scans codebase, maps components/relationships into SQLite, generates HTML with Mermaid C4 diagrams. Delta tracking across runs. |
 | `/kill` | Kill dev processes (servers, watchers) without touching Claude. |
 | `/look` | Inspect Chrome viewport via Puppeteer — DOM-first, not screenshot-first. |
-| `/plan` | Multi-phased project planning with fresh-eyes reconciliation. |
+| `/plan` | Multi-phased project planning with fresh-eyes reconciliation. Supports `review` mode for `{{bracketed}}` change proposals. |
 | `/push` | Commit and push to remote. |
-| `/research` | Web research with parallel agents (Brave, Exa, WebSearch). Numbered reports. |
+| `/research` | Deep web research with parallel agents, 6-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Subagents write their own reports; orchestrator writes synthesis only. |
 | `/vibe-audit` | Codebase health + security audit with self-learning Bayesian pattern tracking. |
 | `/video-editor` | Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption. |
 
 ### Infrastructure
 
 - **Session hooks** — Brain DB state loaded on start, session timestamps on end, compound lesson prompt
-- **MCP servers** — Exa (semantic search) + Brave Search (keyword + Reddit/HN access)
+- **MCP servers** — 5 research tools (Brave, Exa, Firecrawl, Tavily, Perplexity) pre-configured in `.mcp.json`
 - **Cowork structure** — Brain DB, plans, research, vibe-audit databases
 - **CLAUDE.md template** — Project documentation with mantra block
 
@@ -44,6 +44,20 @@ Start with `/brainstorm` to explore the problem space conversationally. Decision
 Once the shape of the work is clear, `/plan` generates a phased implementation plan grounded in the codebase. It reads brain DB context (decisions, open questions, prior brainstorms) so the plan reflects what you've already worked through rather than starting from scratch.
 
 Then build. The plan tracks progress, and `/plan N` resumes with a fresh-eyes reconciliation — re-reading the plan against the current state of the code to catch drift between what was planned and what was actually built.
+
+### Reviewing plan changes
+
+Plans are collaborative — you can propose changes directly in the plan file by wrapping edits in `{{double curly braces}}`, then running `/plan review`. Claude reviews each bracketed change for clarity, feasibility, and coherence with the rest of the plan, then applies the approved edits and removes the markers.
+
+```
+# In your plan file, add/edit with brackets:
+- [ ] **API design** — {{use GraphQL instead of REST for the query layer}}
+
+# Then run:
+/plan review
+```
+
+This is useful when you've been thinking about the plan offline and want to batch-update it with Claude validating that nothing conflicts or needs downstream changes.
 
 ### Shorter variants
 
@@ -64,7 +78,7 @@ Inspired by the "compound step" from [Every Inc's Compound Engineering](https://
 
 The **brain DB** is the connective tissue. `/brainstorm` writes decisions and questions into it. `/research` indexes reports in it. `/plan` reads from it. Session hooks load the current state on startup. Nothing is lost between sessions — context accumulates instead of resetting.
 
-Plans and research reports are numbered, dated markdown files (`cowork/plans/001_2025-06-20_auth-redesign.md`, `cowork/research/002_2025-06-22_oauth-providers.md`) that live in the repo alongside your code. They travel with the project through git — any collaborator or future Claude session can read them for full context on why something was built the way it was.
+Plans are numbered, dated markdown files (`cowork/plans/001_2025-06-20_auth-redesign.md`). Research runs are numbered, dated **folders** (`cowork/research/002_2025-06-22_oauth-providers/`) containing individual agent reports (`agent-official-docs.md`, `agent-community.md`, etc.) and a synthesized `SUMMARY.md`. Both live in the repo alongside your code — any collaborator or future Claude session can read them for full context on why something was built the way it was.
 
 ## Installation
 
@@ -98,7 +112,7 @@ bash /path/to/tb-claude-kit/install.sh --dry-run
 
 ### Post-install
 
-1. Edit `.mcp.json` — add your Brave API key
+1. Edit `.mcp.json` — add your API keys for Brave, Firecrawl, and Perplexity (Exa and Tavily use OAuth, no keys needed)
 2. Edit `CLAUDE.md` — describe your project
 3. Edit `cowork/vibe-audit/GUARDRAILS.md` — customize for your architecture
 4. Edit `cowork/architecture/seed.sql` — define your project's subsystems for `/cto`
@@ -136,7 +150,9 @@ cowork/
     schema.sql        # DB schema for initialization
     USAGE.md          # Schema reference and common queries
   plans/              # Numbered plan files (NNN_YYYY-MM-DD_topic.md)
-  research/           # Numbered research reports (NNN_YYYY-MM-DD_topic.md)
+  research/           # Numbered research folders (NNN_YYYY-MM-DD_topic/)
+                      #   agent-*.md      — individual subagent reports
+                      #   SUMMARY.md      — synthesized final report
   architecture/
     CTO.db            # Architecture observatory database (created on first /cto run)
     PROCEDURE.md      # Full scan/synthesize/output procedure
@@ -158,20 +174,24 @@ cowork/
 
 A shared Chrome viewport that Claude can inspect programmatically while you see the same browser window. You drive — navigating pages, setting mobile viewports via Chrome's device toolbar. Claude inspects — reading computed styles, DOM structure, and box models through a local HTTP API.
 
+Supports **multiple concurrent instances** — run separate Chrome windows for different projects on the same machine, each with its own profile, port, and cookie/storage isolation.
+
 ### How it works
 
-The co-browser is a Puppeteer server (`scripts/puppeteer-server.cjs`) that launches a headed Chrome instance and exposes an HTTP API on `localhost:9615`. Claude uses the `/look` skill to query this API with `curl` commands — no MCP server or browser extension needed.
+The co-browser is a Puppeteer server (`scripts/puppeteer-server.cjs`) that launches a headed Chrome instance and exposes an HTTP API. Claude uses the `/look` skill to query this API with `curl` commands — no MCP server or browser extension needed.
+
+Each instance self-registers in `~/.claude-chrome-registry.json` with its profile name, port, and PID. The `/look` skill reads this registry to find the right instance for the current project.
 
 ```
 You (Chrome window)          Claude (terminal)
     │                            │
-    ├── navigate, scroll,        │
+    ├── navigate, scroll,        ├── read registry → resolve port
     │   set mobile viewport      │
-    │                            ├── curl :9615/status
-    │                            ├── curl :9615 -d '{"command":"inspect","selector":".nav"}'
+    │                            ├── curl :PORT/status
+    │                            ├── curl :PORT -d '{"command":"inspect","selector":".nav"}'
     │                            ├── edit source file
     │                            ├── (hot reload)
-    │                            └── curl :9615 -d '{"command":"inspect","selector":".nav"}'
+    │                            └── curl :PORT -d '{"command":"inspect","selector":".nav"}'
     │                                 └── verify fix
 ```
 
@@ -180,18 +200,58 @@ You (Chrome window)          Claude (terminal)
 Launch manually, or build a `/dev` skill (see Customization section) that starts your dev server + the co-browser together:
 
 ```bash
-# Launch with a starting URL
+# Launch with a starting URL — profile auto-names from cwd basename
 node scripts/puppeteer-server.cjs http://localhost:3000
 
-# Or launch without — navigate manually in the Chrome window
+# Launch without a URL — navigate manually in the Chrome window
 node scripts/puppeteer-server.cjs
+
+# Explicit profile name (useful for monorepos or shared directories)
+node scripts/puppeteer-server.cjs --profile my-project http://localhost:3000
+
+# Explicit port (otherwise auto-assigns from 9615-9634)
+node scripts/puppeteer-server.cjs --port 9620 http://localhost:3000
 ```
 
-Chrome opens with a separate user data dir (`~/.claude-chrome-debug`) so it doesn't interfere with your normal browser profile.
+Each instance gets its own Chrome user data directory at `~/.claude-chrome/<profile>/` — fully isolated cookies, storage, and extensions per project.
+
+### Multiple projects
+
+Run Claude Code sessions in two different project directories and each gets its own Chrome window:
+
+```
+# Terminal 1 — in ~/dev/project-a
+node scripts/puppeteer-server.cjs http://localhost:3000
+# → Profile: project-a, Port: 9615
+
+# Terminal 2 — in ~/dev/project-b
+node scripts/puppeteer-server.cjs http://localhost:4000
+# → Profile: project-b, Port: 9616
+```
+
+The `/look` skill automatically resolves the correct port by matching `basename(cwd)` against the registry. No manual port configuration needed.
+
+### Registry
+
+Running instances are tracked in `~/.claude-chrome-registry.json`:
+
+```json
+[
+  {
+    "profile": "project-a",
+    "port": 9615,
+    "pid": 12345,
+    "userDataDir": "/Users/you/.claude-chrome/project-a",
+    "launchedAt": "2025-07-10T15:30:00.000Z"
+  }
+]
+```
+
+Dead PIDs are automatically pruned on read. Entries are removed on clean shutdown (SIGTERM/SIGINT). The `/kill` skill resets the registry when killing all instances.
 
 ### API
 
-All commands are POST requests to `http://127.0.0.1:9615` with a JSON body. There's also a GET `/status` endpoint.
+All commands are POST requests with a JSON body. There's also a GET `/status` endpoint.
 
 | Command | Purpose | Example |
 |---------|---------|---------|
@@ -199,7 +259,7 @@ All commands are POST requests to `http://127.0.0.1:9615` with a JSON body. Ther
 | `dom` | HTML structure + child elements | `{"command":"dom","selector":".hero","children":true}` |
 | `screenshot` | Viewport or element capture (saves PNG) | `{"command":"screenshot","selector":".hero"}` |
 | `eval` | Run arbitrary JS in page context | `{"command":"eval","expression":"document.querySelectorAll('.card').length"}` |
-| `status` | Current URL, viewport size, scroll position | GET `/status` |
+| `status` | Current URL, viewport size, scroll position, profile, port | GET `/status` |
 
 ### What `inspect` returns
 
@@ -366,24 +426,110 @@ The HTML document has 7 sections:
 6. **Git Intelligence** — most-changed files in the last 90 days
 7. **Delta Report** — changes since last run
 
+## Research System (`/research`)
+
+The research skill runs deep, multi-agent web research with a 6-tool stack. Each research run produces a numbered folder in `cowork/research/` containing individual subagent reports and an orchestrator-written synthesis.
+
+### Architecture
+
+```
+/research "topic"
+  → Scout pass (Perplexity orientation, deep dives only)
+  → Decompose into 3-5 research angles
+  → Spawn parallel subagents (one per angle)
+  → Each agent searches, extracts, writes its own report
+  → Orchestrator reads all reports, writes SUMMARY.md
+```
+
+**Key design principles:**
+
+- **Angle-based, not tool-based.** Each subagent gets a research *question* and the full tool stack. The agent picks the right tools for its question — not the other way around.
+- **Subagents write their own reports.** Each agent writes directly to `agent-{label}.md` in the run folder. The orchestrator never rewrites agent findings — it only writes `SUMMARY.md` as a synthesis layer. This prevents "silent consensus hallucination" (the orchestrator inventing positions no agent actually found) and preserves the raw research for drill-down.
+- **Cost-aware extraction cascade.** For getting content from URLs, agents follow: WebFetch (free) → Tavily extract (free tier) → Firecrawl (paid credits). Firecrawl is reserved for pages that genuinely need JS rendering or structured extraction.
+
+### Tool Stack
+
+The skill uses 6 search/extraction tools, each filling a distinct niche:
+
+| Tool | Type | Role | Best For |
+|---|---|---|---|
+| **Brave Search** | MCP (stdio) | Keyword discovery | Reddit, HN, forums, community content, news. Broadest independent index (30B+ pages). |
+| **Exa** | MCP (HTTP/OAuth) | Semantic discovery | Conceptual queries, finding related work, "how do people think about X." Neural search finds what keywords miss. |
+| **Tavily** | MCP (HTTP/OAuth) | Fast agent-native search | Quick factual lookups (187ms avg latency), clean agent-ready responses. Also provides page extraction. |
+| **Perplexity** | MCP (stdio) | Scout/orientation | Pre-synthesized answers with citations. One call orients on a new topic before deep research begins. |
+| **Firecrawl** | MCP (stdio) | Deep extraction | JS-rendered pages, cookie banners, structured schema extraction, site crawling. The only tool that replaces WebFetch for complex pages. |
+| **WebFetch** | Built-in | Fallback extraction | Simple/static pages. Free, fast, always available. First choice in the extraction cascade. |
+
+### Tool Selection Guide
+
+Agents are given this guidance and choose for themselves:
+
+- **"What do practitioners think about X?"** → Brave Search (Reddit/HN access)
+- **"What's conceptually related to X?"** → Exa (semantic search)
+- **"Quick factual answer"** → Tavily (fastest) or WebSearch
+- **"Orient me on a new topic"** → Perplexity (pre-synthesized with citations)
+- **"Official docs for X"** → WebSearch with `allowed_domains`
+- **"Full content of this URL"** → WebFetch → Tavily extract → Firecrawl (cascade)
+
+### Research Depth Levels
+
+| Depth | When | Agents | Tool Usage |
+|---|---|---|---|
+| **Quick lookup** | Narrow factual question, pricing, API behavior | 1 (or direct search) | Minimal |
+| **Standard** | Technology evaluation, comparison, how-to | 3 parallel | Full stack |
+| **Deep dive** | Strategic analysis, competitive landscape, architecture decision | Scout + 4-5 parallel + follow-up | Full stack + iterative deepening |
+
+### Output Structure
+
+```
+cowork/research/005_2026-07-10_ai-research-methodology/
+  agent-scout.md              # Perplexity orientation (deep dives)
+  agent-architectures.md      # Subagent report (written by agent)
+  agent-community.md          # Subagent report (written by agent)
+  agent-pricing.md            # Subagent report (written by agent)
+  agent-alternatives.md       # Subagent report (written by agent)
+  SUMMARY.md                  # Orchestrator synthesis (the main deliverable)
+```
+
+### Anti-Hallucination Measures
+
+The synthesis step is the primary failure point in multi-agent research. The skill encodes specific defenses:
+
+- **Verbatim anchoring** — preserve specific numbers, quotes, and data points from agent reports
+- **Conflict flagging** — when agents disagree, flag it explicitly rather than silently picking one version
+- **Minority preservation** — findings from a single agent are kept, not dropped because the majority didn't mention them
+- **Confidence signaling** — facts stated as facts, consensus qualified, contested claims flagged, inferences labeled
+- **Gap reporting** — what was NOT found is noted alongside what was
+
+### Pricing & Free Tiers
+
+| Tool | Free Tier | Paid | Recommendation |
+|---|---|---|---|
+| **Brave Search** | 2,000 queries/mo | $5/1K queries | Stay free |
+| **Exa** | 1,000 searches/mo | $5-7/1K | Stay free |
+| **Tavily** | 1,000 credits/mo | $0.008/credit | Stay free |
+| **Perplexity** | None | ~$5-15/1K requests | Pay-as-you-go (1 call per run) |
+| **Firecrawl** | 500 credits/mo | $16/mo (3,000 credits) | Consider Hobby tier |
+
+Firecrawl is the only tool worth upgrading — its free tier is tight (500 credits/mo) and it's the only tool that handles JS-rendered pages. The extraction cascade (WebFetch → Tavily → Firecrawl) minimizes credit burn.
+
+### Setup
+
+All 5 MCP servers are pre-configured in `.mcp.json`. After installing the kit:
+
+1. **Brave Search** — get a free API key at https://brave.com/search/api/ and add it to `.mcp.json`
+2. **Exa** — no key needed. Uses OAuth via HTTP transport (authenticates on first use)
+3. **Tavily** — no key needed. Uses OAuth via HTTP transport (authenticates on first use)
+4. **Firecrawl** — sign up at https://firecrawl.dev, get API key, add to `.mcp.json`
+5. **Perplexity** — sign up at https://perplexity.ai, get API key from settings, add to `.mcp.json`
+
+The skill works with any subset of these tools — it gracefully adapts when tools are missing. But the full stack gives the best results: keyword search (Brave) + semantic search (Exa) + fast lookup (Tavily) + orientation (Perplexity) + deep extraction (Firecrawl) + free fallback (WebFetch).
+
 ## Customization
 
-### MCP Servers
+### Additional MCP Servers
 
-The installer can configure these MCP servers for `/research` and general web access. Both are optional — the kit works without them, but research quality improves significantly with at least one.
-
-**Exa (semantic search)**
-- HTTP transport: `https://mcp.exa.ai/mcp`
-- Authentication via Exa account (OAuth on first use)
-- Best for: conceptual exploration, finding related work
-
-**Brave Search (keyword search)**
-- stdio transport via `@modelcontextprotocol/server-brave-search`
-- Requires API key in `.mcp.json`
-- Best for: Reddit/HN content, news, community discussions
-- Get a key at: https://brave.com/search/api/
-
-Palmier Pro is an open source video editor designed to be driven by AI agents.
+Beyond the research stack above, you may want these project-specific MCP servers:
 
 **Palmier Pro (video editing)**
 - HTTP transport: `http://127.0.0.1:19789/mcp`
@@ -478,7 +624,7 @@ Starts your project's dev server and opens a headed Chrome instance for co-brows
 
 **Key design:**
 - Kill any existing process on the dev port, then start the dev server in the background
-- Launch a Puppeteer server on port 9615 pointing at the dev server URL
+- Launch a Puppeteer server pointed at the dev server URL — port auto-assigned, profile auto-named from cwd
 - Both processes run in the background — the skill returns after confirming both are up
 - Pairs with `/kill` (to tear down) and `/look` (to inspect)
 
@@ -486,12 +632,11 @@ Starts your project's dev server and opens a headed Chrome instance for co-brows
 1. Check if the dev port is already in use — kill if so (restart case)
 2. Start the dev server: `cd <project-dir> && npm run dev` (background)
 3. Wait for the server to respond (curl health check)
-4. Kill any stale Puppeteer server on 9615
-5. Launch Puppeteer server pointed at the dev URL (background)
-6. Wait for Puppeteer to be ready
-7. Report both URLs (dev server + Puppeteer)
+4. Launch Puppeteer server pointed at the dev URL (background) — it auto-registers in `~/.claude-chrome-registry.json`
+5. Wait for Puppeteer to be ready (read port from registry)
+6. Report both URLs (dev server + Puppeteer)
 
-**Puppeteer server:** Included at `scripts/puppeteer-server.cjs`. Requires `npm install puppeteer` in your project. Launches headed Chrome with a separate user data dir, accepts an optional URL argument, and exposes an HTTP API on `localhost:9615` with commands: `inspect` (computed styles + box model), `dom` (HTML structure), `screenshot` (viewport/element capture), `eval` (JS execution), and GET `/status` (current URL, viewport, scroll).
+**Puppeteer server:** Included at `scripts/puppeteer-server.cjs`. Requires `npm install puppeteer` in your project. Launches headed Chrome with an isolated profile per project (`~/.claude-chrome/<profile>/`), auto-assigns a free port in the 9615-9634 range, and exposes an HTTP API with commands: `inspect` (computed styles + box model), `dom` (HTML structure), `screenshot` (viewport/element capture), `eval` (JS execution), and GET `/status` (current URL, viewport, scroll, profile, port).
 
 **Example SKILL.md:**
 ```yaml
@@ -529,19 +674,26 @@ user_only: true
 
 5. Start Puppeteer co-browsing server (background):
    \`\`\`bash
-   lsof -iTCP:9615 -sTCP:LISTEN -t 2>/dev/null | xargs /bin/kill 2>/dev/null; sleep 1
    node scripts/puppeteer-server.cjs http://localhost:3000
    \`\`\`
 
-6. Wait for Puppeteer:
+6. Wait for Puppeteer and resolve port:
    \`\`\`bash
-   for i in 1 2 3 4 5 6 7 8 9 10; do curl -s http://127.0.0.1:9615/status > /dev/null 2>&1 && break; sleep 1; done
+   sleep 2
+   LOOK_PORT=$(node -e "
+     const fs = require('fs'), path = require('path'), os = require('os');
+     const reg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude-chrome-registry.json'), 'utf8') || '[]');
+     const profile = path.basename(process.cwd());
+     const entry = reg.find(e => e.profile === profile);
+     if (entry) console.log(entry.port); else console.log('');
+   " 2>/dev/null)
+   for i in 1 2 3 4 5 6 7 8 9 10; do curl -s http://127.0.0.1:${LOOK_PORT}/status > /dev/null 2>&1 && break; sleep 1; done
    \`\`\`
 
 7. Report:
    - Dev server: http://localhost:3000
-   - Puppeteer: http://127.0.0.1:9615
-   - Chrome is open with a debug profile — set mobile viewport via Chrome's device toolbar
+   - Puppeteer: http://127.0.0.1:${LOOK_PORT}
+   - Chrome is open with an isolated profile — set mobile viewport via Chrome's device toolbar
 
 ## Rules
 - No confirmation needed — execute immediately
@@ -553,7 +705,7 @@ user_only: true
 - Dev port (3000, 4747, 5173, 8080, etc.)
 - Dev command (`npm run dev`, `npx vite`, `npx next dev`, `npx wrangler dev`, etc.)
 - Puppeteer server script path
-- Whether to pass a URL argument to Puppeteer or let the user navigate manually
+- Profile name (`--profile <name>`) if cwd basename isn't unique across projects
 
 ---
 

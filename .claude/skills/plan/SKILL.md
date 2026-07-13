@@ -1,7 +1,7 @@
 ---
 name: plan
 description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. Topic/no arg -> generate from brain DB tasks and codebase context.
-argument-hint: "[plan number | NNN brainstorm | topic | update | carry | status]"
+argument-hint: "[plan number | NNN brainstorm | topic | update | carry | status | review]"
 ---
 
 ## Available Plans
@@ -20,6 +20,7 @@ Generate a new plan or resume an existing one. Routing is based on the argument:
 - **`update`** -> Sweep completed plan items and mark brain DB tasks done
 - **`carry`** -> Sweep unfinished plan items back to brain DB
 - **`status`** -> Status check of the current session's bound plan (or most recent active plan)
+- **`review`** -> Review user's `{{bracketed}}` proposed changes to the bound plan
 - **Topic, description, or no argument** -> Generate flow (research + brainstorm + write plan file)
 
 ## Input
@@ -30,6 +31,7 @@ Optional argument: `$ARGUMENTS`
 - `update` -> **Update flow**
 - `carry` -> **Carry flow**
 - `status` -> **Status flow**
+- `review` -> **Review flow**
 - A bare number (`003`) that matches an existing plan file -> **Resume flow**
 - A number + `brainstorm` (e.g. `013 brainstorm`) -> **Brainstorm flow**
 - A filename fragment (`tech-stack-rebuild`) that matches an existing plan -> **Resume flow**
@@ -384,6 +386,47 @@ Usage: `status`
    ```
 
 4. **Do NOT start any work.** Status is read-only. If the user wants to resume, they run `/plan <NNN>`.
+
+---
+
+## Review Flow
+
+Review user-proposed changes to a plan. The user marks their proposed edits with `{{double curly braces}}` in the plan file, then runs `/plan review`. Claude reviews the bracketed changes for clarity, feasibility, and coherence with the rest of the plan.
+
+Usage: `review` (uses the currently bound plan, or asks which plan)
+
+### Procedure
+
+1. **Identify the plan.** Use the bound plan from the current session. If none is bound, check if there's only one plan with `{{` markers — use that. Otherwise ask.
+
+2. **Read the plan file.** Scan for all `{{...}}` bracketed sections. These are the user's proposed changes — they may be additions, replacements, rewrites, or annotations.
+
+3. **For each bracketed change, assess:**
+   - **Clarity** — Is the item specific enough to execute? Does it need more detail, file paths, or acceptance criteria?
+   - **Feasibility** — Is this realistic given the tech stack, timeline, and existing architecture? Flag anything that sounds simple but is actually complex (or vice versa).
+   - **Coherence** — Does this change conflict with or duplicate other plan items? Does it belong in the phase it's placed in, or should it move? Does it affect downstream phases?
+   - **Completeness** — Did the change introduce new dependencies or prerequisites that aren't accounted for elsewhere in the plan?
+
+4. **Present the review.** For each bracketed change:
+   ```
+   **{{change summary}}**
+   ✓ Looks good / ⚠ Suggestion / ✗ Issue
+
+   <1-3 sentences of feedback>
+   ```
+
+5. **Propose final edits.** After reviewing all changes:
+   - Offer to accept all brackets as-is (remove the `{{}}` markers, keep the content)
+   - Suggest specific rewrites for any items flagged with issues
+   - Flag any new items that should be added elsewhere in the plan as a consequence
+
+6. **On user approval:** Remove all `{{}}` markers from the plan file — either accepting the content as-is or applying the agreed rewrites. The plan should have zero `{{}}` markers when done.
+
+### Rules
+
+- **User's intent wins.** The brackets represent what the user wants. Don't reject outright — improve and integrate.
+- **Don't rewrite unprompted.** Only modify content inside or directly adjacent to `{{}}` markers. Leave the rest of the plan untouched.
+- **Flag scope creep.** If a bracketed change significantly expands scope, note it explicitly so the user can make a conscious decision.
 
 ---
 
