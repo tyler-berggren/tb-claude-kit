@@ -8,14 +8,14 @@ This project uses Claude Code skills for structured workflows:
 
 - `/brain` — Project knowledge management (decisions, tasks, questions, insights). Single source of truth in `cowork/brain/BRAIN.db`.
 - `/brainstorm` — Conversational idea development. All outputs logged to brain DB with parent linking.
-- `/commit` — Stage all files and commit with auto-generated message.
 - `/bridge` — Start artifact bridge server (port 4444) for HTML artifacts to read/write project files.
+- `/commit` — Stage all files and commit with auto-generated message.
+- `/cto` — Architecture observatory — scans codebase, maps components into SQLite, generates HTML with Mermaid C4 diagrams.
 - `/kill` — Kill dev processes (servers, watchers, bridge) without touching Claude Code.
 - `/look` — Inspect shared Chrome viewport via Puppeteer (DOM-first, not screenshot-first).
 - `/plan` — Multi-phased project planning with fresh-eyes reconciliation on every resume.
 - `/push` — Commit and push to remote.
 - `/research` — Web and project research with numbered reports in `cowork/research/`.
-- `/sync` — Propagate kit changes to downstream projects. Diffs, preserves customizations, merges intelligently.
 - `/vibe-audit` — Codebase health and security audit with self-learning pattern database.
 - `/video-editor` — Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption.
 

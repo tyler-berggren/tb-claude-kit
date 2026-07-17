@@ -1,32 +1,35 @@
 # TB Claude Kit
 
-A reusable project kit to give Claude Code a brain, eyes, video editing, and a brainstorm/research > plan > implement workflow
+A reusable project kit to give Claude Code a brain, eyes, research superpowers, and other meta skills to make Claude feel like an extremely capable coworker.
 
 Developed through ongoing trial and error by [Tyler Berggren](https://github.com/tyler-berggren).
 
 ## What's Included
 
-### Skills (11)
+### Skills (13)
 
 | Skill | Purpose |
 |---|---|
 | `/brain` | Project knowledge DB — decisions, tasks, questions, insights, milestones. Single source of truth. |
 | `/brainstorm` | Conversational idea development with live brain DB capture. |
+| `/bridge` | Start artifact bridge server for HTML artifacts to read/write project files. |
 | `/commit` | Stage all files and commit with auto-generated message. |
 | `/cto` | Architecture observatory — scans codebase, maps components/relationships into SQLite, generates HTML with Mermaid C4 diagrams. Delta tracking across runs. |
-| `/kill` | Kill dev processes (servers, watchers) without touching Claude. |
-| `/look` | Inspect Chrome viewport via Puppeteer — DOM-first, not screenshot-first. |
+| `/kill` | Kill dev processes (servers, watchers, bridge) without touching Claude. |
+| `/look` | Inspect Chrome viewport via Puppeteer — DOM-first, not screenshot-first. Console log capture. |
 | `/plan` | Multi-phased project planning with fresh-eyes reconciliation. Supports `review` mode for `{{bracketed}}` change proposals. |
 | `/push` | Commit and push to remote. |
 | `/research` | Deep web research with parallel agents, 6-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Subagents write their own reports; orchestrator writes synthesis only. |
+| `/sync` | Propagate kit changes to downstream projects. Diffs, preserves project customizations, merges intelligently. Kit-only — not installed to downstream projects. |
 | `/vibe-audit` | Codebase health + security audit with self-learning Bayesian pattern tracking. |
 | `/video-editor` | Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption. |
 
 ### Infrastructure
 
-- **Session hooks** — Brain DB state loaded on start, session timestamps on end, compound lesson prompt
+- **Zero-config defaults** — VS Code recommends the Claude Code extension on open, permissions are set to bypass prompts, and Opus 4.6 is the default model. Clone and go.
+- **Session hooks** — On start: loads brain state (focus, tasks, questions, mantra), cleans up stale sessions, loads last session's work for context continuity, prompts Claude to review and update the mantra if warranted. On end: records session timestamp.
 - **MCP servers** — 5 research tools (Brave, Exa, Firecrawl, Tavily, Perplexity) pre-configured in `.mcp.json`
-- **Cowork structure** — Brain DB, plans, research, vibe-audit databases
+- **Cowork structure** — Brain DB, plans, research, architecture observatory, vibe-audit databases
 - **CLAUDE.md template** — Project documentation with mantra block
 
 ## Recommended Workflow
@@ -112,8 +115,8 @@ bash /path/to/tb-claude-kit/install.sh --dry-run
 
 ### Post-install
 
-1. Edit `.mcp.json` — add your API keys for Brave, Firecrawl, and Perplexity (Exa and Tavily use OAuth, no keys needed)
-2. Edit `CLAUDE.md` — describe your project
+1. Edit `CLAUDE.md` — describe your project
+2. Edit `.mcp.json` — add your API keys for Brave, Firecrawl, and Perplexity (Exa and Tavily use OAuth, no keys needed)
 3. Edit `cowork/vibe-audit/GUARDRAILS.md` — customize for your architecture
 4. Edit `cowork/architecture/seed.sql` — define your project's subsystems for `/cto`
 5. Edit `.claude/skills/kill/SKILL.md` — set your dev server ports
@@ -259,6 +262,7 @@ All commands are POST requests with a JSON body. There's also a GET `/status` en
 | `dom` | HTML structure + child elements | `{"command":"dom","selector":".hero","children":true}` |
 | `screenshot` | Viewport or element capture (saves PNG) | `{"command":"screenshot","selector":".hero"}` |
 | `eval` | Run arbitrary JS in page context | `{"command":"eval","expression":"document.querySelectorAll('.card').length"}` |
+| `console` | Browser console log buffer (filter, limit, clear) | `{"command":"console","filter":"error","limit":20}` or GET `/console` |
 | `status` | Current URL, viewport size, scroll position, profile, port | GET `/status` |
 
 ### What `inspect` returns

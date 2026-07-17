@@ -285,6 +285,21 @@ install_file \
   ".claude/settings.local.json" \
   "project"
 
+# --- VS Code ---
+echo ""
+echo "VS Code:"
+mkdir -p "$TARGET_DIR/.vscode"
+
+install_file \
+  "$KIT_DIR/.vscode/extensions.json" \
+  "$TARGET_DIR/.vscode/extensions.json" \
+  ".vscode/extensions.json"
+
+install_file \
+  "$KIT_DIR/.vscode/settings.json" \
+  "$TARGET_DIR/.vscode/settings.json" \
+  ".vscode/settings.json"
+
 # --- MCP ---
 echo ""
 echo "MCP:"
@@ -302,6 +317,7 @@ mkdir -p "$TARGET_DIR/cowork/plans"
 mkdir -p "$TARGET_DIR/cowork/research"
 mkdir -p "$TARGET_DIR/cowork/video"
 mkdir -p "$TARGET_DIR/cowork/vibe-audit"
+mkdir -p "$TARGET_DIR/cowork/architecture"
 mkdir -p "$TARGET_DIR/cowork/setup"
 
 for file in schema.sql USAGE.md; do
@@ -316,6 +332,13 @@ for file in PROCEDURE.md schema.sql seed.sql; do
     "$KIT_DIR/cowork/vibe-audit/$file" \
     "$TARGET_DIR/cowork/vibe-audit/$file" \
     "cowork/vibe-audit/$file"
+done
+
+for file in PROCEDURE.md schema.sql seed.sql; do
+  install_file \
+    "$KIT_DIR/cowork/architecture/$file" \
+    "$TARGET_DIR/cowork/architecture/$file" \
+    "cowork/architecture/$file"
 done
 
 install_file \
@@ -340,6 +363,11 @@ install_file \
   "$KIT_DIR/scripts/puppeteer-server.cjs" \
   "$TARGET_DIR/scripts/puppeteer-server.cjs" \
   "scripts/puppeteer-server.cjs"
+
+install_file \
+  "$KIT_DIR/scripts/artifact-bridge.cjs" \
+  "$TARGET_DIR/scripts/artifact-bridge.cjs" \
+  "scripts/artifact-bridge.cjs"
 
 # --- CLAUDE.md ---
 echo ""
@@ -368,6 +396,16 @@ else
   sqlite3 "$TARGET_DIR/cowork/vibe-audit/VIBE-AUDIT.db" < "$TARGET_DIR/cowork/vibe-audit/schema.sql"
   sqlite3 "$TARGET_DIR/cowork/vibe-audit/VIBE-AUDIT.db" < "$TARGET_DIR/cowork/vibe-audit/seed.sql"
   echo "  [init] VIBE-AUDIT.db created from schema + seed"
+fi
+
+echo ""
+echo "Architecture DB:"
+if [ -f "$TARGET_DIR/cowork/architecture/CTO.db" ]; then
+  echo "  [skip] CTO.db already exists"
+else
+  sqlite3 "$TARGET_DIR/cowork/architecture/CTO.db" < "$TARGET_DIR/cowork/architecture/schema.sql"
+  sqlite3 "$TARGET_DIR/cowork/architecture/CTO.db" < "$TARGET_DIR/cowork/architecture/seed.sql"
+  echo "  [init] CTO.db created from schema + seed"
 fi
 
 chmod +x "$TARGET_DIR/.claude/hooks/session-start.sh" 2>/dev/null || true
@@ -511,6 +549,7 @@ if [ $ADD_COUNT -gt 0 ]; then
   echo "Next steps:"
   echo "  1. Edit CLAUDE.md — describe your project"
   echo "  2. Edit cowork/vibe-audit/GUARDRAILS.md — customize for your architecture"
-  echo "  3. Edit .claude/skills/kill/SKILL.md — set your dev ports"
-  echo "  4. Run 'git add .claude/ cowork/ CLAUDE.md .mcp.json scripts/' to commit"
+  echo "  3. Edit cowork/architecture/seed.sql — define your project's subsystems for /cto"
+  echo "  4. Edit .claude/skills/kill/SKILL.md — set your dev ports"
+  echo "  5. Run 'git add .claude/ cowork/ CLAUDE.md .mcp.json scripts/' to commit"
 fi
