@@ -247,9 +247,11 @@ ask_yn() {
 
 # --- Skills ---
 echo "Skills:"
+SKIP_SKILLS="sync"
 for skill_dir in "$KIT_DIR/.claude/skills"/*/; do
   [ -d "$skill_dir" ] || continue
   skill_name=$(basename "$skill_dir")
+  echo "$SKIP_SKILLS" | tr ' ' '\n' | grep -qx "$skill_name" && continue
   for skill_file in "$skill_dir"*; do
     [ -f "$skill_file" ] || continue
     fname=$(basename "$skill_file")

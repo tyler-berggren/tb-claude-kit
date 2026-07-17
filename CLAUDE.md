@@ -15,6 +15,7 @@ This project uses Claude Code skills for structured workflows:
 - `/plan` — Multi-phased project planning with fresh-eyes reconciliation on every resume.
 - `/push` — Commit and push to remote.
 - `/research` — Web and project research with numbered reports in `cowork/research/`.
+- `/sync` — Propagate kit changes to downstream projects. Diffs, preserves customizations, merges intelligently.
 - `/vibe-audit` — Codebase health and security audit with self-learning pattern database.
 - `/video-editor` — Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption.
 
@@ -31,9 +32,18 @@ All project knowledge lives in `cowork/brain/BRAIN.db` — a SQLite database wit
 
 ### Session hooks
 
-- **SessionStart:** Loads brain state (focus, tasks, questions, mantra) into context. Recalculates tiers.
+- **SessionStart:** Loads brain state (focus, tasks, questions, mantra) and last session's work into context. Recalculates tiers. Instructs Claude to review the last session and update the mantra if warranted.
 - **SessionEnd:** Records session end timestamp.
 
+### Mantra
+The mantra is Claude's self-authored evolving context — patterns, non-obvious knowledge, tricky areas, current momentum, and working assumptions that CLAUDE.md doesn't cover. It lives in three synced locations:
+1. `mantra` table in BRAIN.db (source of truth)
+2. `cowork/brain/MANTRA.md` (readable export for Obsidian)
+3. `<!-- BEGIN:mantra -->` block in this file (inline for fresh sessions)
+
+**Automatic review-on-start:** The session-start hook loads the last session's logs, journal, and summary. At the start of each session, review this context against the current mantra. If the last session surfaced something a fresh session would need — update the mantra silently (all three locations). If it was routine, skip. No user action required.
+
+**How to update:** `UPDATE mantra SET content = '...', updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime');` (or INSERT if empty). Then write `cowork/brain/MANTRA.md` and update the BEGIN:mantra block in CLAUDE.md.
+
 <!-- BEGIN:mantra -->
-<!-- Mantra will be inserted here by /brain audit or /brain mantra -->
 <!-- END:mantra -->

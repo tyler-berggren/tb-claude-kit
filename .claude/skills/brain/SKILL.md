@@ -510,7 +510,7 @@ Reflect on recent work and consider updating the mantra. Same as the mantra chec
 
    {narrative}
    ```
-5. If a `<!-- BEGIN:mantra -->` block exists in CLAUDE.md, update it with the same content.
+5. Update the `<!-- BEGIN:mantra -->` block in CLAUDE.md with the same content. If the block doesn't exist yet, append it after the Brain section.
 6. Confirm.
 
 ---

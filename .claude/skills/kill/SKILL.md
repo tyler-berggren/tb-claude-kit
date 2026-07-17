@@ -14,7 +14,7 @@ Finds and kills all development processes — dev servers, file watchers, bundle
 
 ```bash
 # Common dev server ports — customize this list per project
-for port in 3000 3001 4000 4444 5173 5174 8080 8787 8788 8789 9615; do
+for port in 3000 3001 4000 4444 5173 5174 8080 8787 8788 8789 $(seq 9615 9634); do
   pids=$(lsof -iTCP:$port -sTCP:LISTEN -t 2>/dev/null)
   if [ -n "$pids" ]; then
     echo "Killing port $port: PIDs $pids"
@@ -34,18 +34,22 @@ pgrep -f "vite" 2>/dev/null | xargs kill 2>/dev/null
 pgrep -f "nodemon" 2>/dev/null | xargs kill 2>/dev/null
 ```
 
-3. **Find and kill Puppeteer, Chrome debug, and artifact bridge:**
+3. **Find and kill Puppeteer, Chrome debug, artifact bridge, and clean registry:**
 
 ```bash
+# Kill all puppeteer server processes
 pgrep -f "puppeteer-server" 2>/dev/null | xargs kill 2>/dev/null
-pgrep -f "chrome.*debug" 2>/dev/null | xargs kill 2>/dev/null
+pgrep -f "chrome.*claude-chrome" 2>/dev/null | xargs kill 2>/dev/null
 pgrep -f "artifact-bridge" 2>/dev/null | xargs kill 2>/dev/null
+
+# Clear the chrome registry since we killed everything
+echo '[]' > ~/.claude-chrome-registry.json 2>/dev/null
 ```
 
 4. **Verify nothing is left on dev ports:**
 
 ```bash
-for port in 3000 3001 4000 4444 5173 5174 8080 8787 8788 8789 9615; do
+for port in 3000 3001 4000 4444 5173 5174 8080 8787 8788 8789 $(seq 9615 9634); do
   pid=$(lsof -iTCP:$port -sTCP:LISTEN -t 2>/dev/null)
   if [ -n "$pid" ]; then
     echo "WARNING: port $port still occupied by PID $pid"

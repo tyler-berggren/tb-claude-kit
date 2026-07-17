@@ -2,15 +2,95 @@ const http = require('http');
 const puppeteer = require('puppeteer');
 const path = require('path');
 const os = require('os');
+const fs = require('fs');
 
-const PORT = 9615;
-const USER_DATA_DIR = path.join(os.homedir(), '.claude-chrome-debug');
-const DEFAULT_URL = process.argv[2] || null;
+const REGISTRY_PATH = path.join(os.homedir(), '.claude-chrome-registry.json');
+const BASE_PORT = 9615;
+const MAX_PORT_SCAN = 20;
+const CONSOLE_MAX = 500;
+const consoleLogs = [];
+
+function parseArgs(argv) {
+  const args = { port: null, profile: null, url: null };
+  let i = 2;
+  while (i < argv.length) {
+    if (argv[i] === '--port' && argv[i + 1]) {
+      args.port = parseInt(argv[i + 1], 10);
+      i += 2;
+    } else if (argv[i] === '--profile' && argv[i + 1]) {
+      args.profile = argv[i + 1];
+      i += 2;
+    } else if (!argv[i].startsWith('--')) {
+      args.url = argv[i];
+      i++;
+    } else {
+      i++;
+    }
+  }
+  return args;
+}
+
+function readRegistry() {
+  try {
+    const data = fs.readFileSync(REGISTRY_PATH, 'utf8');
+    const entries = JSON.parse(data);
+    return entries.filter(e => {
+      try { process.kill(e.pid, 0); return true; } catch { return false; }
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeRegistry(entries) {
+  fs.writeFileSync(REGISTRY_PATH, JSON.stringify(entries, null, 2));
+}
+
+function registerInstance(entry) {
+  const entries = readRegistry().filter(e => e.profile !== entry.profile);
+  entries.push(entry);
+  writeRegistry(entries);
+}
+
+function unregisterInstance(profile) {
+  const entries = readRegistry().filter(e => e.profile !== profile);
+  writeRegistry(entries);
+}
+
+function isPortFree(port) {
+  return new Promise(resolve => {
+    const s = require('net').createServer();
+    s.once('error', () => resolve(false));
+    s.once('listening', () => { s.close(); resolve(true); });
+    s.listen(port, '127.0.0.1');
+  });
+}
+
+async function findFreePort(preferred) {
+  if (preferred && await isPortFree(preferred)) return preferred;
+  for (let offset = 0; offset < MAX_PORT_SCAN; offset++) {
+    const p = BASE_PORT + offset;
+    if (await isPortFree(p)) return p;
+  }
+  throw new Error(`No free port found in range ${BASE_PORT}-${BASE_PORT + MAX_PORT_SCAN - 1}`);
+}
+
+function defaultProfile() {
+  return path.basename(process.cwd());
+}
+
+const cliArgs = parseArgs(process.argv);
+const PROFILE = cliArgs.profile || defaultProfile();
+const USER_DATA_DIR = path.join(os.homedir(), '.claude-chrome', PROFILE);
+const DEFAULT_URL = cliArgs.url || null;
 
 let browser = null;
 let page = null;
+let assignedPort = null;
 
 async function launchBrowser() {
+  fs.mkdirSync(USER_DATA_DIR, { recursive: true });
+
   browser = await puppeteer.launch({
     headless: false,
     defaultViewport: null,
@@ -29,13 +109,28 @@ async function launchBrowser() {
     try {
       await page.goto(DEFAULT_URL, { waitUntil: 'domcontentloaded', timeout: 5000 });
     } catch {
-      // Target might not be up yet — that's fine, user will navigate
+      // Target might not be up yet — user will navigate
     }
   }
 
+  const setupConsoleCapture = (p) => {
+    p.on('console', (msg) => {
+      const entry = { type: msg.type(), text: msg.text(), ts: Date.now() };
+      consoleLogs.push(entry);
+      if (consoleLogs.length > CONSOLE_MAX) consoleLogs.shift();
+    });
+  };
+  setupConsoleCapture(page);
+  browser.on('targetcreated', async (target) => {
+    if (target.type() === 'page') {
+      const newPage = await target.page();
+      if (newPage) setupConsoleCapture(newPage);
+    }
+  });
+
   browser.on('disconnected', () => {
     console.log('Browser disconnected, shutting down.');
-    process.exit(0);
+    shutdown();
   });
 }
 
@@ -188,6 +283,8 @@ async function handleStatus() {
 
   return {
     ...result,
+    profile: PROFILE,
+    port: assignedPort,
     puppeteerViewport: viewport,
   };
 }
@@ -214,6 +311,15 @@ async function handleCommand(body) {
     case 'status':
       return handleStatus();
 
+    case 'console': {
+      const filter = body.filter || '';
+      const limit = body.limit || 50;
+      let logs = consoleLogs;
+      if (filter) logs = logs.filter(l => l.text.includes(filter));
+      if (body.clear) { consoleLogs.length = 0; return { cleared: true }; }
+      return { logs: logs.slice(-limit) };
+    }
+
     default:
       return { error: `Unknown command: ${command}. Available: inspect, dom, screenshot, eval, status` };
   }
@@ -221,6 +327,16 @@ async function handleCommand(body) {
 
 const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
+
+  if (req.method === 'GET' && req.url.startsWith('/console')) {
+    const url = new URL(req.url, `http://127.0.0.1`);
+    const filter = url.searchParams.get('filter') || '';
+    const limit = parseInt(url.searchParams.get('limit') || '50', 10);
+    let logs = consoleLogs;
+    if (filter) logs = logs.filter(l => l.text.includes(filter));
+    res.end(JSON.stringify({ logs: logs.slice(-limit) }));
+    return;
+  }
 
   if (req.method === 'GET' && req.url === '/status') {
     try {
@@ -253,8 +369,12 @@ const server = http.createServer(async (req, res) => {
   });
 });
 
+let shuttingDown = false;
 async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log('Shutting down...');
+  unregisterInstance(PROFILE);
   server.close();
   if (browser) {
     try { await browser.close(); } catch {}
@@ -266,9 +386,19 @@ process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
 (async () => {
+  assignedPort = await findFreePort(cliArgs.port);
   await launchBrowser();
-  server.listen(PORT, '127.0.0.1', () => {
-    console.log(`Puppeteer server listening on http://127.0.0.1:${PORT}`);
-    console.log(`Chrome launched with debug profile at ${USER_DATA_DIR}`);
+
+  server.listen(assignedPort, '127.0.0.1', () => {
+    registerInstance({
+      profile: PROFILE,
+      port: assignedPort,
+      pid: process.pid,
+      userDataDir: USER_DATA_DIR,
+      launchedAt: new Date().toISOString(),
+    });
+    console.log(`Puppeteer server listening on http://127.0.0.1:${assignedPort}`);
+    console.log(`Profile: ${PROFILE}`);
+    console.log(`Chrome data: ${USER_DATA_DIR}`);
   });
 })();

@@ -5,6 +5,16 @@ if [ ! -f "$DB" ]; then
   exit 0
 fi
 
+# Close any stale sessions (crashed/killed without SessionEnd hook firing)
+sqlite3 "$DB" "UPDATE sessions SET ended_at = started_at WHERE ended_at IS NULL AND pid IS NOT NULL AND pid != $$;"
+
+# Find the last closed session before inserting a new one
+LAST_SESSION_ID=$(sqlite3 "$DB" "SELECT id FROM sessions WHERE ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1;")
+LAST_SESSION_START=""
+if [ -n "$LAST_SESSION_ID" ]; then
+  LAST_SESSION_START=$(sqlite3 "$DB" "SELECT started_at FROM sessions WHERE id = $LAST_SESSION_ID;")
+fi
+
 # Insert session row with PID for concurrent session safety
 sqlite3 "$DB" "INSERT INTO sessions (agent, goals, pid) VALUES ('claude-code', 'auto-started', $$);"
 
@@ -53,6 +63,18 @@ RECENT=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, type, title FROM logs
 TASKS=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, title, pillar FROM logs WHERE type = 'task' AND status = 'active' ORDER BY pillar, priority;")
 QUESTIONS=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, title FROM logs WHERE type = 'question' AND status = 'active';")
 
+# Query last session's work for mantra review
+LAST_SESSION_LOGS=""
+LAST_SESSION_JOURNAL=""
+if [ -n "$LAST_SESSION_START" ]; then
+  LAST_SESSION_LOGS=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, type, title FROM logs WHERE created_at >= '$LAST_SESSION_START' ORDER BY created_at DESC LIMIT 15;")
+  LAST_SESSION_JOURNAL=$(sqlite3 "$DB" "SELECT content FROM journal WHERE session_id = '$LAST_SESSION_ID' ORDER BY created_at DESC LIMIT 1;")
+fi
+LAST_SESSION_SUMMARY=""
+if [ -n "$LAST_SESSION_ID" ]; then
+  LAST_SESSION_SUMMARY=$(sqlite3 "$DB" "SELECT summary FROM sessions WHERE id = $LAST_SESSION_ID;")
+fi
+
 CTX="## Brain State (auto-loaded at session start)"
 
 if [ -n "$MANTRA" ]; then
@@ -89,7 +111,32 @@ fi
 
 CTX="$CTX
 ### Recent Entries
-$RECENT
+$RECENT"
+
+# Append last session context for mantra review
+if [ -n "$LAST_SESSION_LOGS" ] || [ -n "$LAST_SESSION_JOURNAL" ] || [ -n "$LAST_SESSION_SUMMARY" ]; then
+  CTX="$CTX
+
+### Last Session (#$LAST_SESSION_ID)"
+  if [ -n "$LAST_SESSION_SUMMARY" ]; then
+    CTX="$CTX
+Summary: $LAST_SESSION_SUMMARY"
+  fi
+  if [ -n "$LAST_SESSION_JOURNAL" ]; then
+    CTX="$CTX
+Journal: $LAST_SESSION_JOURNAL"
+  fi
+  if [ -n "$LAST_SESSION_LOGS" ]; then
+    CTX="$CTX
+Entries created:
+$LAST_SESSION_LOGS"
+  fi
+fi
+
+CTX="$CTX
+
+### Mantra Review
+Review the last session's work above and the current mantra. If the last session surfaced patterns, non-obvious knowledge, shifted assumptions, or tricky areas that a fresh session would benefit from — update the mantra silently (DB + MANTRA.md + CLAUDE.md block) before starting your work. Skip if the last session was routine or the mantra already captures it. Do not ask the user — just update or skip.
 
 ### Compound Lesson
 Before wrapping up a substantive session, consider: did a reusable lesson or pattern emerge? If yes, write it as a brain insight tagged 'lesson' — one sentence stating the rule, then Why and How to apply. If nothing novel was learned, skip this entirely."

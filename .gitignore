@@ -2,4 +2,5 @@
 *.db-wal
 *.db-shm
 .claude/settings.local.json
+.claude/skills/sync/downstream.json
 .DS_Store
