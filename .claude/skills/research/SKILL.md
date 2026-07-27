@@ -49,7 +49,14 @@ If Perplexity MCP is available, use `perplexity_search` or `perplexity_reason` w
 
 If Perplexity is unavailable, do a quick WebSearch + WebFetch pass on the most authoritative source you can find. The scout phase is additive — skip it gracefully if tools are missing.
 
-Use scout findings to refine the research angles from Step 3.
+**The scout's job is landscape and terminology — not substantive claims.** Use it to learn what the concepts are called, who the players are, and where the boundaries of the topic sit. Do not treat its specific assertions as findings.
+
+**Validate before you use it.** Pre-synthesized answer tools sometimes return a confident, internally consistent answer whose citations do not support it — the model answering from training data and presenting it in cited form. Before writing any agent prompt, spot-check **two or three of the scout's citations against the claims they supposedly support**:
+
+- If they check out, proceed and use the scout to refine the angles from Step 3.
+- If they do not, **discard the scout entirely.** Keep the file for the record, but open it with a prominent provenance warning and do not carry its claims into agent prompts.
+
+A wrong hypothesis is worse than no hypothesis — it anchors agents and costs them effort to unwind. If you do pass scout claims forward, label them explicitly as unverified hypotheses to check, never as background fact.
 
 ### Step 5 — Plan the research angles
 
@@ -61,6 +68,8 @@ Decompose the topic into 3-5 distinct research angles. Each angle is a specific 
 - **Failure modes/limitations** — What goes wrong? What are the criticisms and tradeoffs?
 - **Alternatives/comparisons** — What else exists? How do options compare?
 - **Recent developments** — What changed recently? What's the current state?
+
+**If the user drops an angle**, note it in the remaining agents' prompts as *"out of scope for this run, but flag it prominently if it surfaces in your search."* Descoped questions have a habit of turning out to matter, and the agent already reading the sources is the cheapest place to catch that.
 
 ### Step 6 — Conduct parallel web research
 
@@ -79,13 +88,16 @@ Each agent's report should follow this structure:
 # {Angle Title}
 
 ## Search Approach
-{What tools were used, what queries were run}
+{What tools were used, what queries were run, what failed and how you worked around it}
 
 ## Key Findings
 {Numbered findings with confidence signals: HIGH/MEDIUM/LOW}
 
 ## Detailed Analysis
 {Deeper analysis organized by subtopic}
+
+## What I Could NOT Verify
+{Required. See the anti-fabrication contract below.}
 
 ## Sources
 {Numbered list with URLs and what each source contributed}
@@ -98,6 +110,13 @@ Each agent should:
 - Use **targeted extraction prompts** (never "summarize this page" — instead: "Extract the specific benchmarks, methodology, and limitations discussed")
 - Use `allowed_domains` / `blocked_domains` on WebSearch/Brave to focus results
 - Load MCP tool schemas via ToolSearch before first use
+- Read `SOURCE-NOTES.md` in this skill's directory first, and report anything new worth adding to it
+
+**Include this anti-fabrication contract verbatim in every agent prompt.** It is the single highest-value addition to an agent's instructions — it reliably catches invented citations, misremembered figures, and numbers that secondary sources have quietly corrupted:
+
+> **ANTI-FABRICATION RULE.** Every specific claim you report — a figure, a quote, a name, a date, a technical detail — must come from a source you actually retrieved this session, and you must give its URL. Do NOT reconstruct facts, quotes, or numbers from memory, and do not restate a claim you only saw summarized somewhere else without going to the original. If you cannot verify something, say so explicitly rather than omitting it or softening it into a hedge. **Absence of evidence is itself a reportable finding** — "I searched for X specifically and found nothing" is valuable output. Include a required **"What I Could NOT Verify"** section listing: claims you could not confirm, sources you could not retrieve and why, and anything you found only on low-quality or apparently auto-generated pages. Where a widely-repeated number conflicts with the primary source, report both and say which governs.
+
+Where accuracy is load-bearing, also tell agents to prefer the **primary artifact** over any secondary description of it — the actual spec, filing, dataset, opinion, or release notes rather than an article about it. Secondary sources are for finding primaries, not for quoting.
 
 For quick lookups, a single agent or direct search is sufficient — skip the parallel spawn, but still save findings to the run folder.
 
@@ -114,6 +133,15 @@ If significant gaps remain, spawn 1-2 focused follow-up agents. One good source 
 ### Step 8 — Conduct project research
 
 Search the codebase and project files for anything relevant to the topic — existing code, configs, docs, patterns, prior decisions. Query `cowork/brain/BRAIN.db` for related decisions and insights. This grounds the report in the project's actual state.
+
+**Also check whether the findings CONTRADICT anything already recorded.** Search the brain for entries the research touches:
+
+```sql
+SELECT id, type, title, substr(body,1,300) FROM logs
+WHERE status='active' AND (title LIKE '%<keyword>%' OR body LIKE '%<keyword>%');
+```
+
+If a finding overturns a prior decision or insight, say so in the report's "Project Relevance" section and supersede the old entry in Step 10. A research system that cannot correct its own earlier conclusions accumulates errors — and prior entries are exactly what future sessions will read and trust.
 
 ### Step 9 — Write the final summary report
 
@@ -184,6 +212,14 @@ VALUES ('note', '{Report Title}', '{10-word summary}', 'research', 'done', '{rel
   json('{"folder": "cowork/research/NNN_YYYY-MM-DD_topic/", "summary": "cowork/research/NNN_YYYY-MM-DD_topic/SUMMARY.md"}'), '{ISO 8601 timestamp}');
 ```
 
+**Supersede anything the research overturned** (from Step 8). Do not edit the old entry — write a new one that replaces it, so the change of mind stays visible:
+
+```sql
+INSERT INTO logs (type, title, body, tags, supersedes)
+VALUES ('insight', 'CORRECTION to #<old>: <what changed>', '<what the old entry claimed, what the research found, and why>', 'research', <old_id>);
+UPDATE logs SET superseded_by = last_insert_rowid(), status = 'superseded' WHERE id = <old_id>;
+```
+
 ### Step 11 — Report back
 
 Report back with the file path and a 2-3 sentence summary of what was found.
@@ -193,6 +229,8 @@ If findings are significant enough to inform future project decisions, also add 
 INSERT INTO logs (type, title, body, tags, importance)
 VALUES ('insight', '<title>', '<key finding summary>', 'research', <importance>);
 ```
+
+**Update `SOURCE-NOTES.md`** in this skill's directory with anything the run learned about the tools themselves — sources that blocked or failed, workarounds that got past them, source types that proved unexpectedly high-value, and any content farms worth blocking next time. This file is append-only across runs and is what makes each research pass cheaper than the last.
 
 ---
 
@@ -205,9 +243,9 @@ Every research agent has access to the full tool stack. Tools are listed in orde
 | Tool | What It Does | Best For | Load With |
 |---|---|---|---|
 | **Brave Search** | Keyword search with independent 30B+ page index | Reddit, HN, forums, community content, news. Default for most keyword queries. | `ToolSearch("select:mcp__brave-search__brave_web_search")` |
-| **Exa** | Neural/semantic search | Conceptual queries, finding related work, "how do people think about X", discovering content keywords miss. 60% pass rate on semantic queries vs 38% for keyword search. | `ToolSearch("+exa")` |
+| **Exa** | Neural/semantic search | Conceptual queries, finding related work, "how do people think about X", discovering content keywords miss. 60% pass rate on semantic queries vs 38% for keyword search. **Reach for it after 2-3 empty keyword queries, not at the end** — it finds things keyword search structurally cannot. | `ToolSearch("+exa")` |
 | **Tavily** | Agent-native keyword search, 187ms avg latency | Fast factual lookups, clean agent-ready responses. Use when you need speed or Brave is unavailable. | `ToolSearch("+tavily")` |
-| **Perplexity** | Pre-synthesized answers with citations | Scout/orientation on new topics, quick synthesis of 10-15 sources. Too slow (1.4s+) for tight loops. | `ToolSearch("+perplexity")` |
+| **Perplexity** | Pre-synthesized answers with citations | Landscape/terminology orientation only. **Validate its citations before using anything it says** — see Step 4. Not a source of findings. Too slow (1.4s+) for tight loops. | `ToolSearch("+perplexity")` |
 | **WebSearch** | Built-in keyword search | Quick factual lookups, official docs. Cannot access Reddit. | Always available |
 | **GitHub CLI** | `gh search repos/issues/code` | Adoption signals, real-world problems, implementation examples | Always available |
 
@@ -226,19 +264,32 @@ Every research agent has access to the full tool stack. Tools are listed in orde
 - **Firecrawl**: 0% success on social media (LinkedIn, Twitter, Instagram). 67% overall success rate. Anti-bot-protected sites frequently fail. Unpredictable credit consumption.
 - **Exa**: Coverage gaps on long-tail/niche queries. Smaller index than Brave/Google. Pair with keyword search for completeness.
 - **Brave**: Coverage gaps on niche technical topics. Best community content access of any tool (Reddit, HN).
-- **Perplexity**: Hidden cost inflation — cited web page text is counted as input tokens (20x cost surprises reported). Structured output fragility. No free tier.
+- **Perplexity**: Hidden cost inflation — cited web page text is counted as input tokens (20x cost surprises reported). Structured output fragility. No free tier. **Observed failure mode: returns a confident, internally consistent answer with a citation list that does not support any of its claims.** Always spot-check citations against claims.
 - **WebFetch**: Cannot render JavaScript. Fails on complex layouts, paywalls, SPAs.
 - **WebSearch**: Cannot access Reddit. Keyword-only.
 
-### When to use which search tool
+### Four modes — pick the mode first, then the tool
 
-- **"What do practitioners think about X?"** → Brave Search (Reddit/HN access)
-- **"What's conceptually related to X?"** → Exa (semantic search)
-- **"Quick factual answer"** → Tavily (fastest) or WebSearch
-- **"Orient me on a new topic"** → Perplexity (pre-synthesized)
-- **"Official docs for X"** → WebSearch with `allowed_domains`
-- **"GitHub repos/issues for X"** → `gh search repos/issues/code`
-- **"Full content of this URL"** → WebFetch → Tavily extract → Firecrawl (cascade)
+Most tool-selection mistakes come from treating every query as "search." These are four different jobs:
+
+**1. DISCOVERY — you don't know what exists.**
+- Conceptual: *"has anyone solved a problem shaped like this?"* → **Exa**. Keyword search structurally cannot answer questions where you don't know the name of the thing. Reach for Exa **as soon as two or three keyword queries come back empty** — not as a last resort. In practice this is where the highest-value finds come from, and it is the most commonly skipped tool in the stack.
+- Practitioner reality: *"what do people who actually do this say?"* → **Brave** (best Reddit/HN/forum access).
+- Landscape orientation: → **Perplexity**, with the Step 4 caveats.
+
+**2. TARGETED RETRIEVAL — you know what you want and roughly where it lives.**
+- → **WebSearch or Brave with `allowed_domains`** scoped to the authoritative domain, or a direct URL + **WebFetch**.
+- → **`gh search repos/issues/code`** for code-level evidence.
+
+**3. RESCUE — something blocked you.**
+- Cascade: **WebFetch → Tavily extract → Firecrawl**. Tavily extract is the workhorse here; it gets past a large share of 403s, empty returns, and awkward PDFs, and it is free-tier.
+- For PDFs that extract badly: `pdftotext` via Bash, or the Read tool's PDF mode page by page. Authoritative material (specs, filings, standards, papers, government documents) is disproportionately PDF-first, and search tools handle it worst.
+- Check `SOURCE-NOTES.md` before improvising — the workaround may already be recorded.
+
+**4. VERIFICATION — you have a claim and need to know if it's true.**
+- → **Fetch the primary artifact directly.** Never verify a claim against another secondary source; that is how a corrupted figure propagates.
+- Widely-repeated numbers are the highest-risk category. When a round, oft-quoted figure and a primary source disagree, the primary governs and both belong in the report.
+- This mode is what makes the anti-fabrication contract enforceable rather than aspirational.
 
 ## Search Technique Reference
 
@@ -274,7 +325,9 @@ Every research agent has access to the full tool stack. Tools are listed in orde
 - **Agents write their own reports** — Each subagent writes its report directly. The orchestrator writes ONLY the SUMMARY.md synthesis.
 - **Use today's actual date** for the filename, not a hardcoded date
 - **Topic slug** in the folder name should be short kebab-case (e.g., `css-cascade-layers`, `static-site-generators`)
-- **Extraction cascade** — WebFetch (free) → Tavily (free tier) → Firecrawl (paid). Never start with Firecrawl.
+- **Extraction cascade** — WebFetch (free) → Tavily (free tier) → Firecrawl (paid). Never start with Firecrawl. State this in agent prompts; agents left to themselves sometimes invert it and burn paid credits on work the free tier handles.
+- **Anti-fabrication contract in every agent prompt** — verbatim, per Step 6. Retrieved URLs for every specific claim, a required "What I Could NOT Verify" section, no reconstruction from memory, and absence of evidence reported as a finding.
+- **Verify against primaries** — Never confirm a claim using a second secondary source. Go to the artifact.
 - **Be thorough** — This is a research tool, not a quick answer. Dig into multiple sources and synthesize.
 - **Cite sources** — Every claim should be traceable to a source. Annotate sources with type and role.
 - **Signal confidence** — Distinguish facts from consensus from contested claims from inferences

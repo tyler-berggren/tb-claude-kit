@@ -19,7 +19,7 @@ Developed through ongoing trial and error by [Tyler Berggren](https://github.com
 | `/look` | Inspect Chrome viewport via Puppeteer — DOM-first, not screenshot-first. Console log capture. |
 | `/plan` | Multi-phased project planning with fresh-eyes reconciliation. Supports `review` mode for `{{bracketed}}` change proposals. |
 | `/push` | Commit and push to remote. |
-| `/research` | Deep web research with parallel agents, 6-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Subagents write their own reports; orchestrator writes synthesis only. |
+| `/research` | Deep web research with parallel agents, 6-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Subagents write their own reports under an anti-fabrication contract; orchestrator writes synthesis only. Accumulates source knowledge across runs. |
 | `/sync` | Propagate kit changes to downstream projects. Diffs, preserves project customizations, merges intelligently. Kit-only — not installed to downstream projects. |
 | `/vibe-audit` | Codebase health + security audit with self-learning Bayesian pattern tracking. |
 | `/video-editor` | Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption. |
@@ -438,11 +438,12 @@ The research skill runs deep, multi-agent web research with a 6-tool stack. Each
 
 ```
 /research "topic"
-  → Scout pass (Perplexity orientation, deep dives only)
+  → Scout pass (Perplexity orientation, deep dives only) — citations spot-checked before use
   → Decompose into 3-5 research angles
-  → Spawn parallel subagents (one per angle)
-  → Each agent searches, extracts, writes its own report
+  → Spawn parallel subagents (one per angle, each under the anti-fabrication contract)
+  → Each agent searches, extracts, writes its own report + "What I Could NOT Verify"
   → Orchestrator reads all reports, writes SUMMARY.md
+  → Supersede any brain entries the findings overturned; append to SOURCE-NOTES.md
 ```
 
 **Key design principles:**
@@ -450,6 +451,8 @@ The research skill runs deep, multi-agent web research with a 6-tool stack. Each
 - **Angle-based, not tool-based.** Each subagent gets a research *question* and the full tool stack. The agent picks the right tools for its question — not the other way around.
 - **Subagents write their own reports.** Each agent writes directly to `agent-{label}.md` in the run folder. The orchestrator never rewrites agent findings — it only writes `SUMMARY.md` as a synthesis layer. This prevents "silent consensus hallucination" (the orchestrator inventing positions no agent actually found) and preserves the raw research for drill-down.
 - **Cost-aware extraction cascade.** For getting content from URLs, agents follow: WebFetch (free) → Tavily extract (free tier) → Firecrawl (paid credits). Firecrawl is reserved for pages that genuinely need JS rendering or structured extraction.
+- **Anti-fabrication contract.** Every agent prompt carries a verbatim rule: retrieved URLs for every specific claim, no reconstruction from memory, a required "What I Could NOT Verify" section, and absence of evidence reported as a finding. This is what catches invented citations, misremembered figures, and numbers that secondary sources have quietly corrupted — including the pre-synthesized scout's own output, whose citations are spot-checked before anything it says is carried forward.
+- **Accumulating source knowledge.** `SOURCE-NOTES.md` in the skill directory records what blocked, what worked around it, which source types proved unexpectedly primary, and which content classes wasted searches. Agents read it before searching; each run appends. Research gets cheaper over time instead of rediscovering the same dead ends.
 
 ### Tool Stack
 
@@ -460,18 +463,25 @@ The skill uses 6 search/extraction tools, each filling a distinct niche:
 | **Brave Search** | MCP (stdio) | Keyword discovery | Reddit, HN, forums, community content, news. Broadest independent index (30B+ pages). |
 | **Exa** | MCP (HTTP/OAuth) | Semantic discovery | Conceptual queries, finding related work, "how do people think about X." Neural search finds what keywords miss. |
 | **Tavily** | MCP (HTTP/OAuth) | Fast agent-native search | Quick factual lookups (187ms avg latency), clean agent-ready responses. Also provides page extraction. |
-| **Perplexity** | MCP (stdio) | Scout/orientation | Pre-synthesized answers with citations. One call orients on a new topic before deep research begins. |
+| **Perplexity** | MCP (stdio) | Scout/orientation | Pre-synthesized answers with citations. Orients on terminology and landscape — **not a source of findings**; its citations are spot-checked before use. |
 | **Firecrawl** | MCP (stdio) | Deep extraction | JS-rendered pages, cookie banners, structured schema extraction, site crawling. The only tool that replaces WebFetch for complex pages. |
 | **WebFetch** | Built-in | Fallback extraction | Simple/static pages. Free, fast, always available. First choice in the extraction cascade. |
 
 ### Tool Selection Guide
 
-Agents are given this guidance and choose for themselves:
+Agents pick the **mode** first, then the tool. Most tool-selection mistakes come from treating every query as "search" when these are four different jobs:
+
+- **Discovery** (you don't know what exists) → **Exa** for concepts, **Brave** for practitioner reality. Reach for Exa after 2-3 empty keyword queries, not as a last resort — it finds what keyword search structurally cannot.
+- **Targeted retrieval** (you know what and roughly where) → **WebSearch/Brave with `allowed_domains`**, or a direct URL + **WebFetch**.
+- **Rescue** (something blocked you) → **Tavily extract**, then **Firecrawl**, then `pdftotext` for PDFs that extract badly.
+- **Verification** (you have a claim and need to know if it's true) → fetch the **primary artifact** directly. Never verify a claim against a second secondary source.
+
+Legacy quick reference:
 
 - **"What do practitioners think about X?"** → Brave Search (Reddit/HN access)
 - **"What's conceptually related to X?"** → Exa (semantic search)
 - **"Quick factual answer"** → Tavily (fastest) or WebSearch
-- **"Orient me on a new topic"** → Perplexity (pre-synthesized with citations)
+- **"Orient me on a new topic"** → Perplexity (landscape only — validate its citations)
 - **"Official docs for X"** → WebSearch with `allowed_domains`
 - **"Full content of this URL"** → WebFetch → Tavily extract → Firecrawl (cascade)
 
