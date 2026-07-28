@@ -82,3 +82,14 @@ setInterval(function() {
     .catch(() => { connected = false; });
 }, 5000);
 ```
+
+---
+
+## Project overrides
+
+If `.claude/kit.json` has a `rules."bridge"` entry, read it and apply it as an additional
+instruction for this skill. Absent file or key means no overrides — that is the normal case.
+
+```bash
+jq -r '.rules."bridge" // empty' .claude/kit.json 2>/dev/null
+```

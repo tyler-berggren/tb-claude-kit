@@ -173,3 +173,14 @@ curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"dom","selector":".
 - **Re-inspect after edits** — always verify your fix by re-inspecting the element after the dev server reloads
 - **Report concisely** — don't dump raw JSON at the user. Summarize the relevant values and what they mean for the issue
 - **Viewport is the user's** — never resize or navigate the browser. The user controls Chrome directly.
+
+---
+
+## Project overrides
+
+If `.claude/kit.json` has a `rules."look"` entry, read it and apply it as an additional
+instruction for this skill. Absent file or key means no overrides — that is the normal case.
+
+```bash
+jq -r '.rules."look" // empty' .claude/kit.json 2>/dev/null
+```

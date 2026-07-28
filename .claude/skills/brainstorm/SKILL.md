@@ -1,7 +1,7 @@
 ---
 name: brainstorm
 description: Work through an idea conversationally with Claude. All brainstorms are logged in the brain with any decisions, questions, insights, or tasks that emerge.
-argument-hint: "[topic or idea] | [id to revisit] | list | focus"
+argument-hint: "[topic or idea] | hater [topic] | [id to revisit] | list | focus"
 ---
 
 ## Recent Brainstorms
@@ -22,6 +22,8 @@ Optional argument: `$ARGUMENTS`
 
 Dispatch:
 - `focus` -> start a **Focus Brainstorm** on the current focus items.
+- `hater <topic>` -> start a **Hater Brainstorm** — constructive skepticism to pressure-test the topic.
+- `hater` (no topic) -> ask the user what to pressure-test.
 - A topic or idea string -> start a **New Brainstorm** on that topic.
 - A bare number (e.g. `42`) -> **Revisit** brainstorm entry #42 and continue the conversation.
 - `list` -> **List** all brainstorms with their output counts.
@@ -146,6 +148,36 @@ Start a brainstorm session anchored to the current focus items. Usage: `/brainst
 
 ---
 
+## Hater Brainstorm
+
+Pressure-test an idea like a skeptical investor or CTO would. Usage: `/brainstorm hater <topic>`
+
+The goal is not to kill ideas — it's to make them stronger by surfacing risks, edge cases, and gaps in thinking before they become expensive surprises.
+
+### Procedure
+
+Follow the same Steps 1, 2, 4, and 5 as **New Brainstorm**, with these modifications:
+
+**Step 1 — Create the brainstorm entry** with tags `brainstorm,hater`:
+```sql
+INSERT INTO logs (type, title, body, tags, importance)
+VALUES ('note', 'Hater: <topic title>', 'Hater brainstorm — pressure-testing assumptions.', 'brainstorm,hater', 6);
+```
+
+**Step 3 — Brainstorm with a skeptic's lens.** Replace the standard principles with:
+
+- **Default to doubt.** Assume the idea has a fatal flaw you haven't found yet. Your job is to find it — or confirm it's not there.
+- **Attack the assumptions, not the person.** Every plan rests on beliefs about the market, the user, the tech, the timeline. Name those beliefs explicitly, then stress-test each one. "This assumes X — what if X is wrong?"
+- **Ask the investor questions.** "What's the failure mode?", "Who else has tried this and what happened?", "What's the second-order effect?", "What does this look like at 10x scale?", "Where's the hidden cost?"
+- **Find the edge cases.** The happy path is easy. Probe the unhappy paths — the user who doesn't fit the model, the technical constraint that only shows up at scale, the regulatory angle nobody mentioned.
+- **Be specific about risk.** Don't say "this could be risky." Say "if churn exceeds 30% in month 2, this unit economics model breaks because..." Concrete scenarios, not vibes.
+- **Steel-man before you attack.** Before poking a hole, show you understand why the idea is compelling. Then explain why that's not enough.
+- **Every criticism carries a suggestion.** Never raise a risk without proposing at least one way to address it. "This breaks if X" is incomplete — "This breaks if X; you could mitigate by Y or validate with Z" is the standard. Unproductive negativity is a bug.
+- **Flag research gaps honestly.** When a risk or decision hinges on something neither of us actually knows — market data, technical benchmarks, competitor behavior, legal constraints — say so and suggest a `/research` topic. Don't pretend to have the answer and don't assume the user does either. Before suggesting research, check `cowork/research/` for existing reports that already cover the topic. If a report exists, reference it instead of proposing redundant work.
+- **Converge on what survives.** The output isn't a graveyard of killed ideas — it's a ranked list of risks with severity and mitigation options, a set of questions that need answers before committing, and the core thesis restated with its actual (not imagined) strength.
+
+---
+
 ## Revisit
 
 Continue a prior brainstorm. Usage: `/brainstorm <id>`
@@ -190,3 +222,14 @@ Show all brainstorms with output counts. Usage: `/brainstorm list`
 - **Normalize tags** — Split by comma, trim, lowercase, sort alphabetically, deduplicate, rejoin. Check existing tags (shown in dynamic context above) before inventing new ones.
 - **DB is truth** — Never read from `cowork/brain/BRAIN.md` to determine state. Always query the DB.
 - **Decisions are permanent** — Don't update a decision entry. If thinking changes, create a new decision that supersedes it (set `supersedes` column, mark old one `superseded`).
+
+---
+
+## Project overrides
+
+If `.claude/kit.json` has a `rules."brainstorm"` entry, read it and apply it as an additional
+instruction for this skill. Absent file or key means no overrides — that is the normal case.
+
+```bash
+jq -r '.rules."brainstorm" // empty' .claude/kit.json 2>/dev/null
+```

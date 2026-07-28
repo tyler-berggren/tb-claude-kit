@@ -5,6 +5,36 @@ if [ ! -f "$DB" ]; then
   exit 0
 fi
 
+# --- Schema integrity guard: auto-migrate drift and SURFACE it (never fail silently) ---
+# CREATE TABLE IF NOT EXISTS can add missing *tables* but never missing *columns* on an
+# existing table, so an old DB silently drifts and every query below returns empty. This
+# heals both and injects a visible notice into the session context when it does.
+SCHEMA_NOTICE=""
+SCHEMA_FILE="cowork/brain/schema.sql"
+if [ -f "$SCHEMA_FILE" ]; then
+  HEALED=""
+  COLS=$(sqlite3 "$DB" "PRAGMA table_info(logs);" 2>/dev/null | awk -F'|' '{print $2}')
+  ensure_col() {
+    printf '%s\n' "$COLS" | grep -qx "$1" || {
+      if sqlite3 "$DB" "ALTER TABLE logs ADD COLUMN $2;" 2>/dev/null; then HEALED="$HEALED $1"; fi
+    }
+  }
+  # logs columns that a CREATE TABLE IF NOT EXISTS re-apply cannot backfill:
+  ensure_col priority      "priority INTEGER"
+  ensure_col tier          "tier TEXT NOT NULL DEFAULT 'warm' CHECK (tier IN ('hot','warm','cold','archived'))"
+  ensure_col completed_at  "completed_at TEXT"
+  ensure_col superseded_by "superseded_by INTEGER REFERENCES logs(id)"
+  # (re)apply schema to create any missing tables (sessions/journal/mantra) + indexes.
+  # Columns are ensured first so index creation (e.g. idx_logs_tier) can't fail.
+  SCHEMA_ERR=$(sqlite3 "$DB" < "$SCHEMA_FILE" 2>&1 >/dev/null)
+  if [ -n "$HEALED" ] || [ -n "$SCHEMA_ERR" ]; then
+    SCHEMA_NOTICE="⚠️ BRAIN.db schema was out of date and auto-migrated at session start."
+    [ -n "$HEALED" ] && SCHEMA_NOTICE="$SCHEMA_NOTICE Added missing logs columns:$HEALED."
+    [ -n "$SCHEMA_ERR" ] && SCHEMA_NOTICE="$SCHEMA_NOTICE Remaining errors: $SCHEMA_ERR"
+    SCHEMA_NOTICE="$SCHEMA_NOTICE Prior sessions may have run against a degraded schema — tier/journal/mantra state may be incomplete; consider re-running /brain digest."
+  fi
+fi
+
 # Close any stale sessions (crashed/killed without SessionEnd hook firing)
 sqlite3 "$DB" "UPDATE sessions SET ended_at = started_at WHERE ended_at IS NULL AND pid IS NOT NULL AND pid != $$;"
 
@@ -76,6 +106,12 @@ if [ -n "$LAST_SESSION_ID" ]; then
 fi
 
 CTX="## Brain State (auto-loaded at session start)"
+
+if [ -n "$SCHEMA_NOTICE" ]; then
+  CTX="$CTX
+
+$SCHEMA_NOTICE"
+fi
 
 if [ -n "$MANTRA" ]; then
   CTX="$CTX

@@ -23,7 +23,7 @@ argument-hint: "[security|monolith|shell|deps] or empty for full audit"
 
 Read `cowork/vibe-audit/PROCEDURE.md` for the full audit procedure — three phases (scan, brainstorm, commit), scan categories, VIBE-AUDIT.db integration.
 
-Read `cowork/vibe-audit/GUARDRAILS.md` for the architecture guardrails checklist.
+Read `cowork/vibe-audit/GUARDRAILS.md` for the Layer 2 architecture guardrails checklist.
 
 ## Key paths
 
@@ -31,7 +31,7 @@ Read `cowork/vibe-audit/GUARDRAILS.md` for the architecture guardrails checklist
 - **Schema**: `cowork/vibe-audit/schema.sql` — recreate DB if missing
 - **Seed data**: `cowork/vibe-audit/seed.sql` — builtin patterns and suppressions
 - **Procedure**: `cowork/vibe-audit/PROCEDURE.md` — full scan/brainstorm/commit procedure
-- **Guardrails**: `cowork/vibe-audit/GUARDRAILS.md` — architecture checklist
+- **Guardrails**: `cowork/vibe-audit/GUARDRAILS.md` — Layer 2 architecture checklist
 
 ## Rules
 
@@ -45,3 +45,14 @@ Read `cowork/vibe-audit/GUARDRAILS.md` for the architecture guardrails checklist
 - **Normalize tags** — Split by comma, trim, lowercase, sort alphabetically, deduplicate, rejoin.
 - **The brain is the report** — Findings are brain entries. The milestone is the summary. VIBE-AUDIT.db tracks scan mechanics and learning — it's the skill's memory, not the project's knowledge base.
 - **VIBE-AUDIT.db is the skill's memory** — Every run creates a record, every finding gets a fingerprint and disposition. Patterns learn from feedback. Suppressions accumulate. The skill gets smarter each run.
+
+---
+
+## Project overrides
+
+If `.claude/kit.json` has a `rules."vibe-audit"` entry, read it and apply it as an additional
+instruction for this skill. Absent file or key means no overrides — that is the normal case.
+
+```bash
+jq -r '.rules."vibe-audit" // empty' .claude/kit.json 2>/dev/null
+```

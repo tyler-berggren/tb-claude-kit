@@ -1,11 +1,11 @@
 ---
 name: plan
-description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. Topic/no arg -> generate from brain DB tasks and codebase context.
-argument-hint: "[plan number | NNN brainstorm | topic | update | carry | status | review]"
+description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. Supports scoped plan directories via for:<scope>. Topic/no arg -> generate from brain DB tasks and codebase context.
+argument-hint: "[plan number | scope NNN | for:<scope> topic | NNN brainstorm | topic | update | carry | status | review]"
 ---
 
 ## Available Plans
-!`ls -1 cowork/plans/*.md 2>/dev/null | grep -v .gitkeep || echo "No plans yet"`
+!`ROOTS=$(jq -r '.plan.roots[]?' .claude/kit.json 2>/dev/null); [ -z "$ROOTS" ] && ROOTS="cowork/plans"; OUT=$(echo "$ROOTS" | while IFS= read -r r; do find . -path "./$r/*.md" -not -name '.gitkeep' 2>/dev/null; done | sed 's|^\./||' | sort); [ -n "$OUT" ] && echo "$OUT" || echo "No plans yet"`
 
 ## Active Plan-Linked Tasks
 !`sqlite3 -separator ' | ' cowork/brain/BRAIN.db "SELECT '#' || id, title, json_extract(meta, '$.plan_id') as plan FROM logs WHERE type = 'task' AND status = 'active' AND meta LIKE '%plan_id%';" 2>/dev/null || echo "No plan-linked tasks"`
@@ -33,10 +33,51 @@ Optional argument: `$ARGUMENTS`
 - `status` -> **Status flow**
 - `review` -> **Review flow**
 - A bare number (`003`) that matches an existing plan file -> **Resume flow**
-- A number + `brainstorm` (e.g. `013 brainstorm`) -> **Brainstorm flow**
+- A scope + number (`mvp 001`, `data-portal 000`) -> **Resume flow** for that scope's plan
+- A number + `brainstorm` (e.g. `013 brainstorm`), optionally scoped (`mvp 001 brainstorm`) -> **Brainstorm flow**
 - A filename fragment (`tech-stack-rebuild`) that matches an existing plan -> **Resume flow**
-- A full path (`cowork/plans/003_2026-05-10_tech-stack-rebuild.md`) -> **Resume flow**
+- A full path (`cowork/plans/003_2026-05-10_tech-stack-rebuild.md`, `cowork/plans/mvp/001_seed-profile-design.md`) -> **Resume flow**
+- `for:<scope> <topic>` (e.g. `for:data-portal build parcel POC`) -> **Generate flow** scoped to that directory
 - A topic, description, task IDs, pillar name, or empty -> **Generate flow**
+
+---
+
+## Plan Scopes
+
+Plans may live in more than one directory. The roots are configured per project in
+`.claude/kit.json`; when the file or key is absent the single root is `cowork/plans`.
+
+```json
+{ "plan": { "roots": ["cowork/plans", "cowork/clients/*/projects/*/plans"] } }
+```
+
+Roots may contain `*` wildcards. Plans nested in subdirectories of a root (e.g.
+`cowork/plans/mvp/`, `cowork/plans/mvp/testing/`) are found automatically — subdirectories do
+not need to be listed.
+
+**Numbering is per-directory.** `cowork/plans/003_*.md` and `cowork/plans/mvp/003_*.md` can
+both exist, so a bare `003` is ambiguous whenever more than one root or subdirectory is in play.
+
+**`plan_id` is `<scope>-<NNN>`**, where scope is the plan's directory identity:
+
+| Plan file | scope | `plan_id` |
+|---|---|---|
+| `cowork/plans/003_2026-05-10_rebuild.md` | *(none — directly in a root)* | `003` |
+| `cowork/plans/mvp/001_seed-profile.md` | `mvp` | `mvp-001` |
+| `cowork/plans/mvp/testing/001_proof.md` | `mvp-testing` | `mvp-testing-001` |
+| `cowork/clients/acme/projects/data-portal/plans/000_poc.md` | `data-portal` | `data-portal-000` |
+
+Derivation: for a plan sitting directly in a configured root, there is no scope. For a plan in a
+subdirectory of a root, scope is the relative path from that root with `/` replaced by `-`. For a
+root containing wildcards, scope is the last wildcard-matched segment.
+
+**`meta.plan_path` is authoritative.** Always store the plan's full repo-relative path in
+`meta.plan_path`. `plan_id` is a human handle for the command line and can collide across roots;
+`plan_path` cannot. Resume resolves by `plan_path` first and only falls back to scanning.
+
+**Filenames.** New plans always get the date: `NNN_YYYY-MM-DD_topic.md`. Older plans may omit it
+(`NNN_topic.md`) — match on the `NNN_` prefix when resolving so both forms work. Never rename an
+existing plan to fit the convention.
 
 ---
 
@@ -100,8 +141,15 @@ Wait for user approval or redirection before writing.
 
 ### Step G3 — Write the plan file
 
-1. Determine the next plan number from `cowork/plans/`. Filename: `NNN_YYYY-MM-DD_topic.md`.
-   The plan number `NNN` is zero-padded (e.g., `004`).
+1. Determine the target directory and plan number.
+   - **Scoped** (`for:<scope>` given, or the topic clearly belongs to an existing scope): use that
+     scope's directory. Create it if it doesn't exist. If the scope is ambiguous or unrecognized,
+     ask rather than guessing.
+   - **Default:** the first configured root (`cowork/plans` when unconfigured).
+
+   Find the highest `NNN` prefix **in that directory only** — numbering is per-directory. The new
+   plan gets `NNN + 1`, zero-padded to 3 digits, starting at `000` if the directory is empty.
+   Filename: `NNN_YYYY-MM-DD_topic.md`.
 2. Write the plan file:
    - `# Plan: <Title>`
    - `## Source` — manifest linking each task by DB id:
@@ -115,15 +163,19 @@ Wait for user approval or redirection before writing.
    - `## Verification` — concrete test per phase
 3. Update each source task's meta with the plan link:
    ```sql
-   UPDATE logs SET meta = json_set(COALESCE(meta, '{}'), '$.plan_id', '<NNN>') WHERE id = <id>;
+   UPDATE logs SET meta = json_set(COALESCE(meta, '{}'), '$.plan_id', '<plan_id>',
+     '$.plan_path', '<repo-relative path to the plan file>') WHERE id = <id>;
    ```
-   `plan_id` is always a zero-padded string matching the plan filename prefix (e.g., `'003'`, not `3`).
+   See **Plan Scopes** for how `plan_id` is derived. Always write `plan_path` as well — it is what
+   Resume actually resolves against.
 4. Create a brain DB task for each phase:
    ```sql
    INSERT INTO logs (type, title, pillar, status, meta)
-   VALUES ('task', 'Plan NNN Phase X: <phase title>', '<pillar>', 'active', '{"plan_id":"<NNN>"}');
+   VALUES ('task', 'Plan <plan_id> Phase X: <phase title>', '<pillar>', 'active',
+     json('{"plan_id":"<plan_id>","plan_path":"<path>"}'));
    ```
-5. Do **not** start implementation. The user will invoke `/plan NNN` to resume and begin execution.
+5. Do **not** start implementation. The user will invoke `/plan <plan_id>` (e.g. `/plan 004` or
+   `/plan mvp 001`) to resume and begin execution.
 
 ---
 
@@ -133,7 +185,12 @@ Resume work on an existing plan. Every invocation begins with a fresh-eyes recon
 
 ### Step R1 — Load and bind
 
-1. Resolve the plan file path.
+1. Resolve the plan file path. Search in order, stopping at the first hit:
+   a. A full path, if one was given.
+   b. `meta.plan_path` on a brain DB task whose `plan_id` matches the argument.
+   c. If a scope was given (`mvp 001`), that scope's directory for a `001_*.md` file.
+   d. All configured roots and their subdirectories for a matching `NNN_*` prefix. If more than
+      one directory yields a match, list the candidates and ask — do not guess.
 2. Read the full plan file.
 3. **Bind this session to the plan.** For the rest of this conversation, `/plan update` and `/plan carry` default to this plan without requiring a ref.
 4. Identify the current state:
@@ -161,7 +218,8 @@ Do not trust the plan's file paths, function names, line numbers, or assumptions
    SELECT id, title, status, meta FROM logs
    WHERE type = 'task' AND json_extract(meta, '$.plan_id') = '<NNN>';
    ```
-   `plan_id` is always a zero-padded string matching the plan filename prefix (e.g., `'003'`, not `3`).
+   `plan_id` is `'NNN'` for plans directly in a root, or `'<scope>-NNN'` for scoped plans — see
+   **Plan Scopes**. Always a string, never an integer (`'003'`, not `3`).
    Flag any DB tasks marked done that the plan file still shows as open (or vice versa).
 
 ### Step R3 — Brainstorm
@@ -436,3 +494,14 @@ Usage: `review` (uses the currently bound plan, or asks which plan)
 - **Fresh eyes are mandatory** — Every `/plan` invocation does the reconciliation pass, even if you were just working on this plan 5 minutes ago.
 - **One plan per session** — A session binds to one plan at a time. If the user wants to switch, they run `/plan <different-ref>` which rebinds.
 - **The plan file is a baton.** Every edit should serve the handoff to the next session. A future Claude — with zero memory of this conversation — will open this file cold and need to resume within a minute.
+
+---
+
+## Project overrides
+
+If `.claude/kit.json` has a `rules."plan"` entry, read it and apply it as an additional
+instruction for this skill. Absent file or key means no overrides — that is the normal case.
+
+```bash
+jq -r '.rules."plan" // empty' .claude/kit.json 2>/dev/null
+```

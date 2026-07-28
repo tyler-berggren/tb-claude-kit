@@ -39,3 +39,14 @@ Read `cowork/architecture/PROCEDURE.md` for the full scan/synthesize/output proc
 - **HTML is the deliverable** — `architecture.html` is self-contained, dark-themed, and shareable. Opens in any browser.
 - **DB is the memory** — CTO.db accumulates data across runs. Component history tracks first/last seen, LOC drift, role changes.
 - **Seed data is project-specific** — Edit `seed.sql` to define your project's subsystems and patterns. The scan discovers everything else automatically.
+
+---
+
+## Project overrides
+
+If `.claude/kit.json` has a `rules."cto"` entry, read it and apply it as an additional
+instruction for this skill. Absent file or key means no overrides — that is the normal case.
+
+```bash
+jq -r '.rules."cto" // empty' .claude/kit.json 2>/dev/null
+```

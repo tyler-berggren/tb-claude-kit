@@ -1,177 +1,289 @@
 # TB Claude Kit
 
-A reusable project kit to give Claude Code a brain, eyes, research superpowers, and other meta skills to make Claude feel like an extremely capable coworker.
+**Claude Code forgets everything when the session ends.** Every new session starts by
+re-explaining the same architecture, re-litigating the same decisions, re-discovering the same
+constraints. This kit fixes that, then builds on top of it.
+
+It gives Claude a **persistent brain** (a SQLite knowledge base that survives restarts), a
+**planning loop** that reconciles itself against the real codebase on every resume, a **research
+system** that runs parallel agents under an anti-fabrication contract, and **eyes** — a live
+browser it can inspect the DOM of rather than squint at screenshots.
 
 Developed through ongoing trial and error by [Tyler Berggren](https://github.com/tyler-berggren).
 
-## What's Included
+---
 
-### Skills (13)
+## Quick start
 
-| Skill | Purpose |
+```bash
+# 1. Clone the kit and create the standard pointer (once per machine)
+git clone https://github.com/tyler-berggren/tb-claude-kit.git ~/dev/tb-claude-kit
+ln -s ~/dev/tb-claude-kit ~/.claude-kit
+
+# 2. Install into any project
+cd /path/to/your/project
+bash ~/.claude-kit/install.sh
+```
+
+That's it. Open the project in Claude Code and the skills are available.
+
+**Then:**
+
+1. Edit `CLAUDE.md` — describe your project
+2. Edit `.claude/kit.json` — dev ports for `/kill`, plan/research directories, per-skill rules
+   (see [`kit.example.json`](kit.example.json) for every supported key)
+3. Edit `.mcp.json` — API keys for Brave, Firecrawl, Perplexity (Exa and Tavily use OAuth)
+4. Edit `cowork/vibe-audit/GUARDRAILS.md` and `cowork/architecture/seed.sql` — describe your
+   architecture so `/vibe-audit` and `/cto` know what they're looking at
+
+> **A note on permissions.** This kit ships with Claude Code's permission prompts bypassed, so
+> Claude can work without stopping to ask. That means tool calls — including shell commands —
+> execute without confirmation. It's a reasonable default for a repo you own and trust, and a bad
+> one otherwise. To restore prompting, delete the `permissions` block from
+> `.claude/settings.json`. The pre-configured MCP servers in `.mcp.json` are covered by the same
+> setting.
+
+---
+
+## The skills
+
+Twelve skills, grouped by what they do for you.
+
+**Memory — so context accumulates instead of resetting**
+
+| | |
 |---|---|
-| `/brain` | Project knowledge DB — decisions, tasks, questions, insights, milestones. Single source of truth. |
-| `/brainstorm` | Conversational idea development with live brain DB capture. |
-| `/bridge` | Start artifact bridge server for HTML artifacts to read/write project files. |
-| `/commit` | Stage all files and commit with auto-generated message. |
-| `/cto` | Architecture observatory — scans codebase, maps components/relationships into SQLite, generates HTML with Mermaid C4 diagrams. Delta tracking across runs. |
-| `/kill` | Kill dev processes (servers, watchers, bridge) without touching Claude. |
-| `/look` | Inspect Chrome viewport via Puppeteer — DOM-first, not screenshot-first. Console log capture. |
-| `/plan` | Multi-phased project planning with fresh-eyes reconciliation. Supports `review` mode for `{{bracketed}}` change proposals. |
-| `/push` | Commit and push to remote. |
-| `/research` | Deep web research with parallel agents, 6-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Subagents write their own reports under an anti-fabrication contract; orchestrator writes synthesis only. Accumulates source knowledge across runs. |
-| `/sync` | Propagate kit changes to downstream projects. Diffs, preserves project customizations, merges intelligently. Kit-only — not installed to downstream projects. |
-| `/vibe-audit` | Codebase health + security audit with self-learning Bayesian pattern tracking. |
-| `/video-editor` | Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption. |
+| `/brain` | The knowledge base. Decisions, open questions, insights, tasks, milestones — queryable, tiered by relevance, and loaded into every new session automatically. |
+| `/brainstorm` | Think an idea through conversationally. Decisions and questions that emerge are captured as you go, not reconstructed afterwards. Includes a `hater` mode that pressure-tests an idea like a skeptical investor would. |
 
-### Infrastructure
+**Thinking — so work survives being interrupted**
 
-- **Zero-config defaults** — VS Code recommends the Claude Code extension on open, permissions are set to bypass prompts, and Opus 4.6 is the default model. Clone and go.
-- **Session hooks** — On start: loads brain state (focus, tasks, questions, mantra), cleans up stale sessions, loads last session's work for context continuity, prompts Claude to review and update the mantra if warranted. On end: records session timestamp.
-- **MCP servers** — 5 research tools (Brave, Exa, Firecrawl, Tavily, Perplexity) pre-configured in `.mcp.json`
-- **Cowork structure** — Brain DB, plans, research, architecture observatory, vibe-audit databases
-- **CLAUDE.md template** — Project documentation with mantra block
+| | |
+|---|---|
+| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. |
+| `/research` | Parallel agents across a six-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Each writes its own report under an anti-fabrication contract with a mandatory "what I could not verify" section; the orchestrator only synthesizes. Reports accumulate as sourced, dated folders. |
 
-## Recommended Workflow
+**Seeing — so Claude can check its own work**
 
-The skills are designed to chain together in a natural sequence: **understand → plan → build**.
+| | |
+|---|---|
+| `/look` | A shared Chrome window Claude inspects DOM-first — computed styles, box models, console logs — instead of guessing from screenshots. |
+| `/cto` | Architecture observatory. Scans the codebase into a SQLite model and generates an HTML document with Mermaid C4 diagrams. Re-running shows what drifted. |
+| `/vibe-audit` | Health and security audit tuned for vibe-engineered code, with Bayesian pattern tracking that gets more precise each run. |
+| `/bridge` | A local server that lets HTML artifacts read and write real project files. |
 
-### The full loop
+**Doing — the small stuff, done consistently**
+
+| | |
+|---|---|
+| `/commit` `/push` | Stage, write a real commit message, push. |
+| `/kill` | Kill dev servers, watchers, and browser instances without touching your Claude session. |
+| `/video-editor` | Transcript-driven video editing — transcribe, script, cut, caption. |
+
+---
+
+## How it works
+
+The **brain DB** is the connective tissue. `/brainstorm` writes decisions and questions into it.
+`/research` indexes reports in it. `/plan` reads from it. Session hooks load the current state on
+startup, so a fresh Claude opens already knowing where things stand.
+
+Everything else is a file in your repo, readable by a human or a future session:
+
+- **Plans** are numbered, dated markdown — `cowork/plans/001_2026-06-20_auth-redesign.md`
+- **Research runs** are numbered, dated *folders* —
+  `cowork/research/002_2026-06-22_oauth-providers/` holding each agent's report plus a synthesized
+  `SUMMARY.md`
+
+Both sit alongside your code, so anyone can read why something was built the way it was.
+
+### The mantra
+
+Claude maintains its own notes about your project — the non-obvious patterns, the tricky areas,
+the working assumptions that `CLAUDE.md` doesn't cover. It reviews and updates them on session
+start, unprompted. This is the part people tend to underestimate: it's Claude telling the next
+Claude what actually matters.
+
+### Compound lessons
+
+At the end of substantive sessions, Claude considers whether a reusable lesson emerged. If one
+did, it's written as a brain insight tagged `lesson` — the rule, why it matters, how to apply it.
+If nothing novel happened, the step is skipped. Over time these accumulate into a searchable
+catalog of what to do differently next time.
+
+Inspired by the "compound step" from
+[Every Inc's Compound Engineering](https://github.com/everyinc/compound-engineering-plugin).
+
+---
+
+## Recommended workflow
+
+The skills chain in a natural sequence: **understand → plan → build**.
 
 ```
 /brainstorm  →  /research  →  /plan  →  implement  →  /commit
 ```
 
-Start with `/brainstorm` to explore the problem space conversationally. Decisions, questions, and insights that emerge are captured in the brain DB automatically. If you need external evidence — how an API works, what the tradeoffs are between libraries, what others have done — run `/research` to get a sourced report.
+Start with `/brainstorm` to explore the problem conversationally; decisions and questions are
+captured automatically. When you need outside evidence — how an API behaves, what the tradeoffs
+are, what others hit — `/research` returns a sourced report.
 
-Once the shape of the work is clear, `/plan` generates a phased implementation plan grounded in the codebase. It reads brain DB context (decisions, open questions, prior brainstorms) so the plan reflects what you've already worked through rather than starting from scratch.
+Once the shape is clear, `/plan` generates a phased plan grounded in both the codebase and the
+brain DB, so it reflects what you've already worked through. Then build. `/plan N` resumes with a
+fresh-eyes reconciliation pass, re-reading the plan against the current code to catch the gap
+between what was planned and what actually got built.
 
-Then build. The plan tracks progress, and `/plan N` resumes with a fresh-eyes reconciliation — re-reading the plan against the current state of the code to catch drift between what was planned and what was actually built.
+**Not everything needs the full loop:**
 
-### Reviewing plan changes
+- **Quick feature** — `/plan` → implement → `/commit`
+- **Exploratory question** — `/brainstorm`, and you're done; insights are saved
+- **Technology decision** — `/research` → `/brainstorm` the findings → decision logged
+- **Bug fix** — just fix it → `/commit`
 
-Plans are collaborative — you can propose changes directly in the plan file by wrapping edits in `{{double curly braces}}`, then running `/plan review`. Claude reviews each bracketed change for clarity, feasibility, and coherence with the rest of the plan, then applies the approved edits and removes the markers.
+**Proposing plan changes offline.** Wrap edits in `{{double curly braces}}` directly in the plan
+file, then run `/plan review`. Claude checks each one for feasibility and coherence with the rest
+of the plan before applying it.
 
 ```
-# In your plan file, add/edit with brackets:
 - [ ] **API design** — {{use GraphQL instead of REST for the query layer}}
-
-# Then run:
-/plan review
 ```
 
-This is useful when you've been thinking about the plan offline and want to batch-update it with Claude validating that nothing conflicts or needs downstream changes.
+---
 
-### Shorter variants
+## Two ways to install
 
-Not every task needs the full loop:
+The kit can either **travel with your repo** or **live outside it**. This is the main thing to
+understand before adopting it across several projects.
 
-- **Quick feature:** `/plan` → implement → `/commit`
-- **Exploratory question:** `/brainstorm` (done — insights saved to brain)
-- **Technology decision:** `/research` → `/brainstorm` (discuss findings) → decision logged
-- **Bug fix:** just fix it → `/commit`
+| | **outside repo** (default) | **inside repo** |
+|---|---|---|
+| Kit files are | symlinks into `~/.claude-kit` | real files in your project |
+| Git | gitignored — never committed | tracked — travel with the repo |
+| Updating | instant; edit the kit once, every project sees it | re-run `install.sh`, with drift detection |
+| Needs the kit present? | yes | no |
 
-### Compound lessons
-
-At the end of substantive sessions, the session-start hook prompts Claude to consider whether a reusable lesson or pattern emerged. If one did, it's written as a brain insight tagged `lesson` — one sentence stating the rule, then why it matters and how to apply it. If nothing novel was learned, the step is skipped entirely. Over time, these accumulate into a searchable catalog of meta-learning: not just what happened, but what to do differently next time.
-
-Inspired by the "compound step" from [Every Inc's Compound Engineering](https://github.com/everyinc/compound-engineering-plugin) methodology.
-
-### What ties it together
-
-The **brain DB** is the connective tissue. `/brainstorm` writes decisions and questions into it. `/research` indexes reports in it. `/plan` reads from it. Session hooks load the current state on startup. Nothing is lost between sessions — context accumulates instead of resetting.
-
-Plans are numbered, dated markdown files (`cowork/plans/001_2025-06-20_auth-redesign.md`). Research runs are numbered, dated **folders** (`cowork/research/002_2025-06-22_oauth-providers/`) containing individual agent reports (`agent-official-docs.md`, `agent-community.md`, etc.) and a synthesized `SUMMARY.md`. Both live in the repo alongside your code — any collaborator or future Claude session can read them for full context on why something was built the way it was.
-
-## Installation
-
-### New project
+**Choose with one question: does a machine without your kit checkout need this repo to work?**
+If yes — a repo you hand to someone else, a cloud session, CI — use `inside`. Otherwise `outside`,
+and stop thinking about propagation entirely.
 
 ```bash
-cd /path/to/your/project
-bash /path/to/tb-claude-kit/install.sh
+bash ~/.claude-kit/install.sh                  # uses the mode in kit.json (default: outside)
+bash ~/.claude-kit/install.sh --mode inside    # convert to vendored files
+bash ~/.claude-kit/install.sh --mode outside   # convert back to symlinks
+bash ~/.claude-kit/install.sh --dry-run        # report what would change, touch nothing
+bash ~/.claude-kit/install.sh --yes            # auto-update drifted files, enable integrations
 ```
 
-### Existing project
+Conversion is lossless in both directions.
 
-Same command — the installer detects drifted files and prompts you to update, keep, or view the diff.
+**Adopting an existing project.** Paths already holding real files are reported as `[occupied]`
+and left alone — the installer never silently deletes your work. Content that's byte-identical to
+the kit converts automatically. For anything that genuinely differs, either add it to `fork` (see
+below) or commit it and re-run with `--replace`.
 
-### Updating
+**On another machine.** Clone the kit anywhere, run `ln -s <path> ~/.claude-kit`, then
+`bash ~/.claude-kit/install.sh` in each project. Nothing in any repo hardcodes a checkout location.
 
-To pull updates from the kit into an existing project, re-run the installer. It detects drifted files and shows unified diffs. In an interactive terminal, you're prompted per file (`[u]pdate / [k]eep / [d]iff`). Non-interactive shells (e.g. Claude Code) get full diffs in the output.
+---
 
-**Kit-managed files** (skills, hooks, schemas, scripts) can be auto-updated with `--yes`. **Project files** (CLAUDE.md, settings.json, .mcp.json, GUARDRAILS.md) are never auto-updated — diffs are shown for manual review.
+## Configuration — `.claude/kit.json`
 
-```bash
-# Interactive — prompt per drifted file
-bash /path/to/tb-claude-kit/install.sh
+One file per project holds both its mode and its customizations. Every key is optional; skills
+fall back to sensible defaults when the file or a key is missing. See
+[`kit.example.json`](kit.example.json) for the annotated full reference.
 
-# Auto-update kit files + enable integrations
-bash /path/to/tb-claude-kit/install.sh --yes
+```json
+{
+  "kitVersion": 1,
+  "mode": "outside",
+  "fork": [],
+  "exclude": [],
 
-# Report drifts without changing anything
-bash /path/to/tb-claude-kit/install.sh --dry-run
+  "kill": {
+    "ports": [3000, 5173, 8787],
+    "portRanges": [[9615, 9634]],
+    "patterns": ["my-custom-watcher"],
+    "scopeToProjectPath": true
+  },
+  "commit": { "author": "Jane Dev <jane@example.com>" },
+  "plan":     { "roots": ["cowork/plans", "cowork/clients/*/projects/*/plans"] },
+  "research": { "roots": ["cowork/research"] },
+
+  "rules": {
+    "push": "If the post-commit hook reports undeployed changes, ask before pushing."
+  }
+}
 ```
 
-### Post-install
+### `fork` vs `exclude`
 
-1. Edit `CLAUDE.md` — describe your project
-2. Edit `.mcp.json` — add your API keys for Brave, Firecrawl, and Perplexity (Exa and Tavily use OAuth, no keys needed)
-3. Edit `cowork/vibe-audit/GUARDRAILS.md` — customize for your architecture
-4. Edit `cowork/architecture/seed.sql` — define your project's subsystems for `/cto`
-5. Edit `.claude/skills/kill/SKILL.md` — set your dev server ports
+Easy to confuse, and they do opposite things:
 
-## Brain DB
+- **`fork`** — the path exists here and **your project owns it**. The kit never links, copies, or
+  gitignores it. Use it when you need genuinely different behavior from the kit's version.
+- **`exclude`** — the path **has no business existing here at all**. Never installed, in either
+  mode. Use it to install a subset — say, a repo for a non-technical collaborator that shouldn't
+  carry developer tooling. Excluding doesn't delete what's already there; the installer reports
+  leftovers so removal stays deliberate.
 
-The brain is a SQLite database at `cowork/brain/BRAIN.db` with FTS5 full-text search.
+### Where project-specific behavior belongs
 
-### Entry types
-- `note` — general observations, brainstorm summaries
-- `decision` — choices with rationale (permanent — supersede, don't edit)
-- `question` — open questions to resolve (resolve into decisions)
-- `insight` — patterns or realizations worth preserving
-- `task` — work items with pillar, priority, plan linking
-- `milestone` — significant project events
+In order of preference — reach for the first one that fits:
 
-### Tier system (computed, not manual)
-- **hot** — focus items + plan-linked tasks with momentum
-- **warm** — importance >= 6, or created within 14 days
-- **cold** — everything else that's active
-- **archived** — done, dropped, or superseded
+1. **A value** → `kit.json` (dev ports, commit author, plan directories)
+2. **A short rule** → `kit.json` `rules.<skill>`, applied whenever that skill runs
+3. **A procedure** → a project-owned skill with its own name, sitting alongside the kit's. Your
+   own skills in `.claude/skills/` are never touched by the installer.
+4. **`fork`** → last resort, when the kit's own behavior has to change
 
-### Mantra
-Claude's self-authored context — what Claude thinks is important that CLAUDE.md doesn't say. Updated during `/brain audit` and `/brain done`. Synced to `cowork/brain/MANTRA.md` and optionally to a `<!-- BEGIN:mantra -->` block in CLAUDE.md.
+The ordering matters: JSON keeps overrides deliberately small, and a rule that won't fit
+comfortably in a string is usually a sign it belongs in its own skill — or upstream in the kit.
 
-## Cowork Directory
+---
+
+## What's in a project after install
 
 ```
+.claude/
+  kit.json            # mode + configuration (yours)
+  skills/             # kit skills, plus any you add
+  hooks/              # session-start: loads brain state, heals schema drift
+  settings.json       # model, permissions, hooks (yours)
 cowork/
   brain/
-    BRAIN.db          # Knowledge database (SQLite + FTS5)
-    BRAIN.md          # Auto-generated readable export
+    BRAIN.db          # knowledge base (SQLite + FTS5)
+    BRAIN.md          # auto-generated readable export
     MANTRA.md         # Claude's self-authored context
-    schema.sql        # DB schema for initialization
-    USAGE.md          # Schema reference and common queries
-  plans/              # Numbered plan files (NNN_YYYY-MM-DD_topic.md)
-  research/           # Numbered research folders (NNN_YYYY-MM-DD_topic/)
-                      #   agent-*.md      — individual subagent reports
-                      #   SUMMARY.md      — synthesized final report
-  architecture/
-    CTO.db            # Architecture observatory database (created on first /cto run)
-    PROCEDURE.md      # Full scan/synthesize/output procedure
-    schema.sql        # CTO.db schema
-    seed.sql          # Project-specific context (edit per project)
-    architecture.html # Generated HTML with Mermaid diagrams (output)
-    YYYY-MM-DD_*.md   # Dated markdown summaries (accumulate over runs)
-  vibe-audit/
-    VIBE-AUDIT.db     # Self-learning audit database
-    PROCEDURE.md      # Full audit procedure
-    GUARDRAILS.md     # Architecture checklist (customize per project)
-    schema.sql        # Audit DB schema
-    seed.sql          # Builtin scan patterns
-  video/              # Video editing projects (transcripts, scripts, artifacts)
-  staged.json         # Changelog entries awaiting release
+  plans/              # NNN_YYYY-MM-DD_topic.md
+  research/           # NNN_YYYY-MM-DD_topic/ — agent-*.md + SUMMARY.md
+  architecture/       # CTO.db, generated architecture.html, dated summaries
+  vibe-audit/         # VIBE-AUDIT.db, GUARDRAILS.md (yours)
+  video/              # transcripts, scripts, caption-dictionary.json (yours)
+CLAUDE.md             # project documentation + mantra block (yours)
+.mcp.json             # research MCP servers (yours — holds API keys)
 ```
+
+Files marked *(yours)* are created once and never overwritten. Everything else is kit-managed.
+
+### The brain DB
+
+SQLite with FTS5 full-text search at `cowork/brain/BRAIN.db`.
+
+**Entry types** — `note`, `decision` (permanent; supersede rather than edit), `question`,
+`insight`, `task`, `milestone`.
+
+**Tiers**, computed rather than set by hand:
+
+- **hot** — focus items and plan-linked tasks with momentum
+- **warm** — importance ≥ 6, or created in the last 14 days
+- **cold** — everything else still active
+- **archived** — done, dropped, or superseded
+
+---
+
+# Reference
+
+Everything below is detail for when you need it — skip it on a first read.
 
 ## "Look" Co-Browser (`/look`)
 
@@ -343,7 +455,10 @@ These are encoded into the skill's procedure, derived from analysis of 17 source
 
 ### Caption dictionary
 
-The skill ships with `caption-dictionary.json` in the skill folder (`.claude/skills/video-editor/caption-dictionary.json`). Customize it for your project:
+The dictionary lives at `cowork/video/caption-dictionary.json` and is **project-owned** — the kit
+installs an empty template once and never overwrites it. It sits outside the skill folder on
+purpose: in outside-repo mode the skill directory is shared across every project, and your brand
+terms must not be. Customize it freely:
 
 ```json
 {
@@ -554,7 +669,12 @@ Beyond the research stack above, you may want these project-specific MCP servers
 
 ### Per-project skills to add
 
-These skills were intentionally excluded from the kit because they're deeply project-specific. Use the patterns below as templates when building them for your project.
+These were intentionally left out of the kit because they're deeply project-specific. Use the
+patterns below as templates when building your own.
+
+This is **lane 3** from [Configuration](#where-project-specific-behavior-belongs): a project-owned
+skill with its own name, living in `.claude/skills/` alongside the kit's. The installer never
+touches skills it doesn't ship, so yours are safe in either mode — no `fork` entry needed.
 
 ---
 

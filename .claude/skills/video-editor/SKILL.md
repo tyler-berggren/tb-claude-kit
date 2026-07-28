@@ -196,7 +196,10 @@ Call `add_captions` with:
 
 ### Step 13 — Caption cleanup
 
-Load `caption-dictionary.json` from the skill folder (`.claude/skills/video-editor/caption-dictionary.json`).
+Load `cowork/video/caption-dictionary.json` — a **project-owned** file. The kit ships an empty
+template; each project fills in its own brand terms, transcription corrections, and capitalization.
+It lives outside the skill folder because the skill directory is shared across projects (symlinked
+in outside-repo mode), and this data must not be.
 
 Call `get_timeline` to read all caption clips from the caption track's `captionGroups`.
 
@@ -264,3 +267,14 @@ Full analysis in `cowork/research/060_2026-06-29_ai-agent-video-editing-transcri
 - `remove_clips` — delete filler captions
 - `add_clips` — add segments to timeline
 - `add_texts` — add manual caption clips
+
+---
+
+## Project overrides
+
+If `.claude/kit.json` has a `rules."video-editor"` entry, read it and apply it as an additional
+instruction for this skill. Absent file or key means no overrides — that is the normal case.
+
+```bash
+jq -r '.rules."video-editor" // empty' .claude/kit.json 2>/dev/null
+```

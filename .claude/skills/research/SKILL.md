@@ -1,11 +1,11 @@
 ---
 name: research
-description: Run web and project research on a topic, producing a numbered report in cowork/research/.
-argument-hint: "<topic or question>"
+description: Run web and project research on a topic, producing a numbered report in cowork/research/ or a scoped research directory.
+argument-hint: "<topic or question> | for:<scope> <topic>"
 ---
 
 ## Existing Research
-!`sqlite3 -separator ' — ' cowork/brain/BRAIN.db "SELECT '#' || id, title, created_at, json_extract(meta, '$.folder') FROM logs WHERE type='note' AND tags LIKE '%research%' AND status = 'done' ORDER BY created_at DESC;" 2>/dev/null || echo "No research reports yet"`
+!`sqlite3 -separator ' — ' cowork/brain/BRAIN.db "SELECT '#' || id, title, created_at, json_extract(meta, '$.folder') FROM logs WHERE type='note' AND tags LIKE '%research%' AND status = 'done' ORDER BY created_at DESC LIMIT 15;" 2>/dev/null || echo "No research reports yet"`
 
 ---
 
@@ -19,17 +19,38 @@ The user provides a research topic or question as the argument: `$ARGUMENTS`
 
 If no argument is provided, ask the user what they'd like researched.
 
+**Scoped research.** Reports may be routed to a directory other than the default. The roots are
+configured per project in `.claude/kit.json`; when the file or key is absent the single root is
+`cowork/research`.
+
+```json
+{ "research": { "roots": ["cowork/research", "cowork/clients/*/projects/*/research"] } }
+```
+
+`for:<scope> <topic>` (e.g. `for:data-portal parcel data APIs`) routes the report to that scope's
+directory. The user may also phrase it naturally — "research parcel APIs for the acme data portal project" — so detect the scope from context, including recent brain entries. If the scope
+is ambiguous or unrecognized, ask rather than guessing. Scope derivation matches `/plan` — see
+**Plan Scopes** in the `plan` skill.
+
 ## Procedure
 
-### Step 1 — Determine the next report number and create the run folder
+### Step 1 — Determine the output directory and create the run folder
 
-List entries in `cowork/research/` and find the highest `NNN` prefix. The new report gets `NNN + 1` (zero-padded to 3 digits). If the directory is empty or doesn't exist, create it and start at `000`.
+**Base directory:** the scope's directory if one was given or detected, otherwise the first
+configured root (`cowork/research` when unconfigured). Create it if it doesn't exist.
 
-Create the run folder: `cowork/research/NNN_YYYY-MM-DD_topic/` (use today's actual date, short kebab-case topic slug). All output for this research run — subagent reports and the final summary — goes into this folder.
+List entries in **that directory only** — numbering is per-directory — and find the highest `NNN`
+prefix. The new report gets `NNN + 1` (zero-padded to 3 digits), starting at `000` if empty.
+
+Create the run folder: `<base>/NNN_YYYY-MM-DD_topic/` (use today's actual date, short kebab-case
+topic slug). All output for this research run — subagent reports and the final summary — goes into
+this folder.
 
 ### Step 2 — Check for prior research
 
-Before searching the web, scan existing reports in `cowork/research/` for reports on related topics. If prior work exists, note it — build on it rather than re-covering the same ground.
+Before searching the web, scan the target base directory **and** `cowork/research/` if different
+for reports on related topics. Also query the brain DB for prior research entries. If prior work
+exists, note it — build on it rather than re-covering the same ground.
 
 ### Step 3 — Assess depth and confirm with the user
 
@@ -78,7 +99,7 @@ Spawn 3-5 sub-agents (using the Agent tool) to search different angles simultane
 1. **A research angle** — the specific question to answer
 2. **The full tool stack** — every agent can use any tool (see Tool Stack below)
 3. **Tool selection guidance** — advisory notes on which tools work best for what (see below)
-4. **A file path** — the agent writes its own report directly to `cowork/research/NNN_YYYY-MM-DD_topic/agent-{label}.md`
+4. **A file path** — the agent writes its own report directly to `<run-folder>/agent-{label}.md`
 
 **Each agent MUST write its own report file directly using the Write tool.** The orchestrator does NOT write agent reports. Subagents are capable of writing files — this is non-negotiable. If an agent fails to write its file, note it in the summary but do not rewrite the agent's findings.
 
@@ -145,7 +166,7 @@ If a finding overturns a prior decision or insight, say so in the report's "Proj
 
 ### Step 9 — Write the final summary report
 
-Write to `cowork/research/NNN_YYYY-MM-DD_topic/SUMMARY.md` — this is the main deliverable, synthesized from all subagent reports in the same folder.
+Write to `<run-folder>/SUMMARY.md` — this is the main deliverable, synthesized from all subagent reports in the same folder.
 
 **Synthesis rules — avoid "silent consensus hallucination":**
 - Read every subagent report before writing. Reference which agent found what.
@@ -208,9 +229,12 @@ After writing the report, create a BRAIN.db entry to catalog it:
 
 ```sql
 INSERT INTO logs (type, title, body, tags, status, pillar, importance, meta, created_at)
-VALUES ('note', '{Report Title}', '{10-word summary}', 'research', 'done', '{relevant pillar}', 5,
-  json('{"folder": "cowork/research/NNN_YYYY-MM-DD_topic/", "summary": "cowork/research/NNN_YYYY-MM-DD_topic/SUMMARY.md"}'), '{ISO 8601 timestamp}');
+VALUES ('note', '{Report Title}', '{10-word summary}', 'research{,scope if scoped}', 'done', '{relevant pillar}', 5,
+  json('{"folder": "<run-folder>/", "summary": "<run-folder>/SUMMARY.md"}'), '{ISO 8601 timestamp}');
 ```
+
+For scoped research, add the scope as a tag (e.g. `research,data-portal`) so reports are
+discoverable by scope as well as by folder.
 
 **Supersede anything the research overturned** (from Step 8). Do not edit the old entry — write a new one that replaces it, so the change of mind stays visible:
 
@@ -336,3 +360,14 @@ Most tool-selection mistakes come from treating every query as "search." These a
 - **No silent consensus hallucination** — The synthesis must reflect what agents actually found, not what the orchestrator thinks should be true.
 - **Project context matters** — Always include how findings relate to this project
 - **Plain markdown** — No Obsidian-specific syntax (no frontmatter tags, wikilinks, or callout blocks)
+
+---
+
+## Project overrides
+
+If `.claude/kit.json` has a `rules."research"` entry, read it and apply it as an additional
+instruction for this skill. Absent file or key means no overrides — that is the normal case.
+
+```bash
+jq -r '.rules."research" // empty' .claude/kit.json 2>/dev/null
+```

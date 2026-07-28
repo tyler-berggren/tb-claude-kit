@@ -1,0 +1,45 @@
+{
+  "_note": "Copy to .claude/kit.json in your project. Every key is optional; delete what you don't need. Skills fall back to built-in defaults when a key or the whole file is absent.",
+
+  "kitVersion": 1,
+
+  "_note_mode": "outside = kit files are symlinks to your kit checkout, gitignored, never travel with the repo. inside = kit files are real files, tracked in git, travel with the repo. Choose inside if a machine without your kit checkout needs this repo to work.",
+  "mode": "outside",
+
+  "_note_kitPath": "Optional override for where the kit lives. Resolution order: $TB_CLAUDE_KIT, then this key, then ~/.claude-kit. Leave unset unless this project needs a different checkout than the rest.",
+  "kitPath": null,
+
+  "_note_fork": "Paths this project owns outright. They EXIST here, but the kit never touches them: real files instead of symlinks in outside mode, skipped by drift detection in inside mode. Prefer the other lanes below — fork is a last resort for when kit behavior itself must change.",
+  "fork": [],
+
+  "_note_exclude": "Paths that should NOT exist in this project at all — never installed, in either mode. Use to install a subset of the kit, e.g. a repo for a non-technical user that should not carry developer skills. Different from fork: fork means 'the project owns this', exclude means 'this does not belong here'. Excluding does not delete what is already on disk; install.sh reports leftovers so you can remove them deliberately.",
+  "exclude": [],
+
+  "_note_kill": "Ports and patterns for /kill. portRanges are inclusive pairs. patterns are extra pgrep -f arguments. scopeToProjectPath additionally kills node/tsx processes whose command line contains this project's path.",
+  "kill": {
+    "ports": [3000, 3001, 4000, 4444, 5173, 5174, 8080, 8787, 8788, 8789],
+    "portRanges": [[9615, 9634]],
+    "patterns": [],
+    "scopeToProjectPath": false
+  },
+
+  "_note_commit": "Pins the commit author for /commit. Sets --author only, so the committer still comes from git config and the two identities will differ. Most projects should omit this.",
+  "commit": {
+    "author": null
+  },
+
+  "_note_plan": "Directories /plan may write to. May contain * wildcards. Subdirectories of a root are found automatically and do not need listing. Numbering is per-directory; plan_id becomes <scope>-NNN for scoped plans.",
+  "plan": {
+    "roots": ["cowork/plans"]
+  },
+
+  "_note_research": "Same as plan.roots, for /research output folders.",
+  "research": {
+    "roots": ["cowork/research"]
+  },
+
+  "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
+  "rules": {
+    "push": "Example: if the post-commit hook reports undeployed worker changes, ask before pushing — never auto-deploy."
+  }
+}

@@ -616,3 +616,14 @@ Regenerate `cowork/brain/BRAIN.md` — a single read-only markdown snapshot comb
 - **Keep it conversational** — Review, Audit, and Search results should be narrated, not raw SQL output.
 - **Opinionated but collaborative** — During Audit, propose what to drop, defer, and focus on. Hold it loosely — the user makes the final call.
 - **Don't auto-drop** — Propose changes. Wait for confirmation before executing status/tier/focus updates.
+
+---
+
+## Project overrides
+
+If `.claude/kit.json` has a `rules."brain"` entry, read it and apply it as an additional
+instruction for this skill. Absent file or key means no overrides — that is the normal case.
+
+```bash
+jq -r '.rules."brain" // empty' .claude/kit.json 2>/dev/null
+```
