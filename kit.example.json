@@ -38,6 +38,13 @@
     "roots": ["cowork/research"]
   },
 
+  "_note_web": "Where /web looks for the built static site, and the canonical origin it checks URLs against. roots is a candidate list; the first directory that exists and contains HTML wins. Absent, /web tries web, public, dist, site, build, _site, out, sitemd/site, then the project root. baseUrl is required for canonical/sitemap URL checks and for /web live. ignore records divergences you have decided are correct so re-runs stop re-reporting them — each rule needs check, plus optional file and match (substring of the message) to narrow it, and a note explaining the call. Suppressed findings are still counted and listed under --show-suppressed, never silently dropped.",
+  "web": {
+    "roots": ["web"],
+    "baseUrl": null,
+    "ignore": []
+  },
+
   "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
   "rules": {
     "push": "Example: if the post-commit hook reports undeployed worker changes, ask before pushing — never auto-deploy."

@@ -70,6 +70,7 @@ Twelve skills, grouped by what they do for you.
 | `/look` | A shared Chrome window Claude inspects DOM-first — computed styles, box models, console logs — instead of guessing from screenshots. |
 | `/cto` | Architecture observatory. Scans the codebase into a SQLite model and generates an HTML document with Mermaid C4 diagrams. Re-running shows what drifted. |
 | `/vibe-audit` | Health and security audit tuned for vibe-engineered code, with Bayesian pattern tracking that gets more precise each run. |
+| `/web` | SEO/AEO audit for a static site. Checks metadata, structured data, sitemap, robots, and llms.txt are present and correct — then checks they are still *current*, catching sitemaps with stale lastmod, markdown mirrors that drifted from their pages, and FAQ schema answering questions the page no longer asks. |
 | `/bridge` | A local server that lets HTML artifacts read and write real project files. |
 
 **Doing — the small stuff, done consistently**
