@@ -131,7 +131,7 @@ Each agent should:
 - Use **targeted extraction prompts** (never "summarize this page" — instead: "Extract the specific benchmarks, methodology, and limitations discussed")
 - Use `allowed_domains` / `blocked_domains` on WebSearch/Brave to focus results
 - Load MCP tool schemas via ToolSearch before first use
-- Read `SOURCE-NOTES.md` in this skill's directory first, and report anything new worth adding to it
+- Read both source-notes files first (kit baseline, then the project-local one — see **Source notes** below), and report anything new worth adding
 
 **Include this anti-fabrication contract verbatim in every agent prompt.** It is the single highest-value addition to an agent's instructions — it reliably catches invented citations, misremembered figures, and numbers that secondary sources have quietly corrupted:
 
@@ -254,7 +254,9 @@ INSERT INTO logs (type, title, body, tags, importance)
 VALUES ('insight', '<title>', '<key finding summary>', 'research', <importance>);
 ```
 
-**Update `SOURCE-NOTES.md`** in this skill's directory with anything the run learned about the tools themselves — sources that blocked or failed, workarounds that got past them, source types that proved unexpectedly high-value, and any content farms worth blocking next time. This file is append-only across runs and is what makes each research pass cheaper than the last.
+**Update the project-local `SOURCE-NOTES.md`** with anything the run learned about the tools themselves — sources that blocked or failed, workarounds that got past them, source types that proved unexpectedly high-value, and any content farms worth blocking next time. Append-only across runs; this is what makes each research pass cheaper than the last.
+
+**Write to `<research root>/SOURCE-NOTES.md` in the project, never to this skill's directory.** The skill directory is a symlink into the shared kit, so writing there pushes one project's findings into every other project that installs the kit, and into the kit's own git history. Research output stays in the repo that produced it. Create the project-local file if it does not exist yet, mirroring the kit baseline's headings.
 
 ---
 
@@ -308,7 +310,7 @@ Most tool-selection mistakes come from treating every query as "search." These a
 **3. RESCUE — something blocked you.**
 - Cascade: **WebFetch → Tavily extract → Firecrawl**. Tavily extract is the workhorse here; it gets past a large share of 403s, empty returns, and awkward PDFs, and it is free-tier.
 - For PDFs that extract badly: `pdftotext` via Bash, or the Read tool's PDF mode page by page. Authoritative material (specs, filings, standards, papers, government documents) is disproportionately PDF-first, and search tools handle it worst.
-- Check `SOURCE-NOTES.md` before improvising — the workaround may already be recorded.
+- Check both source-notes files before improvising — the workaround may already be recorded.
 
 **4. VERIFICATION — you have a claim and need to know if it's true.**
 - → **Fetch the primary artifact directly.** Never verify a claim against another secondary source; that is how a corrupted figure propagates.
@@ -342,6 +344,26 @@ Most tool-selection mistakes come from treating every query as "search." These a
 - High Trust: official docs, peer-reviewed papers, framework maintainer blogs
 - Medium Trust: engineering blogs, conference talks, established tech publications
 - Low Trust: SEO content farms, affiliate pages, AI-generated content. Actively avoid these.
+
+## Source notes
+
+Retrieval knowledge lives in two files. Read both before a run, starting with the
+baseline:
+
+| File | Scope | Writable |
+|---|---|---|
+| `.claude/skills/research/SOURCE-NOTES.md` | Kit baseline — generic, curated, ships with the kit | **No** |
+| `<research root>/SOURCE-NOTES.md` | This project's accumulated learnings | Yes — append here |
+
+The research root comes from `research.roots[0]` in `.claude/kit.json`, defaulting
+to `cowork/research`.
+
+**Never write to the kit baseline.** In `outside` mode the skill directory is a
+symlink into the shared kit checkout, so an edit there silently lands in the kit's
+git working tree — pushing one project's findings into every other project that
+installs the kit. Research output belongs to the repo that produced it. If a
+learning is genuinely universal and worth promoting into the baseline, say so in
+the run's wrap-up and let the user move it deliberately.
 
 ## Rules
 

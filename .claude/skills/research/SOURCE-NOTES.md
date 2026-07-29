@@ -1,4 +1,9 @@
-# Source Notes
+# Source Notes — kit baseline
+
+**Read-only.** This file ships with the kit and is shared by every project that
+installs it. Do not append run findings here — they go in the project-local
+`<research root>/SOURCE-NOTES.md`. See **Source notes** in `SKILL.md`.
+
 
 Accumulated knowledge about **sources and retrieval** — not about any research topic. Every research run reads this before searching and appends to it afterward, so each pass is cheaper than the last.
 
@@ -56,9 +61,11 @@ Pass to `blocked_domains` when a run is in a domain these pollute. Add as you fi
 
 ---
 
-## Adding to this file
+## Adding to source notes
 
-At the end of a run, append anything that would have saved time if you'd known it at the start:
+Append to the **project-local** `<research root>/SOURCE-NOTES.md`, not to this
+file. At the end of a run, record anything that would have saved time if you'd
+known it at the start:
 
 - A source that blocked you, and what worked instead
 - A source type that turned out to be unexpectedly primary or unexpectedly good
