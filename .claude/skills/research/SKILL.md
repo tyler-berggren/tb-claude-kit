@@ -28,7 +28,8 @@ configured per project in `.claude/kit.json`; when the file or key is absent the
 ```
 
 `for:<scope> <topic>` (e.g. `for:data-portal parcel data APIs`) routes the report to that scope's
-directory. The user may also phrase it naturally — "research parcel APIs for the acme data portal project" — so detect the scope from context, including recent brain entries. If the scope
+directory. The user may also phrase it naturally — "research parcel APIs for the acme data portal
+project" — so detect the scope from context, including recent brain entries. If the scope
 is ambiguous or unrecognized, ask rather than guessing. Scope derivation matches `/plan` — see
 **Plan Scopes** in the `plan` skill.
 
