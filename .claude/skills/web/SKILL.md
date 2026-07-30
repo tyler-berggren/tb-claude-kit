@@ -65,6 +65,10 @@ severity but it cannot see intent:
   what you assumed.
 - `mirror-missing-section` on a heading the mirror deliberately rewords is a
   judgment call, not a defect.
+- `mirror-text-drift` reports the page's wording and the mirror's side by side.
+  Read both: a mirror that deliberately condenses a paragraph for machine readers
+  is a decision to record as an `ignore` rule, while a mirror still carrying copy
+  the page has since rewritten is exactly the rot this check exists to find.
 - `schema-price-mismatch` may mean the page copy changed and the schema is now
   lying, **or** that the page says "starting at $5,000" while the schema
   correctly uses `minPrice`. Read both before deciding which one is wrong.
@@ -164,9 +168,16 @@ every link in it resolves on disk; `_headers` declares a `Content-Type` for
 
 - `sitemap-stale-lastmod` — `<lastmod>` older than the page's real last change,
   taken from git when the file is committed and clean, filesystem mtime otherwise
-- `mirror-drift` / `mirror-missing-section` — a markdown mirror declared via
-  `<link rel="alternate" type="text/markdown">` no longer matching its HTML page
-- `llms-full-stale` — the concatenated corpus missing a mirror's current content
+- `mirror-missing-text` / `mirror-text-drift` — a paragraph of page copy with no
+  counterpart in the markdown mirror, or one the mirror words differently. This
+  is the check that catches an edited sentence: mirrors are compared block by
+  block, because a whole-document similarity score cannot see one rewritten line
+  in a thousand-word page and reports clean while the mirror still tells engines
+  the old story
+- `mirror-drift` / `mirror-missing-section` — whole-document and heading-level
+  backstops for the same mirrors, catching wholesale rot and dropped sections
+- `llms-full-stale` — the concatenated corpus missing any substantive paragraph
+  of a current mirror
 - `faq-count-mismatch` / `faq-question-mismatch` / `faq-answer-drift` — `FAQPage`
   structured data disagreeing with the `<details>` blocks actually rendered
 - `schema-price-mismatch` — a price asserted in structured data that appears

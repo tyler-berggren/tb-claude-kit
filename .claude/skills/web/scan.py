@@ -35,6 +35,11 @@ VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input",
 # Text-bearing tags whose content is not page copy.
 SKIP_TEXT = {"script", "style", "template", "noscript", "svg"}
 
+# Block-level tags that hold a unit of prose. Paragraph-level drift is measured
+# against these, so a reworded sentence is reported as the specific block that
+# changed rather than a whole-document similarity score.
+BLOCK_TAGS = {"p", "li", "blockquote", "figcaption", "dd", "dt", "td", "th"}
+
 
 class Page(HTMLParser):
     """Collects the handful of things an SEO/AEO audit cares about."""
@@ -60,6 +65,8 @@ class Page(HTMLParser):
         self._detail = None
         self._summary_open = False
         self.text_parts = []
+        self.blocks = []         # list of dict(tag, text, line, in_main) — prose blocks
+        self._open_blocks = []
         self._in_main = False
         self.has_main = False
 
@@ -115,6 +122,15 @@ class Page(HTMLParser):
             self._summary_open = True
             self._buf = []
 
+        if tag in BLOCK_TAGS:
+            # Browsers auto-close <p> when another block opens. Mirror that, so a
+            # page with an unclosed <p> still yields correctly-bounded blocks
+            # instead of one giant run-on paragraph.
+            if self._open_blocks and self._open_blocks[-1]["tag"] == "p":
+                self._close_block()
+            self._open_blocks.append({"tag": tag, "line": line, "buf": [],
+                                      "in_main": self._in_main})
+
     def handle_endtag(self, tag):
         tag = tag.lower()
         if self._stack and tag in self._stack:
@@ -148,6 +164,16 @@ class Page(HTMLParser):
         elif tag == "main":
             self._in_main = False
 
+        if tag in BLOCK_TAGS and self._open_blocks:
+            self._close_block()
+
+    def _close_block(self):
+        blk = self._open_blocks.pop()
+        text = re.sub(r"\s+", " ", "".join(blk["buf"])).strip()
+        if text:
+            self.blocks.append({"tag": blk["tag"], "text": text,
+                                "line": blk["line"], "in_main": blk["in_main"]})
+
     def handle_data(self, data):
         if self._title_open or self._ld_open or self._summary_open:
             self._buf.append(data)
@@ -159,8 +185,15 @@ class Page(HTMLParser):
             return
         if self._detail is not None and not self._summary_open:
             self._detail["body"].append(data)
+        if self._open_blocks:
+            self._open_blocks[-1]["buf"].append(data)
         if data.strip():
             self.text_parts.append(data)
+
+    def close(self):
+        super().close()
+        while self._open_blocks:
+            self._close_block()
 
     # -- derived ---------------------------------------------------------
     def meta(self, key):
@@ -240,6 +273,16 @@ class Scanner:
             return "/" + rel[: -len("index.html")]
         return "/" + rel
 
+    def rel(self, path: Path):
+        """Project-relative path for display, falling back to the path as given.
+
+        A --root outside the project is legitimate (auditing a build directory
+        elsewhere), so this must never raise — relative_to() does."""
+        try:
+            return str(Path(path).resolve().relative_to(self.project.resolve()))
+        except ValueError:
+            return str(path)
+
     def load_pages(self):
         for path in self.html_files():
             raw = path.read_text(encoding="utf-8", errors="replace")
@@ -248,8 +291,9 @@ class Scanner:
                 pg.feed(raw)
             except Exception as e:
                 self.add("critical", "html-parse", f"HTML failed to parse: {e}",
-                         file=str(path.relative_to(self.project)))
+                         file=self.rel(path))
                 continue
+            pg.close()
             pg.raw = raw
             self.pages[self.rel_url(path)] = (path, pg)
 
@@ -259,7 +303,7 @@ class Scanner:
 
     # -- per-page checks -------------------------------------------------
     def check_page(self, url, path, pg):
-        f = str(path.relative_to(self.project))
+        f = self.rel(path)
         indexable = self.is_indexable(pg)
 
         if not pg.lang:
@@ -408,10 +452,10 @@ class Scanner:
         p = self.root / "robots.txt"
         if not p.exists():
             self.add("critical", "robots-missing", "No robots.txt",
-                     file=str(p.relative_to(self.project)), fix="auto")
+                     file=self.rel(p), fix="auto")
             return
         txt = p.read_text(encoding="utf-8", errors="replace")
-        f = str(p.relative_to(self.project))
+        f = self.rel(p)
         if not re.search(r"(?im)^\s*sitemap:", txt):
             self.add("warning", "robots-no-sitemap",
                      "robots.txt does not point at a sitemap", file=f, fix="auto")
@@ -424,7 +468,7 @@ class Scanner:
 
     def check_sitemap(self):
         p = self.root / "sitemap.xml"
-        f = str(p.relative_to(self.project))
+        f = self.rel(p)
         if not p.exists():
             self.add("critical", "sitemap-missing", "No sitemap.xml", file=f, fix="auto")
             return
@@ -481,11 +525,11 @@ class Scanner:
         try:
             r = subprocess.run(
                 ["git", "-C", str(self.project), "log", "-1", "--format=%ad",
-                 "--date=short", "--", str(path.relative_to(self.project))],
+                 "--date=short", "--", self.rel(path)],
                 capture_output=True, text=True, timeout=10)
             dirty = subprocess.run(
                 ["git", "-C", str(self.project), "status", "--porcelain", "--",
-                 str(path.relative_to(self.project))],
+                 self.rel(path)],
                 capture_output=True, text=True, timeout=10)
             if dirty.stdout.strip() or not r.stdout.strip():
                 import datetime
@@ -499,10 +543,10 @@ class Scanner:
         if not llms.exists():
             self.add("warning", "llms-txt-missing",
                      "No llms.txt — no curated entry point for LLM consumers",
-                     file=str((self.root / "llms.txt").relative_to(self.project)), fix="manual")
+                     file=self.rel(self.root / "llms.txt"), fix="manual")
             return
         txt = llms.read_text(encoding="utf-8", errors="replace")
-        f = str(llms.relative_to(self.project))
+        f = self.rel(llms)
         if not txt.lstrip().startswith("#"):
             self.add("warning", "llms-txt-format",
                      "llms.txt should open with an H1 title per the llmstxt.org format",
@@ -533,7 +577,7 @@ class Scanner:
         if not p.exists():
             return
         txt = p.read_text(encoding="utf-8", errors="replace")
-        f = str(p.relative_to(self.project))
+        f = self.rel(p)
         nosniff = re.search(r"(?i)X-Content-Type-Options:\s*nosniff", txt)
         if not nosniff:
             return
@@ -558,7 +602,7 @@ class Scanner:
                 continue
             href = alt["href"] or ""
             mirror = self.root / href.lstrip("/")
-            f = str(path.relative_to(self.project))
+            f = self.rel(path)
             if not mirror.exists():
                 self.add("critical", "mirror-missing",
                          f"{url} declares a markdown mirror at {href} which does not exist",
@@ -572,7 +616,7 @@ class Scanner:
             html_words = self._words(pg.body_text())
             if not html_words:
                 continue
-            mf = str(mirror.relative_to(self.project))
+            mf = self.rel(mirror)
 
             # Precise signal: every heading rendered on the page should appear in
             # the mirror. Catches "added a section, forgot the mirror" exactly,
@@ -589,9 +633,14 @@ class Scanner:
                              f"{href} does not contain the {url} heading {text!r}",
                              file=mf, fix="manual")
 
-            # Coarse signal: overall divergence. A healthy mirror sits high; the
-            # mirror legitimately carries extra front-matter lines the HTML lacks,
-            # so this is deliberately loose and only backs up the heading check.
+            # Precise signal: every paragraph of page copy should survive into the
+            # mirror. This is what catches an edited sentence — a whole-document
+            # ratio cannot see one rewritten line in a thousand-word page, so it
+            # reports clean while the mirror quietly tells engines the old story.
+            self.check_mirror_blocks(url, pg, href, mf, md)
+
+            # Coarse backstop: overall divergence, for wholesale rot the
+            # block-level pass might rationalize away one paragraph at a time.
             ratio = difflib.SequenceMatcher(None, html_words, md_words).quick_ratio()
             missing = [w for w in set(html_words) - set(md_words) if len(w) > 6][:12]
             detail = ("In the page but not the mirror: " + ", ".join(sorted(missing))) if missing else None
@@ -615,20 +664,114 @@ class Scanner:
                 if not mirror.exists():
                     continue
                 body = re.sub(r"(?s)^<!--.*?-->", "", mirror.read_text(encoding="utf-8", errors="replace")).strip()
-                head = "\n".join(body.splitlines()[:6]).strip()
-                if head and head not in corpus:
-                    self.add("warning", "llms-full-stale",
-                             f"llms-full.txt does not contain the current {mirror.name} — regenerate it",
-                             file=str(full.relative_to(self.project)), fix="auto")
-                    break
+                # Every substantive paragraph of the mirror, not just its opening
+                # lines: a mirror's head is front-matter that survives every edit,
+                # so sampling it reports fresh no matter how stale the corpus is.
+                # Compared as word tokens, not raw text: the corpus keeps the
+                # markdown syntax the mirror blocks have had stripped, so a raw
+                # substring test reports stale on passages that are present.
+                flat = " ".join(self._words(self._md_norm(corpus)))
+                for para in self._md_blocks(body):
+                    if " ".join(self._words(para)) not in flat:
+                        self.add("warning", "llms-full-stale",
+                                 f"llms-full.txt is missing current {mirror.name} copy — regenerate it",
+                                 file=self.rel(full), fix="auto",
+                                 detail=f"First missing passage: {self._clip(para)}")
+                        break
+                else:
+                    continue
+                break
+
+    def check_mirror_blocks(self, url, pg, href, mf, md):
+        """Every paragraph of page copy should survive into the markdown mirror."""
+        md_blocks = [b for b in self._md_blocks(md)
+                     if len(self._words(b)) >= self.MIN_BLOCK_WORDS]
+        md_word_lists = [self._words(b) for b in md_blocks]
+
+        # Boilerplate outside <main> (nav, footer, cookie notices) is not copy a
+        # mirror is expected to carry, so only judge main content when it exists.
+        blocks = [b for b in pg.blocks if b["in_main"] or not pg.has_main]
+        for blk in blocks:
+            words = self._words(blk["text"])
+            if len(words) < self.MIN_BLOCK_WORDS:
+                continue
+            best, best_i = 0.0, None
+            for i, cand in enumerate(md_word_lists):
+                sm = difflib.SequenceMatcher(None, words, cand)
+                if sm.quick_ratio() <= best:
+                    continue
+                r = sm.ratio()
+                if r > best:
+                    best, best_i = r, i
+            if best >= self.BLOCK_MATCH:
+                continue
+            if best < self.BLOCK_PRESENT:
+                self.add("warning", "mirror-missing-text",
+                         f"{href} has no counterpart for a paragraph on {url}",
+                         file=mf, line=blk["line"], fix="manual",
+                         detail=f"Page says: {self._clip(blk['text'])}")
+            else:
+                self.add("warning", "mirror-text-drift",
+                         f"{href} words a paragraph differently than {url} "
+                         f"(similarity {best:.0%})",
+                         file=mf, line=blk["line"], fix="manual",
+                         detail=(f"Page:   {self._clip(blk['text'])}\n"
+                                 f"Mirror: {self._clip(md_blocks[best_i])}"))
+
+    # Paragraphs shorter than this are labels, buttons, and captions — matching
+    # them produces noise, not drift.
+    MIN_BLOCK_WORDS = 12
+    # At or above this, the mirror carries the paragraph. Below BLOCK_PRESENT, no
+    # counterpart exists at all. Between them, the mirror kept the paragraph but
+    # the wording moved — which is the case worth reading closely.
+    BLOCK_MATCH = 0.98
+    BLOCK_PRESENT = 0.55
+
+    def _md_blocks(self, md):
+        """Markdown split into prose blocks, with syntax and front-matter stripped."""
+        md = re.sub(r"(?s)^<!--.*?-->", "", md)
+        md = re.sub(r"(?s)```.*?```", " ", md)
+        md = self._md_norm(md)
+        out = []
+        for chunk in re.split(r"\n\s*\n", md):
+            chunk = chunk.strip()
+            if not chunk or chunk.startswith("#"):
+                continue
+            # Bullet lists mirror <li> blocks one-per-item, not one-per-list.
+            lines = [l.strip() for l in chunk.splitlines()]
+            if all(re.match(r"^[-*+]\s|^\d+[.)]\s", l) for l in lines if l):
+                out.extend(re.sub(r"^([-*+]|\d+[.)])\s+", "", l) for l in lines if l)
+            else:
+                out.append(" ".join(lines))
+        return [re.sub(r"\s+", " ", b).strip() for b in out if b.strip()]
+
+    def _md_norm(self, s):
+        """Markdown reduced to the words it renders as.
+
+        Both sides of every comparison go through this. Miss one side and the
+        syntax itself reads as an edit: a link's URL becomes words the HTML
+        "lacks", and emphasis detaches a sentence's last word from its period
+        ("**discount**." → "discount" + "."), scoring identical copy as drifted.
+        """
+        s = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", s)          # links → their text
+        s = re.sub(r"[*`]", "", s)                              # bold/italic/code
+        return re.sub(r"(?<![A-Za-z0-9])_+|_+(?![A-Za-z0-9])", "", s)  # _emphasis_
+
+    def _clip(self, s, n=110):
+        s = re.sub(r"\s+", " ", s).strip()
+        return s if len(s) <= n else s[: n - 1] + "…"
 
     def _words(self, s):
-        return re.findall(r"[a-z0-9$,.]+", s.lower())
+        # Punctuation-only tokens are dropped: markdown emphasis and list syntax
+        # would otherwise register as words the HTML "lacks", scoring an
+        # identical paragraph as drifted.
+        return [w for w in re.findall(r"[a-z0-9$,.]+", s.lower())
+                if re.search(r"[a-z0-9]", w)]
 
     def check_schema_vs_dom(self):
         """Structured data must not contradict what the page actually says."""
         for url, (path, pg) in sorted(self.pages.items()):
-            f = str(path.relative_to(self.project))
+            f = self.rel(path)
             nodes = getattr(pg, "ld_nodes", [])
             body = pg.body_text()
 
