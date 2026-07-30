@@ -1,8 +1,29 @@
 const http = require('http');
-const puppeteer = require('puppeteer');
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+
+// puppeteer is resolved from the invoking PROJECT, not from this file's
+// location. In outside-repo mode this script is a symlink into the kit
+// checkout, and Node resolves require() against a module's realpath — so a
+// bare require('puppeteer') searches the kit for node_modules and fails,
+// even though the project that invoked it has puppeteer installed.
+// (Callers could pass --preserve-symlinks --preserve-symlinks-main instead,
+// but both flags are needed and it is easy to get wrong, so fix it here.)
+function requireFromProject(name) {
+  const paths = [process.cwd(), __dirname];
+  try {
+    return require(require.resolve(name, { paths }));
+  } catch (err) {
+    if (err.code !== 'MODULE_NOT_FOUND') throw err;
+    console.error(`Cannot find module '${name}'.`);
+    console.error(`Looked in: ${paths.join(', ')}`);
+    console.error(`Install it in the project you are running from:  npm i -D ${name}`);
+    process.exit(1);
+  }
+}
+
+const puppeteer = requireFromProject('puppeteer');
 
 const REGISTRY_PATH = path.join(os.homedir(), '.claude-chrome-registry.json');
 const BASE_PORT = 9615;
