@@ -45,6 +45,9 @@
     "ignore": []
   },
 
+  "_note_sqlite_tracking": "SQLite databases that get NDJSON sidecar files on /commit. Each entry names a .db file and optionally which tables to track (default: all non-internal tables). The sidecar is one JSON line per row, sorted by rowid — git tracks line-level diffs, so each row change is a clean diff. Regenerated before staging, not as a git hook.",
+  "sqlite_tracking": [],
+
   "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
   "rules": {
     "push": "Example: if the post-commit hook reports undeployed worker changes, ask before pushing — never auto-deploy."
