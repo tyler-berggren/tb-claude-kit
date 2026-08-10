@@ -26,7 +26,8 @@ Optional argument: `$ARGUMENTS`
 3. **Regenerate SQLite sidecars** (if configured)
 
    Before staging, check for `sqlite_tracking` in `.claude/kit.json`. If the array is non-empty,
-   for each entry regenerate NDJSON sidecar files so `git add -A` picks them up:
+   for each entry regenerate snapshot files in the AirSQLite sidecar layout so `git add -A` picks
+   them up:
 
    ```bash
    jq -e '.sqlite_tracking | length > 0' .claude/kit.json >/dev/null 2>&1 && \
@@ -34,26 +35,32 @@ Optional argument: `$ARGUMENTS`
        DB=$(echo "$entry" | jq -r '.db')
        [ -f "$DB" ] || continue
        DIR=$(dirname "$DB")
+       DBNAME=$(basename "$DB"); DBNAME="${DBNAME%.*}"
+       SIDECAR_DIR="$DIR/$DBNAME.airsqlite"
        TABLES=$(echo "$entry" | jq -r 'if (.tables | length) > 0 then .tables[] else empty end')
        if [ -z "$TABLES" ]; then
          TABLES=$(sqlite3 "$DB" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
        fi
        echo "$TABLES" | while IFS= read -r TABLE; do
          [ -z "$TABLE" ] && continue
-         printf '.mode json\nSELECT * FROM "%s" ORDER BY rowid;\n' "$TABLE" \
+         mkdir -p "$SIDECAR_DIR"
+         printf '.mode json\nSELECT rowid AS _rowid, * FROM "%s" ORDER BY rowid;\n' "$TABLE" \
            | sqlite3 "$DB" \
            | python3 -c "
    import sys, json
    data = sys.stdin.read().strip()
    if data:
-       [print(json.dumps(r, ensure_ascii=False, separators=(',',':'))) for r in json.loads(data)]
-   " > "$DIR/$TABLE.ndjson"
+       [print(json.dumps(r, ensure_ascii=False)) for r in json.loads(data)]
+   " > "$SIDECAR_DIR/$TABLE.snapshot.ndjson"
+         # migrate old flat sidecar
+         [ -f "$DIR/$TABLE.ndjson" ] && rm "$DIR/$TABLE.ndjson"
        done
      done
    ```
 
-   This produces one `.ndjson` file per tracked table, one JSON line per row, sorted by rowid.
-   Newlines in text fields are escaped as `\n`, keeping each row on exactly one line for clean diffs.
+   This uses the AirSQLite sidecar layout: `{dbname}.airsqlite/{table}.snapshot.ndjson`. One JSON
+   line per row (including `_rowid`), sorted by rowid. Old flat `{table}.ndjson` files are removed
+   on first run.
 
 4. **Generate commit message** summarizing the changes
 
