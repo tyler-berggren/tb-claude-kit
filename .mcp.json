@@ -23,7 +23,8 @@
         "firecrawl-mcp"
       ],
       "env": {
-        "FIRECRAWL_API_KEY": "YOUR_FIRECRAWL_API_KEY"
+        "FIRECRAWL_API_KEY": "YOUR_FIRECRAWL_API_KEY",
+        "FIRECRAWL_API_URL": "https://api.firecrawl.dev"
       }
     },
     "tavily": {

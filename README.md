@@ -47,7 +47,7 @@ That's it. Open the project in Claude Code and the skills are available.
 
 ## The skills
 
-Twelve skills, grouped by what they do for you.
+Thirteen skills, grouped by what they do for you.
 
 **Memory — so context accumulates instead of resetting**
 
@@ -79,6 +79,7 @@ Twelve skills, grouped by what they do for you.
 |---|---|
 | `/commit` `/push` | Stage, write a real commit message, push. Regenerates SQLite NDJSON sidecars if configured. |
 | `/kill` | Kill dev servers, watchers, and browser instances without touching your Claude session. |
+| `/parse` | Local documents — contracts, decks, spreadsheets, scanned PDFs — converted to markdown Claude can actually read. Point it at a file, a glob, or a directory; the `.md` lands beside the original. |
 | `/video-editor` | Transcript-driven video editing — transcribe, script, cut, caption. |
 
 ---
@@ -689,10 +690,67 @@ All 5 MCP servers are pre-configured in `.mcp.json`. After installing the kit:
 1. **Brave Search** — get a free API key at https://brave.com/search/api/ and add it to `.mcp.json`
 2. **Exa** — no key needed. Uses OAuth via HTTP transport (authenticates on first use)
 3. **Tavily** — no key needed. Uses OAuth via HTTP transport (authenticates on first use)
-4. **Firecrawl** — sign up at https://firecrawl.dev, get API key, add to `.mcp.json`
+4. **Firecrawl** — sign up at https://firecrawl.dev, get API key, add to `.mcp.json`. Leave the `FIRECRAWL_API_URL` alongside it in place — [`/parse`](#document-parsing-parse) needs it
 5. **Perplexity** — sign up at https://perplexity.ai, get API key from settings, add to `.mcp.json`
 
 The skill works with any subset of these tools — it gracefully adapts when tools are missing. But the full stack gives the best results: keyword search (Brave) + semantic search (Exa) + fast lookup (Tavily) + orientation (Perplexity) + deep extraction (Firecrawl) + free fallback (WebFetch).
+
+## Document Parsing (`/parse`)
+
+Research reaches the public web. `/parse` handles the other half — the documents
+already on your disk that no URL points at. Signed contracts, client decks,
+exported spreadsheets, scanned PDFs: the files that carry the actual terms of
+your work and that Claude otherwise cannot open.
+
+It wraps Firecrawl's `/v2/parse` endpoint, the local-file counterpart to the
+`/scrape` used by `/research`.
+
+```
+/parse contracts/msa.docx                 # one file → msa.md beside it
+/parse ~/Downloads/kickoff-docs           # every supported file in a directory
+/parse decks/*.pptx --out notes/          # glob, outputs collected elsewhere
+/parse scan.pdf --pages 20 --stdout       # first 20 pages, printed not written
+```
+
+**Supported:** PDF, Word (`.docx .doc .docm`), OpenDocument, RTF, Excel,
+PowerPoint, EPUB, CSV, HTML.
+
+| Flag | Effect |
+|---|---|
+| `--formats` | `markdown` (default), `html`, `rawHtml`, `links`, `images`, `summary`, `json` |
+| `--out <dir>` | Collect outputs in one directory instead of beside the originals |
+| `--stdout` | Print into the conversation, write nothing |
+| `--redact` | Strip personally identifiable information from the returned content |
+| `--pages <n>` | Cap PDF parsing at N pages |
+
+### Setup
+
+Needs the same Firecrawl API key as `/research` — keyless mode does not cover
+parse. The skill looks for it in `$FIRECRAWL_API_KEY`, `.env`, `.mcp.json`, then
+`~/.claude.json`, and never prints it.
+
+One non-obvious requirement: **`FIRECRAWL_API_URL` must be set** or the MCP
+server's `firecrawl_parse` throws `requires FIRECRAWL_API_URL to be set to a
+self-hosted Firecrawl API instance`. Despite the message, self-hosting is not
+required — the handler only checks that the variable is non-empty, then reads
+your file and posts it to whatever URL it names. The kit's `.mcp.json` sets it
+to `https://api.firecrawl.dev`, which satisfies the check and routes to the
+cloud API. Projects installed before this was added need the variable added by
+hand; MCP servers only pick it up on session restart, and the skill falls back
+to a direct `curl` against the REST endpoint until then.
+
+### Output
+
+Parsed markdown lands as `<original>.md` beside its source, originals untouched,
+existing `.md` files never overwritten silently. The skill reports what it wrote
+and then spot-checks the result rather than declaring success — tables are where
+docx and PDF conversion actually degrades, multi-column PDFs can interleave, and
+page furniture tends to land mid-document. Set `rules.parse` in `.claude/kit.json`
+if a project files parsed documents somewhere specific.
+
+**Limits:** 50 MB per file, one file per request, credits consumed per file.
+Parsing uploads the file to Firecrawl's API — the skill says so before the first
+request when the documents are confidential, and offers `--redact` for PII.
 
 ## Customization
 
