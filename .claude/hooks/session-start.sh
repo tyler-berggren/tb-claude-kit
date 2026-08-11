@@ -1,7 +1,126 @@
 #!/bin/bash
 DB="cowork/brain/BRAIN.db"
 
+# --- Kit sync: adopt kit files that shipped upstream since the last install ---
+# Outside mode symlinks every kit path in, so file *content* is always current
+# already. What does not follow automatically is a path that is NEW upstream —
+# it needs a link plus a .gitignore line. This adds those, and only those.
+#
+# ADD-ONLY, deliberately. A link whose target vanished is reported, never
+# removed: the hook cannot distinguish "deleted upstream" from "kit checkout is
+# mid-rebase" or "external volume not mounted", and the safe reading of an
+# ambiguous signal is to do nothing.
+KIT_NOTICE=""
+
+# 0 = line added, 2 = already ignored, 1 = no managed block to add it to.
+kit_gitignore_add() {
+  local gi=".gitignore" rel="$1"
+  [ -f "$gi" ] || return 1
+  grep -qxF "# END:tb-claude-kit" "$gi" || return 1   # no managed block: install.sh's job
+  grep -qxF "/$rel" "$gi" && return 2
+  local tmp; tmp=$(mktemp) || return 1
+  awk -v line="/$rel" -v e="# END:tb-claude-kit" '$0 == e { print line } { print }' \
+    "$gi" > "$tmp" && mv "$tmp" "$gi"
+}
+
+kit_sync() {
+  local self="${BASH_SOURCE[0]}"
+  # Only outside mode has anything to sync — and there the hook is itself a
+  # symlink into the kit, which is also how we find the kit. No env var, no
+  # kitPath, no config. Inside mode leaves this a real file and we return here,
+  # which is exactly right: those projects deliberately track no kit.
+  [ -L "$self" ] || return 0
+
+  local resolved kit
+  resolved=$(python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$self" 2>/dev/null) || return 0
+  kit=$(cd "$(dirname "$resolved")/../.." 2>/dev/null && pwd) || return 0
+  [ -d "$kit/.claude/skills" ] || return 0   # kit unreachable — do nothing, quietly
+
+  # Honor the project's own opt-outs: fork = it owns its copy, exclude = it does
+  # not want this at all. Compared as full rel paths, same as install.sh.
+  # A missing or unparseable kit.json means this is not a project we understand.
+  # install.sh always writes one, so its absence is a signal, not a default —
+  # bail rather than guessing "outside, no opt-outs" and linking things in.
+  local cfg mode skips
+  cfg=$(python3 - .claude/kit.json <<'PY' 2>/dev/null
+import json, sys
+try: c = json.load(open(sys.argv[1]))
+except Exception: sys.exit(1)
+print(c.get("mode", "outside"))
+for p in list(c.get("fork", [])) + list(c.get("exclude", [])):
+    print(p.strip("/"))
+PY
+) || return 0
+  mode=$(printf '%s\n' "$cfg" | head -1)
+  [ "$mode" = "outside" ] || return 0
+  skips=$(printf '%s\n' "$cfg" | tail -n +2)
+
+  # install.sh publishes its KIT_PATHS here so both sides share one list. Without
+  # it, fall back to skills only — the paths this hook can discover unaided.
+  local candidates
+  if [ -f "$kit/.claude/kit-manifest.txt" ]; then
+    candidates=$(cat "$kit/.claude/kit-manifest.txt")
+  else
+    candidates=$(cd "$kit/.claude/skills" 2>/dev/null && \
+                 for d in */; do [ -d "$d" ] && echo ".claude/skills/${d%/}"; done)
+  fi
+
+  # Prefer the portable ~/.claude-kit pointer when it names this same checkout,
+  # so new links match the ones install.sh writes.
+  local link_base="$kit"
+  if [ -d "$HOME/.claude-kit" ] &&
+     [ "$(cd "$HOME/.claude-kit" && pwd -P 2>/dev/null)" = "$(cd "$kit" && pwd -P)" ]; then
+    link_base="$HOME/.claude-kit"
+  fi
+
+  local added=() healed=0 rel
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    [ -e "$kit/$rel" ] || continue                    # listed but absent upstream
+    # Opt-outs first: a forked path is project-owned and must stay tracked, so it
+    # must not pick up an ignore line in the healing branch below.
+    printf '%s\n' "$skips" | grep -qxF "$rel" && continue
+    # -e is false for a dangling link, so test -L too. Anything already present
+    # (live link, dangling link, forked directory) keeps its content untouched...
+    if [ -e "$rel" ] || [ -L "$rel" ]; then
+      # ...but a kit symlink with no ignore line is drift worth healing: that is
+      # exactly how a linked skill ends up showing as untracked in git status.
+      if [ -L "$rel" ]; then
+        kit_gitignore_add "$rel" && healed=$((healed + 1))
+      fi
+      continue
+    fi
+    mkdir -p "$(dirname "$rel")" 2>/dev/null
+    ln -s "$link_base/$rel" "$rel" 2>/dev/null || continue
+    kit_gitignore_add "$rel"
+    added+=("$rel")
+  done <<< "$candidates"
+
+  # Report-only pass: upstream deletions surface as dangling links.
+  local stale=() l
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    [ -L "$l" ] && [ ! -e "$l" ] && stale+=("$l")
+  done <<< "$(printf '%s\n%s\n' "$candidates" "$(ls -d .claude/skills/* 2>/dev/null)" | sort -u)"
+
+  [ ${#added[@]} -eq 0 ] && [ ${#stale[@]} -eq 0 ] && [ "$healed" -eq 0 ] && return 0
+  if [ ${#added[@]} -gt 0 ]; then
+    KIT_NOTICE="🧰 Kit sync: linked $(IFS=', '; echo "${added[*]}") and updated .gitignore. Available this session."
+  fi
+  if [ "$healed" -gt 0 ]; then
+    KIT_NOTICE="$KIT_NOTICE Added $healed missing .gitignore line(s) for kit links that were already present."
+  fi
+  if [ ${#stale[@]} -gt 0 ]; then
+    KIT_NOTICE="$KIT_NOTICE Dangling links (gone from the kit, left in place): $(IFS=', '; echo "${stale[*]}") — remove deliberately with install.sh."
+  fi
+}
+
+kit_sync
+
 if [ ! -f "$DB" ]; then
+  # Still surface the notice in a project with no brain DB.
+  [ -n "$KIT_NOTICE" ] && printf '{"hookSpecificOutput":{"additionalContext":%s}}\n' \
+    "$(printf '%s' "$KIT_NOTICE" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
   exit 0
 fi
 
@@ -111,6 +230,12 @@ if [ -n "$SCHEMA_NOTICE" ]; then
   CTX="$CTX
 
 $SCHEMA_NOTICE"
+fi
+
+if [ -n "$KIT_NOTICE" ]; then
+  CTX="$CTX
+
+$KIT_NOTICE"
 fi
 
 if [ -n "$MANTRA" ]; then

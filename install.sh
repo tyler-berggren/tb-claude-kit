@@ -229,6 +229,14 @@ KIT_PATHS+=(
   "scripts/artifact-bridge.cjs"
 )
 
+# Publish KIT_PATHS into the kit checkout so the session-start hook can adopt new
+# kit files without re-running this script. The hook globs skills on its own, but
+# has no way to know about the fixed paths above — this is that list, shared.
+# Best-effort: a read-only or otherwise unwritable kit checkout is not an error.
+if [ "$DRY_RUN" = "no" ] && [ -w "$KIT_DIR/.claude" ]; then
+  printf '%s\n' "${KIT_PATHS[@]}" > "$KIT_DIR/.claude/kit-manifest.txt" 2>/dev/null || true
+fi
+
 # Project-owned scaffolding: copied once if absent, never updated, never linked.
 SCAFFOLD_PATHS=(
   "CLAUDE.md"

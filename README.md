@@ -161,7 +161,7 @@ understand before adopting it across several projects.
 |---|---|---|
 | Kit files are | symlinks into `~/.claude-kit` | real files in your project |
 | Git | gitignored — never committed | tracked — travel with the repo |
-| Updating | instant; edit the kit once, every project sees it | re-run `install.sh`, with drift detection |
+| Updating | instant; edit the kit once, every project sees it. New kit files are [adopted on next session start](#automatic-adoption-of-new-kit-files) | re-run `install.sh`, with drift detection |
 | Needs the kit present? | yes | no |
 
 **Choose with one question: does a machine without your kit checkout need this repo to work?**
@@ -185,6 +185,39 @@ below) or commit it and re-run with `--replace`.
 
 **On another machine.** Clone the kit anywhere, run `ln -s <path> ~/.claude-kit`, then
 `bash ~/.claude-kit/install.sh` in each project. Nothing in any repo hardcodes a checkout location.
+
+### Automatic adoption of new kit files
+
+In outside mode, kit files are symlinks — so editing a skill in the kit is live everywhere
+immediately. What never followed automatically was a *new* file: a skill that didn't exist when
+you last installed needs a symlink and a `.gitignore` line, which meant re-running `install.sh`
+in every project each time the kit grew.
+
+The session-start hook now does that itself. On every session it compares the project against the
+kit and links anything missing, updating the managed `.gitignore` block to match. New skills are
+usable in the session that adopts them, and you're told what happened:
+
+```
+🧰 Kit sync: linked .claude/skills/parse and updated .gitignore. Available this session.
+```
+
+It finds the kit without any configuration: in outside mode the hook is *itself* a symlink into
+the kit, so it resolves its own path. No `$TB_CLAUDE_KIT`, no `kitPath`, nothing to keep in sync.
+The list of what to adopt comes from `.claude/kit-manifest.txt`, which `install.sh` publishes on
+every run so both sides work from one list.
+
+**It only ever adds.** A symlink whose target disappeared upstream is reported, never deleted —
+the hook can't tell "removed from the kit" from "checkout mid-rebase" or "external volume not
+mounted", and deleting on an ambiguous signal is how you lose work. Removal stays an explicit
+`install.sh` run. It also heals a kit link that's missing its `.gitignore` line, the drift that
+otherwise shows up as a mystery untracked file.
+
+It stays out of the way where it should: `fork` and `exclude` are honored, forked paths are never
+given an ignore line, inside-mode projects are skipped entirely (their hook is a real file, so it
+self-disables), and a missing or unparseable `kit.json` makes it bail rather than guess.
+
+Re-running `install.sh` is still what you want for converting modes, updating project-owned
+scaffolding, drift detection, and removing things.
 
 ---
 
