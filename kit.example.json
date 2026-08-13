@@ -45,6 +45,12 @@
     "ignore": []
   },
 
+  "_note_wiki": "Configuration for /wiki. root is the wiki directory (default: wiki/). styleScaffold is a path to a STYLE.md template that /wiki init copies when creating a new wiki — lets an organization maintain a standard starting point while allowing per-project evolution. Both keys are optional.",
+  "wiki": {
+    "root": "wiki",
+    "styleScaffold": null
+  },
+
   "_note_sqlite_tracking": "SQLite databases that get NDJSON snapshot files on /commit, using the AirSQLite sidecar layout: {dbname}.airsqlite/{table}.snapshot.ndjson. Each entry names a .db file and optionally which tables to track (default: all non-internal tables). One JSON line per row (including _rowid), sorted by rowid. Regenerated before staging, not as a git hook.",
   "sqlite_tracking": [],
 

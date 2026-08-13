@@ -47,7 +47,7 @@ That's it. Open the project in Claude Code and the skills are available.
 
 ## The skills
 
-Thirteen skills, grouped by what they do for you.
+Fourteen skills, grouped by what they do for you.
 
 **Memory — so context accumulates instead of resetting**
 
@@ -72,6 +72,12 @@ Thirteen skills, grouped by what they do for you.
 | `/vibe-audit` | Health and security audit tuned for vibe-engineered code, with Bayesian pattern tracking that gets more precise each run. |
 | `/web` | SEO/AEO audit for a static site. Checks metadata, structured data, sitemap, robots, and llms.txt are present and correct — then checks they are still *current*, catching sitemaps with stale lastmod, markdown mirrors that drifted from their pages, and FAQ schema answering questions the page no longer asks. |
 | `/bridge` | A local server that lets HTML artifacts read and write real project files. |
+
+**Documentation — so the project explains itself**
+
+| | |
+|---|---|
+| `/wiki` | Organic project wiki that grows with the codebase. Every invocation does targeted updates (what just changed) and a holistic scan (what's stale or missing). Shape emerges from the project, not a template. Configurable style guide per project. |
 
 **Doing — the small stuff, done consistently**
 
@@ -333,6 +339,9 @@ cowork/
   architecture/       # CTO.db, generated architecture.html, dated summaries
   vibe-audit/         # VIBE-AUDIT.db, GUARDRAILS.md (yours)
   video/              # transcripts, scripts, caption-dictionary.json (yours)
+wiki/                 # organic project documentation (yours, maintained by /wiki)
+  README.md           # table of contents
+  STYLE.md            # writing guide (yours — controls voice, audience, conventions)
 CLAUDE.md             # project documentation + mantra block (yours)
 .mcp.json             # research MCP servers (yours — holds API keys)
 ```
@@ -555,6 +564,59 @@ All artifacts land in `cowork/video/<project-name>/`:
 - `whisper-transcript.json` — raw word-level timestamps
 - `sentences.txt` — sentence index with gap data
 - `script.md` — the reviewable/editable cut script
+
+## Wiki (`/wiki`)
+
+An organic project wiki that Claude maintains as the codebase evolves. Pages are created as topics arise from the work, not from a fixed template — the shape reflects the project.
+
+### How it works
+
+Every `/wiki` invocation runs a hybrid procedure:
+
+1. **Targeted updates** — assess what changed recently (git diff, conversation context), update or create wiki pages for affected areas
+2. **Holistic scan** — walk the codebase, compare against wiki coverage, catch stale pages, dead references, and undocumented components
+3. **Reconcile** — update the `wiki/README.md` index to reflect current state
+
+### Commands
+
+| Command | What it does |
+|---|---|
+| `/wiki` | Hybrid update — targeted changes + gap/staleness scan |
+| `/wiki audit` | Deep audit — exhaustive wiki-vs-codebase reconciliation |
+| `/wiki init` | Create `wiki/` with `README.md` and an optional `STYLE.md` scaffold |
+| `/wiki <page>` | Create or update a single page by name |
+
+### Style guide
+
+`wiki/STYLE.md` controls how pages are written — audience, voice, terminology, conventions. It's optional but recommended. When present, every wiki write follows it.
+
+Projects can configure a scaffold source so `/wiki init` copies a standard starting point:
+
+```json
+{ "wiki": { "styleScaffold": "path/to/STYLE-TEMPLATE.md" } }
+```
+
+The style guide itself is organic — it travels with the project and evolves as the project's needs change.
+
+### Configuration
+
+```json
+{
+  "wiki": {
+    "root": "wiki",
+    "styleScaffold": "templates/STYLE.md"
+  }
+}
+```
+
+- **`root`** — wiki directory (default: `wiki/`)
+- **`styleScaffold`** — path to a `STYLE.md` template that `/wiki init` copies when creating a new wiki
+
+Per-project behavior adjustments go in `rules.wiki`:
+
+```json
+{ "rules": { "wiki": "Write for a non-technical ops team. Use the client's terminology." } }
+```
 
 ## Architecture Observatory (`/cto`)
 
