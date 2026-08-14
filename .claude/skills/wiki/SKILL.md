@@ -153,13 +153,14 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
    cd scripts/wiki-build && npm install --silent && node build.mjs "../../$WIKI_ROOT" ../../_wiki-site --name "$CLIENT_NAME"
    ```
 
-7. Deploy to Cloudflare Pages:
+7. Deploy to Cloudflare Pages. Create the project first if it doesn't exist yet:
    ```bash
    cd ../..
    CLOUDFLARE_ACCOUNT_ID="$CF_ACCT" CLOUDFLARE_API_TOKEN="$CF_TOKEN" \
-     npx wrangler pages deploy _wiki-site --project-name="$PROJECT" --branch=main
+     npx wrangler pages project create "$PROJECT" --production-branch=main 2>/dev/null || true
+   CLOUDFLARE_ACCOUNT_ID="$CF_ACCT" CLOUDFLARE_API_TOKEN="$CF_TOKEN" \
+     npx wrangler pages deploy _wiki-site --project-name="$PROJECT" --branch=main --commit-dirty=true
    ```
-   The first deploy auto-creates the Pages project.
 
 8. Clean up the build output:
    ```bash
