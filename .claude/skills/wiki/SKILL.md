@@ -1,7 +1,7 @@
 ---
 name: wiki
 description: Create and maintain an organic project wiki — updates pages affected by recent work, scans for gaps and staleness, reconciles the index. Shape emerges from the project, not a template.
-argument-hint: "[audit | init | <page-name>] or empty for hybrid update"
+argument-hint: "[audit | deploy | init | <page-name>] or empty for hybrid update"
 ---
 
 ## Wiki state
@@ -26,6 +26,7 @@ Optional argument: `$ARGUMENTS`
 |---|---|
 | _(empty)_ | **Hybrid update** — targeted updates from recent work + gap/staleness scan |
 | `audit` | **Deep audit** — full wiki-vs-codebase reconciliation, heavier than the default scan |
+| `deploy` | **Deploy** — build static HTML site and deploy to Cloudflare Pages |
 | `init` | **Initialize** — create `wiki/` with README.md and optional STYLE.md scaffold |
 | `<page-name>` | **Single page** — create or update a specific page by name |
 
@@ -93,6 +94,79 @@ Usage: `/wiki init`
      ```
 
 4. Report what was created.
+
+---
+
+## Deploy
+
+Usage: `/wiki deploy`
+
+Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
+
+### Prerequisites
+
+- `wiki/` must exist and contain at least one `.md` file
+- `scripts/wiki-build/` must exist (scaffolded by `/repo`)
+- Cloudflare credentials must be in `.env` — the script checks for either prefix:
+  - `CLOUDFLARE_ACCOUNT_ID` or `CF_ACCOUNT_ID`
+  - `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`
+
+### Procedure
+
+1. Resolve the wiki root:
+   ```bash
+   WIKI_ROOT=$(jq -r '.wiki.root // "wiki"' .claude/kit.json 2>/dev/null || echo "wiki")
+   ```
+
+2. Verify prerequisites:
+   ```bash
+   [ -d "$WIKI_ROOT" ] && [ -d scripts/wiki-build ] || exit 1
+   ```
+
+3. Load Cloudflare credentials from `.env`:
+   ```bash
+   set -a; . ./.env; set +a
+   CF_ACCT="${CLOUDFLARE_ACCOUNT_ID:-$CF_ACCOUNT_ID}"
+   CF_TOKEN="${CLOUDFLARE_API_TOKEN:-$CF_API_TOKEN}"
+   ```
+   If neither variable is set, stop and tell the user to add CF credentials to `.env`.
+
+4. Resolve the CF Pages project name. Check `kit.json` first, then derive from the repo
+   directory name:
+   ```bash
+   PROJECT=$(jq -r '.wiki.pagesProject // empty' .claude/kit.json 2>/dev/null)
+   if [ -z "$PROJECT" ]; then
+     PROJECT="$(basename "$(pwd)")-reinstall-work-wiki"
+   fi
+   ```
+
+5. Resolve the client name for the sidebar title. Check `kit.json`, then fall back to the
+   repo directory name (title-cased):
+   ```bash
+   CLIENT_NAME=$(jq -r '.wiki.clientName // empty' .claude/kit.json 2>/dev/null)
+   ```
+   If not set, derive from the repo directory name — convert kebab-case to title case
+   (e.g. `land-advisors` → `Land Advisors`).
+
+6. Run the build:
+   ```bash
+   cd scripts/wiki-build && npm install --silent && node build.mjs "../../$WIKI_ROOT" ../../_wiki-site --name "$CLIENT_NAME"
+   ```
+
+7. Deploy to Cloudflare Pages:
+   ```bash
+   cd ../..
+   CLOUDFLARE_ACCOUNT_ID="$CF_ACCT" CLOUDFLARE_API_TOKEN="$CF_TOKEN" \
+     npx wrangler pages deploy _wiki-site --project-name="$PROJECT" --branch=main
+   ```
+   The first deploy auto-creates the Pages project.
+
+8. Clean up the build output:
+   ```bash
+   rm -rf _wiki-site
+   ```
+
+9. Report the live URL: `https://<project-name>.pages.dev`
 
 ---
 
