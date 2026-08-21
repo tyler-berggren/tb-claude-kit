@@ -12,6 +12,7 @@
 .claude/skills/vibe-audit
 .claude/skills/video-editor
 .claude/skills/web
+.claude/skills/wiki
 .claude/hooks/session-start.sh
 .vscode/extensions.json
 .vscode/settings.json
