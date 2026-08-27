@@ -68,3 +68,38 @@ CREATE TABLE IF NOT EXISTS mantra (
   content         TEXT,
   updated_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+-- Swarm: autonomous parallel plan execution (see the swarm skill).
+-- swarm_runs.status drives /swarm phase inference: no row -> setup,
+-- ready -> run, running -> resume. The skill also creates these
+-- idempotently, so existing databases pick them up on first /swarm.
+CREATE TABLE IF NOT EXISTS swarm_runs (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  plan_id             TEXT NOT NULL,
+  plan_path           TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('ready','running','done','aborted')),
+  swarm_dir           TEXT,
+  integration_branch  TEXT,
+  base_commit         TEXT,
+  started_at          TEXT,
+  completed_at        TEXT,
+  notes               TEXT
+);
+
+CREATE TABLE IF NOT EXISTS swarm_units (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id          INTEGER NOT NULL REFERENCES swarm_runs(id),
+  unit_key        TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  plan_phases     TEXT,
+  depends_on      TEXT,
+  resources       TEXT,
+  territory       TEXT,
+  model           TEXT,
+  reviewer_model  TEXT,
+  status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','working','review','merged','failed','skipped')),
+  branch          TEXT,
+  updated_at      TEXT,
+  result          TEXT
+);

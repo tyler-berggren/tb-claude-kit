@@ -16,6 +16,7 @@ This project uses Claude Code skills for structured workflows:
 - `/plan` — Multi-phased project planning with fresh-eyes reconciliation on every resume.
 - `/push` — Commit and push to remote.
 - `/research` — Web and project research with numbered reports in `cowork/research/`.
+- `/swarm` — Autonomous parallel plan execution. Setup phase resolves every human question and registers a unit graph in the brain; run phase dispatches worktree-isolated agents, reviews, merges, and reports.
 - `/vibe-audit` — Codebase health and security audit with self-learning pattern database.
 - `/video-editor` — Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption.
 

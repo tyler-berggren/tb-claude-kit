@@ -5,7 +5,8 @@ re-explaining the same architecture, re-litigating the same decisions, re-discov
 constraints. This kit fixes that, then builds on top of it.
 
 It gives Claude a **persistent brain** (a SQLite knowledge base that survives restarts), a
-**planning loop** that reconciles itself against the real codebase on every resume, a **research
+**planning loop** that reconciles itself against the real codebase on every resume, a **swarm**
+that executes an entire plan autonomously with parallel, worktree-isolated agents, a **research
 system** that runs parallel agents under an anti-fabrication contract, and **eyes** — a live
 browser it can inspect the DOM of rather than squint at screenshots.
 
@@ -47,7 +48,7 @@ That's it. Open the project in Claude Code and the skills are available.
 
 ## The skills
 
-Fourteen skills, grouped by what they do for you.
+Fifteen skills, grouped by what they do for you.
 
 **Memory — so context accumulates instead of resetting**
 
@@ -62,6 +63,7 @@ Fourteen skills, grouped by what they do for you.
 |---|---|
 | `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. |
 | `/research` | Parallel agents across a six-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Each writes its own report under an anti-fabrication contract with a mandatory "what I could not verify" section; the orchestrator only synthesizes. Reports accumulate as sourced, dated folders. |
+| `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves a report of every decision made in your absence. |
 
 **Seeing — so Claude can check its own work**
 
@@ -93,8 +95,9 @@ Fourteen skills, grouped by what they do for you.
 ## How it works
 
 The **brain DB** is the connective tissue. `/brainstorm` writes decisions and questions into it.
-`/research` indexes reports in it. `/plan` reads from it. Session hooks load the current state on
-startup, so a fresh Claude opens already knowing where things stand.
+`/research` indexes reports in it. `/plan` reads from it. `/swarm` registers its execution state
+in it — which is how a fresh session knows whether to set a swarm up or run one. Session hooks
+load the current state on startup, so a fresh Claude opens already knowing where things stand.
 
 Everything else is a file in your repo, readable by a human or a future session:
 
@@ -141,9 +144,21 @@ brain DB, so it reflects what you've already worked through. Then build. `/plan 
 fresh-eyes reconciliation pass, re-reading the plan against the current code to catch the gap
 between what was planned and what actually got built.
 
+**When the plan should complete itself,** hand it to `/swarm` instead of implementing phase by
+phase:
+
+```
+/plan  →  /swarm (setup)  →  /commit  →  fresh session: /swarm (run)  →  read REPORT.md
+```
+
+Setup resolves every open question with you up front; the run session then executes the whole
+plan — parallel agents where the dependency graph allows, serial where it doesn't — without
+stopping to ask anything. See [Swarm](#swarm-swarm) in the reference.
+
 **Not everything needs the full loop:**
 
 - **Quick feature** — `/plan` → implement → `/commit`
+- **Whole plan, hands-off** — `/plan` → `/swarm` → commit → fresh session `/swarm` → read the report
 - **Exploratory question** — `/brainstorm`, and you're done; insights are saved
 - **Technology decision** — `/research` → `/brainstorm` the findings → decision logged
 - **Bug fix** — just fix it → `/commit`
@@ -249,6 +264,7 @@ fall back to sensible defaults when the file or a key is missing. See
   "commit": { "author": "Jane Dev <jane@example.com>" },
   "plan":     { "roots": ["cowork/plans", "cowork/clients/*/projects/*/plans"] },
   "research": { "roots": ["cowork/research"] },
+  "swarm":    { "maxAgents": 6, "checks": ["npm run check"] },
 
   "rules": {
     "push": "If the post-commit hook reports undeployed changes, ask before pushing."
@@ -336,6 +352,7 @@ cowork/
     MANTRA.md         # Claude's self-authored context
   plans/              # NNN_YYYY-MM-DD_topic.md
   research/           # NNN_YYYY-MM-DD_topic/ — agent-*.md + SUMMARY.md
+  swarm/              # <plan_id>/ — SWARM.md + REPORT.md per swarmed plan (created by /swarm)
   architecture/       # CTO.db, generated architecture.html, dated summaries
   vibe-audit/         # VIBE-AUDIT.db, GUARDRAILS.md (yours)
   video/              # transcripts, scripts, caption-dictionary.json (yours)
@@ -361,6 +378,9 @@ SQLite with FTS5 full-text search at `cowork/brain/BRAIN.db`.
 - **warm** — importance ≥ 6, or created in the last 14 days
 - **cold** — everything else still active
 - **archived** — done, dropped, or superseded
+
+Two additional tables, `swarm_runs` and `swarm_units`, hold `/swarm` execution state — see
+[Swarm](#swarm-swarm).
 
 ---
 
@@ -789,6 +809,144 @@ All 5 MCP servers are pre-configured in `.mcp.json`. After installing the kit:
 5. **Perplexity** — sign up at https://perplexity.ai, get API key from settings, add to `.mcp.json`
 
 The skill works with any subset of these tools — it gracefully adapts when tools are missing. But the full stack gives the best results: keyword search (Brave) + semantic search (Exa) + fast lookup (Tavily) + orientation (Perplexity) + deep extraction (Firecrawl) + free fallback (WebFetch).
+
+## Swarm (`/swarm`)
+
+Hand `/swarm` a plan and it completes the whole thing — end to end, without stopping to ask you
+anything. Parallel agents where the dependency graph allows it, a supervised serial march where it
+doesn't. The point is not parallelism for its own sake; it's that the plan finishes while you're
+away, with every judgment call either answered by you up front or made autonomously and written
+down for your review afterwards.
+
+### The two-session lifecycle
+
+```
+/plan 021                          # generate the plan as usual
+/swarm 021                         # SETUP — conversational, in this session
+  → decomposes the plan into a dependency graph of units
+  → asks you every question the run could possibly need answered
+  → writes cowork/swarm/021/SWARM.md, registers the run in the brain
+/commit                            # the package travels with the repo
+
+# fresh session (start it with /rc to monitor remotely)
+/swarm 021                         # RUN — autonomous, no questions
+  → dispatches worktree-isolated agents wave by wave
+  → reviews every unit before merging it
+  → writes cowork/swarm/021/REPORT.md, notifies you when done
+```
+
+You never say "setup" or "run" — the skill infers the phase from the brain: no registered run
+means setup, a `ready` run means run, a `running` run means resume after an interruption. The
+same inference gives you `/swarm status` (read-only), `/swarm abort`, and `/swarm report`.
+
+### Setup — front-loading every human decision
+
+Setup does a fresh-eyes reconciliation of the plan against the current code, then slices it into
+**units** — the chunk of work one agent completes in one git worktree. The slicing rule that
+matters most: **serial chains that share files become one unit.** Splitting a
+migration → rewrite → re-measure chain across three agents just manufactures merge conflicts;
+real parallelism comes from disjoint file territories. Each unit gets dependencies, a file
+territory, and **resource tags** naming shared mutable state outside git — a live database, a
+deploy, a tile pipeline. Two units holding the same tag never run concurrently, even when their
+code doesn't overlap.
+
+Setup then batches every open question to you in one pass: the plan's own open questions,
+anything reconciliation surfaced, and run policy — may agents touch the live DB? may the swarm
+deploy? merge to main at the end, or leave the integration branch for review? Your answers become
+a numbered decision record in `SWARM.md` that agent briefs cite. Anything you delegate back gets
+a committed default, written down. A question that survives setup unanswered is a setup failure.
+
+Setup also verifies the project's checks pass on the current baseline (a swarm can't tell its own
+failures from inherited ones), reads retro insights from previous runs, assigns a model per unit,
+and reports the **parallelism profile** honestly — "6 units, but one chain is 70% of the work" —
+so you know whether you're approving a wide fan-out or an autonomous serial run. Both are fine;
+manufactured parallelism is not.
+
+### Run — the orchestrator session
+
+The run session reads the registered graph and becomes an orchestrator. Each unit agent works in
+its own **git worktree** on its own branch, from a brief that is fully self-contained. Agents are
+bound by a no-questions protocol with a decision ladder: the plan → the decision record → brain
+decisions → smallest reasonable interpretation, committed to and recorded. Their only channel out
+is a structured final report: done / decisions / questions / unverified.
+
+Nothing merges unreviewed. Every completed unit gets an independent **reviewer agent** that runs
+the project's checks (from `swarm.checks`, verbatim — reviewers never guess) and the unit's
+verification criteria from the plan. Failures get up to two fix cycles, the second always on the
+strongest model; then the unit is marked failed, its dependents are skipped, and everything else
+continues — **failures degrade the run, never halt it**. The orchestrator merges passing units
+into an integration branch (`swarm/<plan_id>`), resolving conflicts itself: it's the only mind
+that has seen every brief. A final integration gate — the plan's full verification table plus a
+whole-diff review — stands between the integration branch and your main branch.
+
+Three things keep an unattended run honest:
+
+- **A stall watchdog** — a hung agent never sends a completion signal, so a background timer
+  checks for units with no state change in ~30 minutes and re-dispatches or fails them.
+- **Mid-run steering** — the no-questions rule binds agents, not you. A message you send mid-run
+  (typically via `/rc` from your phone) becomes a timestamped amendment to the decision record,
+  applied to everything not yet dispatched.
+- **Push notifications** — completion and failure are the two interruptions worth sending.
+
+### Models
+
+Setup assigns a model per unit and per reviewer; you see the table before approving.
+
+| Model | Unit work | Review work |
+|---|---|---|
+| `opus` | Default — anything with judgment: migrations, algorithm changes, cross-file refactors, anything touching a resource tag | Gate units, cascading-failure units, and always the final integration review |
+| `sonnet` | Simple, mechanical, well-briefed work | Default reviewer |
+| `haiku` | Never | Only checklist-style verification of small mechanical units |
+
+When in doubt, up a tier — a swarm's cost center is redone work, not tokens.
+
+### The report
+
+`cowork/swarm/<plan_id>/REPORT.md` is the morning-after read: what merged, what failed and why,
+**every decision made autonomously with its rationale** (the review surface that replaces mid-run
+questions), questions agents flagged for human eyes, and verification output. After each run the
+orchestrator also logs retro insights to the brain (tagged `swarm-retro`) — slicings that
+conflicted anyway, model assignments that didn't survive review — which the next setup reads
+before slicing. The heuristics improve from your runs, not from guesses.
+
+### When a run doesn't finish clean
+
+`/swarm <ref>` against a finished run with unmerged units offers **remainder setup**: diff what
+actually merged against the plan, note salvageable commits on surviving branches, and set up a
+new, smaller run over what's left — decision record carried forward, failed units re-briefed with
+root-cause attention rather than retried blind. `/swarm abort` stops a live run but keeps every
+branch and worktree; deleting work is always your call.
+
+### Configuration
+
+```json
+{
+  "swarm": {
+    "maxAgents": 6,
+    "checks": ["npm run check", "npm test"]
+  },
+  "rules": { "swarm": "Never touch the production database — use the staging branch." }
+}
+```
+
+- **`maxAgents`** — concurrency cap for unit agents (default 6)
+- **`checks`** — the project's verification commands; reviewers run these verbatim on every unit.
+  When absent, setup determines the commands itself and records them in `SWARM.md`
+- **`rules.swarm`** — free-text instruction applied whenever the skill runs
+
+### State on disk
+
+| Where | What |
+|---|---|
+| `cowork/swarm/<plan_id>/SWARM.md` | The package: run config, decision record, unit graph, per-unit briefs, agent protocol |
+| `cowork/swarm/<plan_id>/REPORT.md` | What actually happened (suffixed `-2`, `-3` for remainder runs) |
+| `swarm_runs` / `swarm_units` (brain DB) | Execution state — what phase inference and resume reconstruct the world from |
+| `swarm/<plan_id>` branch | Integration branch; kept after the run for inspection |
+
+The plan file stays the source of truth for *what*; `SWARM.md` owns *who and in what order*;
+`REPORT.md` records *what actually happened*. The plan is updated with checkboxes and phase
+statuses as units merge, exactly as `/plan` sessions would — a swarmed plan and a hand-worked
+plan look the same afterwards.
 
 ## Document Parsing (`/parse`)
 

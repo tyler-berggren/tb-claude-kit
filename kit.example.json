@@ -51,6 +51,12 @@
     "styleScaffold": null
   },
 
+  "_note_swarm": "Configuration for /swarm autonomous plan execution. maxAgents caps how many unit agents run concurrently during a swarm run (setup can override per-run with user approval). checks is the project's verification command list — reviewer agents run these verbatim on every unit; when absent, swarm setup determines the commands itself and records them in SWARM.md.",
+  "swarm": {
+    "maxAgents": 6,
+    "checks": []
+  },
+
   "_note_sqlite_tracking": "SQLite databases that get NDJSON snapshot files on /commit, using the AirSQLite sidecar layout: {dbname}.airsqlite/{table}.snapshot.ndjson. Each entry names a .db file and optionally which tables to track (default: all non-internal tables). One JSON line per row (including _rowid), sorted by rowid. Regenerated before staging, not as a git hook.",
   "sqlite_tracking": [],
 
