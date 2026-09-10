@@ -6,9 +6,11 @@
 .claude/skills/kill
 .claude/skills/look
 .claude/skills/parse
+.claude/skills/pbar
 .claude/skills/plan
 .claude/skills/push
 .claude/skills/research
+.claude/skills/swarm
 .claude/skills/vibe-audit
 .claude/skills/video-editor
 .claude/skills/web

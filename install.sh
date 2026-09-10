@@ -281,6 +281,7 @@ is_excluded() {
 
 ADD_COUNT=0; OK_COUNT=0; UPDATE_COUNT=0; DRIFT_COUNT=0; KEEP_COUNT=0
 LINK_COUNT=0; OCCUPIED_COUNT=0; FORK_COUNT=0; MATERIALIZE_COUNT=0; UNTRACK_COUNT=0; EXCLUDE_COUNT=0
+TRACKED_LINKS=()
 STALE_EXCLUDED=()
 OCCUPIED_PATHS=()
 
@@ -431,60 +432,71 @@ link_path() {
 }
 
 untrack_if_tracked() {
-  # .gitignore has NO effect on files git already tracks. Converting a tracked
-  # regular file into a symlink stages a typechange (T) that sails straight
-  # past the managed ignore block — committing an absolute machine path.
-  # So every path we link must also be dropped from the index.
+  # REPORTS, NEVER ACTS. This script does not modify git state — not the index,
+  # not .gitignore. Whether kit symlinks should be tracked is a decision only
+  # the project can make, and it genuinely goes both ways: tracking them keeps
+  # the repo self-describing, while ignoring them keeps an absolute machine
+  # path out of the history. Silently doing either surprises somebody.
+  #
+  # The hazard worth knowing: converting a tracked regular file into a symlink
+  # stages a typechange (T), and a .gitignore entry does NOT suppress it,
+  # because ignore rules have no effect on paths git already tracks. So a
+  # tracked kit path will show up in `git status` after linking.
   local rel="$1"
-  [ "$DRY_RUN" = "yes" ] && return 0
   git -C "$TARGET_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
   git -C "$TARGET_DIR" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1 || return 0
-  git -C "$TARGET_DIR" rm --cached -r --quiet -- "$rel" 2>/dev/null || return 0
+  TRACKED_LINKS+=("$rel")
   UNTRACK_COUNT=$((UNTRACK_COUNT + 1))
 }
 
-GITIGNORE_BEGIN="# BEGIN:tb-claude-kit (managed by install.sh — do not edit)"
-GITIGNORE_END="# END:tb-claude-kit"
+# This script NEVER writes .gitignore. It used to, and the result was a project
+# discovering that seventeen tracked skill paths had been silently dropped from
+# its index by an installer it ran to add ONE skill. Whether kit symlinks belong
+# in git is a project decision with real arguments on both sides, so the script
+# states the situation and leaves it alone.
+report_gitignore_procedure() {
+  echo ""
+  echo "Git tracking (this script does not change it):"
 
-write_gitignore_block() {
-  local gi="$TARGET_DIR/.gitignore"
-  local tmp; tmp="$(mktemp)"
-
-  if [ -f "$gi" ]; then
-    awk -v b="$GITIGNORE_BEGIN" -v e="$GITIGNORE_END" '
-      $0 == b {skip=1} !skip {print} $0 == e {skip=0}
-    ' "$gi" > "$tmp"
+  if [ "$MODE" = "inside" ]; then
+    echo "  inside mode — kit files are real files and are MEANT to be tracked."
+    echo "  Commit them with the rest of the repo. Nothing to ignore."
+    return 0
   fi
 
-  if [ "$MODE" = "outside" ]; then
-    [ -s "$tmp" ] && [ -n "$(tail -c 1 "$tmp")" ] && echo "" >> "$tmp"
-    {
-      echo "$GITIGNORE_BEGIN"
-      local rel
-      for rel in "${KIT_PATHS[@]}"; do
-        is_forked "$rel" && continue
-        is_excluded "$rel" && continue
-        [ -e "$KIT_DIR/$rel" ] || continue
-        # No trailing slash, ever. In outside mode every one of these is a
-        # SYMLINK, which git treats as a file — a "dir/" pattern would not
-        # match it, and the link would be committed with its absolute path.
-        echo "/$rel"
-      done
-      echo "$GITIGNORE_END"
-    } >> "$tmp"
+  if [ ${#TRACKED_LINKS[@]} -eq 0 ]; then
+    echo "  outside mode — kit paths are symlinks, and none are tracked."
+    echo "  To keep it that way, ignore them (leading slash, NO trailing slash —"
+    echo "  a symlink is a file to git, so a \"dir/\" pattern will not match it):"
+    echo ""
+    local rel
+    for rel in "${KIT_PATHS[@]}"; do
+      is_forked "$rel" && continue
+      is_excluded "$rel" && continue
+      [ -e "$KIT_DIR/$rel" ] || continue
+      echo "      /$rel"
+    done
+    echo ""
+    echo "  Or track them deliberately — the symlinks carry an absolute path to"
+    echo "  this machine's kit checkout, which is fine for a private single-machine"
+    echo "  repo and wrong for a shared one."
+    return 0
   fi
 
-  if [ "$DRY_RUN" = "no" ]; then
-    if [ -s "$tmp" ]; then mv "$tmp" "$gi"; else rm -f "$tmp" "$gi"; fi
-  else
-    rm -f "$tmp"
-  fi
-
-  if [ "$MODE" = "outside" ]; then
-    echo "  [gitignore] managed block written ($(printf '%s\n' "${KIT_PATHS[@]}" | wc -l | tr -d ' ') paths)"
-  else
-    echo "  [gitignore] managed block removed (inside mode tracks kit files)"
-  fi
+  echo "  ${#TRACKED_LINKS[@]} kit path(s) are TRACKED in git and are now symlinks."
+  echo "  git status will show these as typechanges (T). Two valid resolutions:"
+  echo ""
+  echo "    keep tracking them  — commit the typechange. The repo stays"
+  echo "                          self-describing, but the committed link holds"
+  echo "                          an absolute path to this machine."
+  echo ""
+  echo "    stop tracking them  — git rm --cached each path, then add it to"
+  echo "                          .gitignore. NOTE: adding to .gitignore alone"
+  echo "                          does NOTHING for an already-tracked path."
+  echo ""
+  echo "  Tracked kit paths:"
+  local rel
+  for rel in "${TRACKED_LINKS[@]}"; do echo "      $rel"; done
 }
 
 write_kit_json() {
@@ -500,7 +512,7 @@ except Exception:
 d['mode'] = mode
 d.setdefault('kitVersion', 1)
 d.setdefault('fork', [])
-json.dump(d, open(path, 'w'), indent=2)
+json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 open(path, 'a').write('\n')
 " "$KIT_JSON" "$MODE"
   echo "  [kit.json] mode=$MODE"
@@ -515,7 +527,7 @@ p=sys.argv[1]; perm=sys.argv[2]
 s=json.load(open(p))
 a=s.setdefault('permissions',{}).setdefault('allow',[])
 if perm not in a: a.append(perm)
-json.dump(s,open(p,'w'),indent=2); open(p,'a').write('\n')
+json.dump(s,open(p,'w'),indent=2,ensure_ascii=False); open(p,'a').write('\n')
 " "$settings" "$perm"
   fi
 }
@@ -528,7 +540,7 @@ import json,sys
 p,name,frag=sys.argv[1],sys.argv[2],sys.argv[3]
 m=json.load(open(p))
 m.setdefault('mcpServers',{})[name]=json.loads(frag)
-json.dump(m,open(p,'w'),indent=2); open(p,'a').write('\n')
+json.dump(m,open(p,'w'),indent=2,ensure_ascii=False); open(p,'a').write('\n')
 " "$mcp" "$name" "$frag"
   fi
 }
@@ -542,7 +554,7 @@ p,name=sys.argv[1],sys.argv[2]
 s=json.load(open(p))
 v=s.setdefault('enabledMcpjsonServers',[])
 if name not in v: v.append(name)
-json.dump(s,open(p,'w'),indent=2); open(p,'a').write('\n')
+json.dump(s,open(p,'w'),indent=2,ensure_ascii=False); open(p,'a').write('\n')
 " "$sl" "$name"
   fi
 }
@@ -649,7 +661,7 @@ fi
 echo ""
 echo "Config:"
 write_kit_json
-write_gitignore_block
+report_gitignore_procedure
 
 # ============================================================
 # DATABASES
@@ -715,22 +727,6 @@ else
   echo "  [skip] Brave Search"
 fi
 
-if [ -f "$TARGET_DIR/.env" ] && grep -q "op://" "$TARGET_DIR/.env" 2>/dev/null; then
-  echo "  [ok]   1Password (op:// references found in .env)"
-elif [ -f "$TARGET_DIR/cowork/setup/1password-setup.md" ] && [ -f "$TARGET_DIR/.env.example" ]; then
-  echo "  [ok]   1Password (setup guide + .env.example in place)"
-elif ask_yn "Enable 1Password credential access? (op:// refs in .env, no secrets in repo)"; then
-  if [ "$DRY_RUN" = "no" ]; then
-    mkdir -p "$TARGET_DIR/cowork/setup"
-    cp "$KIT_DIR/cowork/setup/1password-setup.md" "$TARGET_DIR/cowork/setup/1password-setup.md"
-    cp "$KIT_DIR/.env.example" "$TARGET_DIR/.env.example"
-  fi
-  echo "  [add]  1Password setup guide + .env.example"
-  echo "         Run: cp .env.example .env, then fill in op:// paths"
-else
-  echo "  [skip] 1Password"
-fi
-
 if grep -q '"cloudflare@cloudflare"' "$TARGET_DIR/.claude/settings.json" 2>/dev/null; then
   echo "  [ok]   Cloudflare plugin (already enabled)"
 elif ask_yn "Enable Cloudflare plugin? (docs, API, bindings, builds, observability)"; then
@@ -739,7 +735,7 @@ elif ask_yn "Enable Cloudflare plugin? (docs, API, bindings, builds, observabili
 import json,sys
 p=sys.argv[1]; s=json.load(open(p))
 s.setdefault('enabledPlugins',{})['cloudflare@cloudflare']=True
-json.dump(s,open(p,'w'),indent=2); open(p,'a').write('\n')
+json.dump(s,open(p,'w'),indent=2,ensure_ascii=False); open(p,'a').write('\n')
 " "$TARGET_DIR/.claude/settings.json"
     for pair in \
       "cloudflare-docs:https://docs.mcp.cloudflare.com/mcp" \
@@ -771,7 +767,7 @@ parts=()
 [ $KEEP_COUNT -gt 0 ]        && parts+=("$KEEP_COUNT kept")
 [ $FORK_COUNT -gt 0 ]        && parts+=("$FORK_COUNT forked")
 [ $EXCLUDE_COUNT -gt 0 ]     && parts+=("$EXCLUDE_COUNT excluded")
-[ $UNTRACK_COUNT -gt 0 ]     && parts+=("$UNTRACK_COUNT untracked")
+[ $UNTRACK_COUNT -gt 0 ]     && parts+=("$UNTRACK_COUNT tracked kit paths")
 [ $OCCUPIED_COUNT -gt 0 ]    && parts+=("$OCCUPIED_COUNT occupied")
 [ ${#parts[@]} -eq 0 ] && parts+=("nothing to do")
 ( IFS=","; echo "${parts[*]}" ) | sed 's/,/, /g'
@@ -810,7 +806,8 @@ if [ $ADD_COUNT -gt 0 ]; then
   echo "  3. Edit cowork/vibe-audit/GUARDRAILS.md — customize for your architecture"
   echo "  4. Edit cowork/architecture/seed.sql — define your subsystems for /cto"
   if [ "$MODE" = "outside" ]; then
-    echo "  5. Commit .claude/kit.json and .gitignore — the symlinks are ignored on purpose"
+    echo "  5. Commit .claude/kit.json — and decide, per the git-tracking note above,"
+    echo "     whether the kit symlinks should be tracked or ignored in this repo"
   else
     echo "  5. Commit .claude/ cowork/ CLAUDE.md .mcp.json scripts/"
   fi
