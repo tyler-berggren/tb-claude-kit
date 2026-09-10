@@ -123,20 +123,20 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
    [ -d "$WIKI_ROOT" ] && [ -d scripts/wiki-build ] || exit 1
    ```
 
-3. Load Cloudflare credentials from `.env`:
+3. Load Cloudflare credentials from `.env`. The `.env` may contain non-shell content
+   (binary tokens, special characters), so extract only the CF variables with `grep`:
    ```bash
-   set -a; . ./.env; set +a
-   CF_ACCT="${CLOUDFLARE_ACCOUNT_ID:-$CF_ACCOUNT_ID}"
-   CF_TOKEN="${CLOUDFLARE_API_TOKEN:-$CF_API_TOKEN}"
+   CF_ACCT=$(grep -E '^(CLOUDFLARE_ACCOUNT_ID|CF_ACCOUNT_ID)=' .env | head -1 | cut -d= -f2-)
+   CF_TOKEN=$(grep -E '^(CLOUDFLARE_API_TOKEN|CF_API_TOKEN)=' .env | head -1 | cut -d= -f2-)
    ```
-   If neither variable is set, stop and tell the user to add CF credentials to `.env`.
+   If neither variable is found, stop and tell the user to add CF credentials to `.env`.
 
 4. Resolve the CF Pages project name. Check `kit.json` first, then derive from the repo
    directory name:
    ```bash
    PROJECT=$(jq -r '.wiki.pagesProject // empty' .claude/kit.json 2>/dev/null)
    if [ -z "$PROJECT" ]; then
-     PROJECT="$(basename "$(pwd)")-reinstall-work-wiki"
+     PROJECT="$(basename "$(pwd)")-wiki"
    fi
    ```
 
@@ -153,14 +153,19 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
    cd scripts/wiki-build && npm install --silent && node build.mjs "../../$WIKI_ROOT" ../../_wiki-site --name "$CLIENT_NAME"
    ```
 
-7. Deploy to Cloudflare Pages. Create the project first if it doesn't exist yet:
+7. Deploy to Cloudflare Pages. Most wikis already have an existing Pages project —
+   **skip project creation** and deploy directly:
    ```bash
    cd ../..
    CLOUDFLARE_ACCOUNT_ID="$CF_ACCT" CLOUDFLARE_API_TOKEN="$CF_TOKEN" \
-     npx wrangler pages project create "$PROJECT" --production-branch=main 2>/dev/null || true
-   CLOUDFLARE_ACCOUNT_ID="$CF_ACCT" CLOUDFLARE_API_TOKEN="$CF_TOKEN" \
      npx wrangler pages deploy _wiki-site --project-name="$PROJECT" --branch=main --commit-dirty=true
    ```
+   If the deploy fails with "project not found", then create it first:
+   ```bash
+   CLOUDFLARE_ACCOUNT_ID="$CF_ACCT" CLOUDFLARE_API_TOKEN="$CF_TOKEN" \
+     npx wrangler pages project create "$PROJECT" --production-branch=main
+   ```
+   Then retry the deploy command above.
 
 8. Clean up the build output:
    ```bash
@@ -168,6 +173,9 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
    ```
 
 9. Report the live URL: `https://<project-name>.pages.dev`
+
+**Do not** verify the deployment by fetching the URL. Wikis are often behind
+Cloudflare Access or other auth layers and cannot be reached for verification.
 
 ---
 
