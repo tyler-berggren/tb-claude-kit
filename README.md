@@ -48,7 +48,7 @@ That's it. Open the project in Claude Code and the skills are available.
 
 ## The skills
 
-Fifteen skills, grouped by what they do for you.
+Sixteen skills, grouped by what they do for you.
 
 **Memory — so context accumulates instead of resetting**
 
@@ -88,6 +88,7 @@ Fifteen skills, grouped by what they do for you.
 | `/commit` `/push` | Stage, write a real commit message, push. Regenerates SQLite NDJSON sidecars if configured. |
 | `/kill` | Kill dev servers, watchers, and browser instances without touching your Claude session. |
 | `/parse` | Local documents — contracts, decks, spreadsheets, scanned PDFs — converted to markdown Claude can actually read. Point it at a file, a glob, or a directory; the `.md` lands beside the original. |
+| `/pbar` | A live progress display for a job that will run for a while. Hands you one path to paste into any terminal: a bar per stage, an ETA from measured throughput, and — the part a bar alone can never tell you — whether the process is still alive. Read-only, so stopping it cannot disturb the job. |
 | `/video-editor` | Transcript-driven video editing — transcribe, script, cut, caption. |
 
 ---
