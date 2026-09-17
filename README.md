@@ -61,7 +61,7 @@ Sixteen skills, grouped by what they do for you.
 
 | | |
 |---|---|
-| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. |
+| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is organised as a sequence of clean pull requests (foundation as a draft, an exemplar, isolated PRs for schema or auth, per-adopter rollout), reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and is written to be inlined into each PR body for reviewers who have never seen your notes. |
 | `/research` | Parallel agents across a six-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Each writes its own report under an anti-fabrication contract with a mandatory "what I could not verify" section; the orchestrator only synthesizes. Reports accumulate as sourced, dated folders. |
 | `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves a report of every decision made in your absence. |
 
@@ -102,7 +102,8 @@ load the current state on startup, so a fresh Claude opens already knowing where
 
 Everything else is a file in your repo, readable by a human or a future session:
 
-- **Plans** are numbered, dated markdown — `cowork/plans/001_2026-06-20_auth-redesign.md`
+- **Plans** are numbered, dated markdown — `cowork/plans/001_2026-06-20_auth-redesign.md`. A plan with
+  companions becomes a directory of the same name; a narrower plan carved out of one is `001a_…` inside it
 - **Research runs** are numbered, dated *folders* —
   `cowork/research/002_2026-06-22_oauth-providers/` holding each agent's report plus a synthesized
   `SUMMARY.md`
@@ -144,6 +145,12 @@ Once the shape is clear, `/plan` generates a phased plan grounded in both the co
 brain DB, so it reflects what you've already worked through. Then build. `/plan N` resumes with a
 fresh-eyes reconciliation pass, re-reading the plan against the current code to catch the gap
 between what was planned and what actually got built.
+
+**When the code lands in someone else's repo** — a client's, an employer's, an open-source
+project's — use `/plan pr <topic>`. The build order becomes one PR per concern, every item is a
+step a cold coding agent can tick off, and the plan file itself ships inside each PR body with
+the goal, summary and design decisions at the top. A project's `kit.json` `rules.plan` names the
+team's ship command, branch conventions and priority tiers so the kit stays generic.
 
 **When the plan should complete itself,** hand it to `/swarm` instead of implementing phase by
 phase:

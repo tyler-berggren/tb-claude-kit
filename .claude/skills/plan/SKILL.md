@@ -1,7 +1,7 @@
 ---
 name: plan
-description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. Supports scoped plan directories via for:<scope>. Topic/no arg -> generate from brain DB tasks and codebase context.
-argument-hint: "[plan number | scope NNN | for:<scope> topic | NNN brainstorm | topic | update | carry | status | review]"
+description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. "pr <topic>" or "NNN pr" -> PR mode, a plan organised as a sequence of clean pull requests for a team repo. Supports scoped plan directories via for:<scope>. Topic/no arg -> generate from brain DB tasks and codebase context.
+argument-hint: "[plan number | scope NNN | for:<scope> topic | NNN brainstorm | pr topic | NNN pr | topic | update | carry | status | review]"
 ---
 
 ## Available Plans
@@ -21,6 +21,7 @@ Generate a new plan or resume an existing one. Routing is based on the argument:
 - **`carry`** -> Sweep unfinished plan items back to brain DB
 - **`status`** -> Status check of the current session's bound plan (or most recent active plan)
 - **`review`** -> Review user's `{{bracketed}}` proposed changes to the bound plan
+- **`pr <topic>`** or **`NNN pr`** -> PR mode (see **PR Mode**): Generate or convert, with the plan organised by pull request for a team repo
 - **Topic, description, or no argument** -> Generate flow (research + brainstorm + write plan file)
 
 ## Input
@@ -38,6 +39,7 @@ Optional argument: `$ARGUMENTS`
 - A filename fragment (`tech-stack-rebuild`) that matches an existing plan -> **Resume flow**
 - A full path (`cowork/plans/003_2026-05-10_tech-stack-rebuild.md`, `cowork/plans/mvp/001_seed-profile-design.md`) -> **Resume flow**
 - `for:<scope> <topic>` (e.g. `for:data-portal build parcel POC`) -> **Generate flow** scoped to that directory
+- `pr <topic>` -> **Generate flow in PR mode**; `NNN pr` -> **Resume flow**, converting an existing plan to PR mode first (see **PR Mode**)
 - A topic, description, task IDs, pillar name, or empty -> **Generate flow**
 
 ---
@@ -58,18 +60,51 @@ not need to be listed.
 **Numbering is per-directory.** `cowork/plans/003_*.md` and `cowork/plans/mvp/003_*.md` can
 both exist, so a bare `003` is ambiguous whenever more than one root or subdirectory is in play.
 
+### Plan directories
+
+A plan may be a single file, or a **directory** holding the plan plus its companion documents — an
+audit, a research report, a findings matrix. Use a directory whenever a plan has supporting material
+that belongs with it; the alternative (a sibling `cowork/audits/`, `cowork/matrices/`, … grouped by
+document TYPE) scatters one piece of work across the tree and is not how this project files things.
+
+```
+cowork/plans/001_2026-09-11_shared-components/
+├── 001_2026-09-11_shared-components.md    <- the plan; keeps the NNN_ prefix
+└── audit.md                               <- companion; plain descriptive name
+```
+
+**A directory whose name matches `NNN_` is a PLAN, not a scope.** This is the rule that keeps the
+derivation below from producing `001_2026-09-11_shared-components-001`. Concretely:
+
+- The plan file inside it keeps the full `NNN_YYYY-MM-DD_topic.md` name. That prefix is what the
+  Resume fallback scan matches on, so dropping it breaks `/plan NNN`.
+- **Exactly one file in a plan directory carries the `NNN_` prefix.** Companions take plain names
+  (`audit.md`, `research.md`), or the scan finds two candidates for one plan.
+- A plan directory contributes its own `NNN` to its PARENT's numbering. When picking the next
+  number, count `NNN_` directories alongside `NNN_` files — otherwise the next plan reuses the
+  number.
+
+**Sub-plans carved out of a plan get a letter suffix, inside the parent's directory.** When part
+of a plan is refocused into its own narrower plan, it is `NNNa` (then `NNNb`, …), not a new
+number or a scope: directory `cowork/plans/NNN_…/NNNa_<topic>/`, plan file `NNNa_YYYY-MM-DD_<topic>.md`,
+`plan_id` `NNNa`. The number itself shows the lineage. Companions sit beside it as usual.
+
 **`plan_id` is `<scope>-<NNN>`**, where scope is the plan's directory identity:
 
 | Plan file | scope | `plan_id` |
 |---|---|---|
 | `cowork/plans/003_2026-05-10_rebuild.md` | *(none — directly in a root)* | `003` |
+| `cowork/plans/001_2026-09-11_shared/001_2026-09-11_shared.md` | *(none — a plan DIRECTORY in a root)* | `001` |
 | `cowork/plans/mvp/001_seed-profile.md` | `mvp` | `mvp-001` |
+| `cowork/plans/mvp/001_seed/001_seed.md` | `mvp` | `mvp-001` |
 | `cowork/plans/mvp/testing/001_proof.md` | `mvp-testing` | `mvp-testing-001` |
 | `cowork/clients/acme/projects/data-portal/plans/000_poc.md` | `data-portal` | `data-portal-000` |
 
 Derivation: for a plan sitting directly in a configured root, there is no scope. For a plan in a
-subdirectory of a root, scope is the relative path from that root with `/` replaced by `-`. For a
-root containing wildcards, scope is the last wildcard-matched segment.
+subdirectory of a root, scope is the relative path from that root with `/` replaced by `-` —
+**skipping any path segment that is itself a plan directory** (matches `NNN_`), since that segment
+names the plan rather than a scope. For a root containing wildcards, scope is the last
+wildcard-matched segment.
 
 **`meta.plan_path` is authoritative.** Always store the plan's full repo-relative path in
 `meta.plan_path`. `plan_id` is a human handle for the command line and can collide across roots;
@@ -147,9 +182,14 @@ Wait for user approval or redirection before writing.
      ask rather than guessing.
    - **Default:** the first configured root (`cowork/plans` when unconfigured).
 
-   Find the highest `NNN` prefix **in that directory only** — numbering is per-directory. The new
-   plan gets `NNN + 1`, zero-padded to 3 digits, starting at `000` if the directory is empty.
+   Find the highest `NNN` prefix **in that directory only** — numbering is per-directory, and
+   counts `NNN_` DIRECTORIES (plan directories) alongside `NNN_` files. The new plan gets
+   `NNN + 1`, zero-padded to 3 digits, starting at `000` if the directory is empty.
    Filename: `NNN_YYYY-MM-DD_topic.md`.
+
+   Write a bare file. Promote it to a plan directory (`NNN_YYYY-MM-DD_topic/` holding
+   `NNN_YYYY-MM-DD_topic.md` plus companions) the moment the plan gains a supporting document —
+   see **Plan directories**. Never file that companion under a new `cowork/<doc-type>/` folder.
 2. Write the plan file:
    - `# Plan: <Title>`
    - `## Source` — manifest linking each task by DB id:
@@ -189,11 +229,14 @@ Resume work on an existing plan. Every invocation begins with a fresh-eyes recon
    a. A full path, if one was given.
    b. `meta.plan_path` on a brain DB task whose `plan_id` matches the argument.
    c. If a scope was given (`mvp 001`), that scope's directory for a `001_*.md` file.
-   d. All configured roots and their subdirectories for a matching `NNN_*` prefix. If more than
-      one directory yields a match, list the candidates and ask — do not guess.
+   d. All configured roots and their subdirectories for a matching `NNN_*` prefix — a plan
+      directory's own file is found this way, since the prefix is on the file too. Ignore a
+      matching `NNN_` DIRECTORY name itself; the plan is the file inside it. If more than one
+      directory yields a match, list the candidates and ask — do not guess.
 2. Read the full plan file.
 3. **Bind this session to the plan.** For the rest of this conversation, `/plan update` and `/plan carry` default to this plan without requiring a ref.
-4. Identify the current state:
+4. If the plan header carries `**Mode:** pr`, apply **PR Mode** rules for the rest of the session (the reply header is `**Plan NNN / PR-k**`, the stay-current steps run before any code, and every ship goes through the project's ship command).
+5. Identify the current state:
    - Which phases are marked `**Status:** done`?
    - Which phases have a mix of `- [x]` and `- [ ]`?
    - Is there an existing RESUME WORK HERE banner? If so, note its location — that's where the last session stopped.
@@ -321,6 +364,103 @@ The plan file is updated as you go, so a future session can pick up where you le
 - **Codebase research is encouraged.** Read files, grep for patterns, check existing implementations. The goal is to ground the brainstorm in reality, not speculate in the abstract.
 
 ---
+
+## PR Mode
+
+The default flows assume one developer on one repo: phases, a checkout, commit when done. PR
+mode is for work that lands in a **team repository** through pull requests reviewed by other
+people, often on a codebase you do not own. The plan stays private (it lives in your own repo),
+but its build order is a sequence of clean PRs, and the plan file itself travels inside each PR
+body, so it has to read well to a reviewer who has never seen your notes.
+
+Usage: `pr <topic>` (generate), or `NNN pr` (convert an existing plan, then resume). A PR-mode plan
+carries `**Mode:** pr` in its header; Resume detects it and applies these rules automatically.
+
+### What changes from the default flows
+
+| Default | PR mode |
+|---|---|
+| Build order in phases | Build order in **PRs**, one concern each: PR-1 is the foundation (the shared thing, the standard, the primitive), opened as a draft for review before anything depends on it; then the exemplar (one real adopter that proves it); then **isolated PRs for anything a team reviews separately** (schema, data backfills, auth, money); then rollout PRs, one per adopter, owned by whoever owns that surface |
+| Reads the working tree | Reads the **remote default branch** (`git fetch`, then `git show origin/<default>:<path>`, `git grep <pat> origin/<default> -- <dir>`). A checkout on a feature branch is stale by definition |
+| One brain task per phase | One brain task per PR: `Plan <id> PR-k: <title>` |
+| Reply header `Plan NNN / Phase X` | `Plan NNN / PR-k` |
+| Companion files cited freely | **No references a reviewer cannot follow**: no other plan numbers, no private companion files, no personal notes. Cite the code (path and line on the default branch), issues, PRs and ADRs instead |
+| Items may name a phase's work loosely | **Every item is one checkable step with a path**, small enough that a coding agent with no memory of the conversation can do it, tick it with ` — done: <note>`, and commit |
+
+### Step P1 — Investigate on the default branch (Phase 0 of the plan)
+
+Before proposing anything, inventory what exists: the components that already do the job, every
+place the thing is implemented differently, the team's own recorded decisions (ADRs, decision
+logs, issue threads, contract docs), open issues that already cover parts of the work, and any
+priority tiers the team uses (release waves, milestones). Cite a path and line for every claim.
+This phase is marked done in the plan with its findings summarised **in plain terms** under
+Context; the evidence detail can live in a companion file for you, but the plan must stand
+without it.
+
+### Step P2 — Decide, with defaults
+
+Two tables in the plan, before Build Order:
+
+- **The new standard** (when the plan standardises something): each existing component the
+  plan names as *the* one, where it lives, and **why that one** over the alternatives found in P1.
+  Reviewers accept "we chose X" far more readily when the table shows what else existed.
+- **Decisions**: every open decision, its **owner**, the **default the plan proceeds on**, and
+  where in the build order it bites. A missing decision never blocks a PR; the default ships and
+  the PR body flags it. Record answers in a **Decisions taken** table as they arrive.
+
+### Step P3 — Write the plan (PR mode template)
+
+Same top-level sections as the default (`Source`, `Context`, `Build Order`, `Out of Scope`,
+`Verification`), plus these, in this order after the header:
+
+1. **The short version** — what ships, in which PRs, for someone who reads nothing else.
+2. **The new standard** and **Decisions** (P2).
+3. **Priority tiers**, if the team has them: which adopters get full work and which are
+   "wire only" (pointed at the standard, listed with a reason, never optimised). Put the tier
+   next to every adopter that appears later.
+4. **PR conventions for this plan** — how every PR body opens (see P5), that the plan file is
+   inlined, and any preview-before-ship rule the project has.
+5. **Handoff: ground rules for whoever codes this** — the reading list in order (the team's
+   agent/contributor rules first), where and how to work (package manager, runtime, worktree,
+   branch naming copied from the team's history, issue-first if the team requires it, one
+   commit per section), the **stay-current steps** (fetch; fast-forward the primary checkout's
+   default branch; read the log of the surface since the last session; rebase the branch), the
+   exact test commands, the ship command, and what to do when the plan turns out to be wrong.
+6. **Build Order, by PR.** Each PR block has: a `**Status:** open · **Waits on:** …` line; an
+   **In plain terms** paragraph (what it does and why, for a non-engineer); its checkable items,
+   grouped in lettered sections for a large PR; and an **Exit** line. Rollout PRs get **one
+   item per adopter**, each naming its files, plus a shared recipe above them so the items stay
+   short. The `RESUME WORK HERE` banner sits on the first open item, as always.
+7. **Verification per PR** and **Risks**, as tables or short lists.
+
+### Step P4 — Register
+
+Brain: one task per PR (`Plan <id> PR-k: …`), `plan_id` and `plan_path` in `meta`; one decision
+entry per row of **Decisions taken**; the open decisions as one question entry.
+
+### Step P5 — PR bodies, previews, and shipping
+
+- **A PR body is written for the humans who review it, decisions first.** It opens with **Goal**
+  (one or two sentences), **Summary** (what changed, plain language, the standard or component
+  it introduces named), and **Key UI / UX / design decisions** (each decision, the alternative,
+  why, and whether it is open for the reviewer's call) — before anything technical, and before
+  the team's own template sections if they have one. Then the technical sections, then the
+  **entire plan file inlined** in a collapsed block.
+- **Previews before drafts.** Any user-facing iteration is viewed and confirmed on a local run by
+  the person who owns the plan before the draft PR is pushed. The plan lists the route(s) to
+  check and a checkbox for the confirmation.
+- **Drafts by default; ready is a human's action.** Never mark ready or merge from the skill.
+- **Ship only through the project's ship command** (the `rules."plan"` override names it); that
+  command is where the team's checks, review bot and body template are enforced.
+
+### Behavioral rules in PR mode
+
+- Run the stay-current steps before writing code in any session, and rebase before every push.
+- One commit per lettered section; commit the plan file in **your** repo alongside, never into
+  the team repo.
+- Tick items with ` — done: <note>`; never delete an item; if a step is impossible as written,
+  say so in the note and do the nearest correct thing without widening or narrowing scope.
+- When the team's rules and this skill disagree, the team's rules win, and the plan says so.
 
 ## During the session
 
@@ -501,6 +641,8 @@ Usage: `review` (uses the currently bound plan, or asks which plan)
 
 If `.claude/kit.json` has a `rules."plan"` entry, read it and apply it as an additional
 instruction for this skill. Absent file or key means no overrides — that is the normal case.
+For **PR mode** the override is where a project names its ship command, its branch and title
+conventions, its issue-first rule, its priority tiers, and any preview-before-ship rule.
 
 ```bash
 jq -r '.rules."plan" // empty' .claude/kit.json 2>/dev/null
