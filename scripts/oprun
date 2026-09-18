@@ -85,7 +85,7 @@ case "$mode" in
     bounded vault list --format json | jq -r '.[] | "  - \(.name) (\(.id))"'
     ;;
   read)
-    exec bounded read "$1"
+    bounded read "$1"
     ;;
   op)
     # Unbounded on purpose: the preflight proved the path answers, and a document upload can be slow.
