@@ -123,8 +123,14 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
    [ -d "$WIKI_ROOT" ] && [ -d scripts/wiki-build ] || exit 1
    ```
 
-3. Load Cloudflare credentials from `.env`. The `.env` may contain non-shell content
-   (binary tokens, special characters), so extract only the CF variables with `grep`:
+3. Load Cloudflare credentials from `.env`. If the project keeps its secrets in 1Password
+   (`secrets.vault` in `.claude/kit.json`, values in `.env` written as `op://…` references), read
+   them through the kit wrapper, which resolves references and passes plain values through:
+   ```bash
+   CF_ACCT=$(~/.claude-kit/scripts/oprun get CLOUDFLARE_ACCOUNT_ID)
+   CF_TOKEN=$(~/.claude-kit/scripts/oprun get CLOUDFLARE_API_TOKEN)
+   ```
+   Otherwise extract only the CF variables with `grep` (the `.env` may contain non-shell content):
    ```bash
    CF_ACCT=$(grep -E '^(CLOUDFLARE_ACCOUNT_ID|CF_ACCOUNT_ID)=' .env | head -1 | cut -d= -f2-)
    CF_TOKEN=$(grep -E '^(CLOUDFLARE_API_TOKEN|CF_API_TOKEN)=' .env | head -1 | cut -d= -f2-)
