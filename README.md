@@ -361,8 +361,10 @@ Two scripts in `scripts/`:
 - **`op-sa-bootstrap <vault> [--write]`** — once per client, at the keyboard (Touch ID). Creates a
   service account named `<vault>-ro-<date>` with `read_items` on that one vault (`--write` adds
   `write_items` and names it `-rw-`), verifies it sees exactly
-  that vault, and stores the token in the macOS Keychain as `op-sa-<vault>`. `--rotate` replaces it;
-  revoking the old one is a web-console action.
+  that vault, and stores the token in the macOS Keychain as `op-sa-<vault>`. Tokens do not expire
+  unless `--expires-in` is given. `--rotate` replaces one; revoke the old account with
+  `op user delete <uuid>` (service accounts are users of type `SERVICE_ACCOUNT`; `oprun check`
+  prints the uuid before you rotate).
 - **`oprun -- <command>`** — runs a command with the repo's `.env` resolved through that token.
   `oprun op <args>` runs any `op` command with the same token, so an agent with a `--write`
   service account can move a secret into the vault or rename a field (`op item create`, `op item edit`).

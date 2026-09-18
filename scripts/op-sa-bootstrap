@@ -4,6 +4,9 @@
 #
 #   op-sa-bootstrap <vault> [--write] [--account my.1password.com] [--expires-in 90d] [--rotate]
 #
+# Tokens do not expire unless --expires-in is given: these are per-client tokens on one developer's
+# Mac, and a token that silently expires mid-pipeline costs more than one that is revoked on purpose.
+#
 # Runs on the desktop-app path (Touch ID), so it needs you at the keyboard once per client.
 # The service account is named "<vault>-ro-<date>", or "<vault>-rw-<date>" with --write, which adds
 # write_items so an agent can create and edit items (move a secret into the vault, rename a field).
@@ -18,7 +21,7 @@
 set -euo pipefail
 die() { echo "op-sa-bootstrap: $*" >&2; exit 1; }
 
-vault=""; account=""; expires="90d"; rotate="no"; perms="read_items"; kind="ro"
+vault=""; account=""; expires=""; rotate="no"; perms="read_items"; kind="ro"
 while [ $# -gt 0 ]; do
   case "$1" in
     --account) account="$2"; shift 2 ;;
@@ -52,8 +55,9 @@ vault_json="$(desk vault get "$vault" --format json 2>&1)" || die "cannot see va
 vault_id="$(echo "$vault_json" | jq -r .id)"
 
 name="${vault}-${kind}-$(date +%Y%m%d)"
-echo "Creating service account '$name' with $perms on vault '$vault' ($vault_id), expiring in $expires ..."
-token="$(desk service-account create "$name" --vault "${vault}:${perms}" --expires-in "$expires" --raw 2>&1)" \
+exp_flag=(); [ -n "$expires" ] && exp_flag=(--expires-in "$expires")
+echo "Creating service account '$name' with $perms on vault '$vault' ($vault_id)${expires:+, expiring in $expires}${expires:-, no expiry} ..."
+token="$(desk service-account create "$name" --vault "${vault}:${perms}" ${exp_flag[@]+"${exp_flag[@]}"} --raw 2>&1)" \
   || die "service-account create failed: $token"
 case "$token" in ops_*) ;; *) die "unexpected output from service-account create: $token" ;; esac
 
@@ -64,11 +68,11 @@ count="$(echo "$seen" | jq 'length')"
 [ "$count" = "1" ] || die "expected the token to see 1 vault, it sees $count: $(echo "$seen" | jq -c '[.[].name]')"
 
 security add-generic-password -U -a "$USER" -s "$item" -w "$token" \
-  -j "1Password service account $name: $perms on vault $vault, created $(date +%F), expires in $expires" \
+  -j "1Password service account $name: $perms on vault $vault, created $(date +%F), ${expires:+expires in $expires}${expires:-no expiry}" \
   || die "could not write Keychain item $item"
 
 echo "Stored token in Keychain as '$item'."
-echo "Service account: $name ($perms, vault $vault, expires in $expires)"
+echo "Service account: $name ($perms, vault $vault, ${expires:+expires in $expires}${expires:-no expiry})"
 echo "Try it:  cd <repo with secrets.vault=$vault> && ~/.claude-kit/scripts/oprun check"
-[ "$rotate" = "yes" ] && echo "Now revoke the previous '${vault}-ro-*' or '${vault}-rw-*' service account at https://start.1password.com (Developer > Service accounts)."
+[ "$rotate" = "yes" ] && echo "Now revoke the previous '${vault}-ro-*' / '${vault}-rw-*' service account: op user delete <id> (find it with op user list), or the web console."
 exit 0
