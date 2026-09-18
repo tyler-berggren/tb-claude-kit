@@ -366,6 +366,10 @@ Two scripts in `scripts/`:
 - **`oprun -- <command>`** — runs a command with the repo's `.env` resolved through that token.
   `oprun op <args>` runs any `op` command with the same token, so an agent with a `--write`
   service account can move a secret into the vault or rename a field (`op item create`, `op item edit`).
+  `oprun get VAR` prints one resolved value for shell scripts. `oprun --no-env` resolves only
+  references already in the process environment — the shape an MCP server launch needs, where
+  `.mcp.json` sets `"command": "…/oprun"`, `"args": ["--vault", "<vault>", "--no-env", "--no-masking", "--", "npx", …]`
+  and the server's `env` block carries `op://` values (masking must be off for stdio protocols).
   `.env` mixes plain values with `op://vault/item/field` references; only the references are
   resolved, and `op run` masks them in output. `oprun check` shows what the token can see;
   `oprun read op://…` prints one value (avoid in agent sessions — it lands in the transcript).
