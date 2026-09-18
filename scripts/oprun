@@ -1,5 +1,5 @@
 #!/bin/bash
-# oprun — run a command with this project's client secrets resolved from 1Password.
+# oprun — run a command with this project's secrets resolved from 1Password.
 #
 #   oprun -- <command> [args...]            resolve the .env chain, run the command
 #   oprun get VAR                           print one variable from the .env chain, resolved if it is an op:// reference
@@ -8,33 +8,45 @@
 #   oprun --no-env -- <cmd>                 resolve only op:// values already in the environment, no .env files
 #                                           (what an MCP server launch needs: its env block carries the references)
 #   oprun read op://<vault>/<item>/<field>  print one secret (avoid in agent sessions: it lands in the transcript)
-#   oprun check                             confirm the token works and show which vault it sees
-#   oprun op <op args...>                   any op command with the vault token (item create/edit/get/list)
+#   oprun check                             confirm auth works and show which vault it sees
+#   oprun op <op args...>                   any op command with the same auth (item create/edit/get/list)
 #
 # The .env chain: every .env from the repo root down to the working directory, nearest last, so a
 # subproject's .env overrides the root's the way `source ../../.env; source ../.env` used to.
 #
-# Why this exists: every client has its own 1Password vault, and a service account's vault list
-# cannot be changed after creation. So there is one read-only service account per client vault,
-# its token lives in the macOS Keychain as "op-sa-<vault>", and the repo says which vault it
-# belongs to (secrets.vault in .claude/kit.json). Nothing is exported globally — a token in
-# ~/.zshenv silently overrides Touch ID for every op call, which is how the 2026-09-18 outage
-# happened. See ~/.claude-kit README, "Secrets".
+# Two ways to authenticate, chosen automatically:
+#   1. A service-account token in the macOS Keychain as "op-sa-<vault>" (created by
+#      op-sa-bootstrap). No prompts. This is what an unattended pipeline or an AI agent uses.
+#   2. The 1Password desktop app (Touch ID), when there is no such Keychain item or when
+#      OPRUN_AUTH=desktop is set. One prompt per terminal session. This is what a collaborator
+#      with access to the vault uses: install `op`, sign the app into the account that holds the
+#      vault, turn on Settings > Developer > "Integrate with 1Password CLI", done.
 #
-# Two traps this script is shaped around:
+# The repo says which vault (and account) it belongs to in .claude/kit.json:
+#   "secrets": { "vault": "<vault name>", "account": "my.1password.com" }
+#
+# Why this exists: every client has its own vault, a service account's vault list cannot be
+# changed after creation, and a token exported from ~/.zshenv silently overrides Touch ID for
+# every op call (the 2026-09-18 outage). So nothing is global: the token reaches one child process.
+#
+# Traps this script is shaped around:
 #   - On macOS 26 the service-account path can hang forever on a TCC dialog (op-js #216), and
-#     macOS has no `timeout`. The preflight runs under a perl alarm so a hang fails in 20 s
-#     instead of never; the real command then runs unbounded, because pipelines take hours.
+#     macOS has no `timeout`. Preflight runs under a perl alarm; the real command runs unbounded.
+#   - `op whoami` is honest on the service-account path and says "not signed in" on the desktop
+#     path while real calls succeed, so the desktop preflight is `op vault get`, not whoami.
 #   - `op run` masks resolved values in output (good for transcripts) but corrupts protocols that
 #     carry the value, such as MCP stdio. Pass --no-masking for those.
 
 set -euo pipefail
 
-usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 die() { echo "oprun: $*" >&2; exit 1; }
 
 PREFLIGHT_SECS=20
+DESKTOP_PREFLIGHT_SECS=90   # a Touch ID prompt has to be answered by a human
 vault="${OPRUN_VAULT:-}"
+account="${OPRUN_ACCOUNT:-}"
+auth="${OPRUN_AUTH:-auto}"   # auto | keychain | desktop
 env_files=()
 passthrough=()
 no_env="no"
@@ -45,6 +57,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --) shift; break ;;
     --vault) vault="$2"; shift 2 ;;
+    --account) account="$2"; shift 2 ;;
     --env-file) env_files+=("$2"); shift 2 ;;
     --no-masking) passthrough+=("--no-masking"); shift ;;
     --no-env) no_env="yes"; shift ;;
@@ -60,15 +73,22 @@ done
 [ "$mode" = "read" ] && [ $# -ne 1 ] && die "read takes exactly one op:// reference"
 [ "$mode" = "op" ] && [ $# -eq 0 ] && die "op mode needs a command, e.g. oprun op item list --vault <vault>"
 [ "$mode" = "get" ] && [ $# -ne 1 ] && die "get takes exactly one variable name"
+command -v op >/dev/null || die "1Password CLI (op) is not installed: brew install --cask 1password-cli"
 
-# --- find the project root and its vault ------------------------------------------------------
+# --- find the project root and its vault / account ---------------------------------------------
 root="$PWD"
 while [ "$root" != "/" ] && [ ! -f "$root/.claude/kit.json" ]; do root="$(dirname "$root")"; done
+kit_get() {  # kit_get <key>: .secrets.<key> from kit.json; jq if present, else a plain-text fallback
+  local f="$root/.claude/kit.json"; [ -f "$f" ] || return 0
+  if command -v jq >/dev/null; then jq -r ".secrets.$1 // empty" "$f"
+  else sed -n '/"secrets"/,/}/p' "$f" | grep -o "\"$1\" *: *\"[^\"]*\"" | head -1 | sed -E 's/.*: *"([^"]*)"/\1/'; fi
+}
 if [ -z "$vault" ]; then
   [ -f "$root/.claude/kit.json" ] || die "no .claude/kit.json above $PWD and no --vault given"
-  vault="$(jq -r '.secrets.vault // empty' "$root/.claude/kit.json")"
+  vault="$(kit_get vault)"
   [ -n "$vault" ] || die "$root/.claude/kit.json has no secrets.vault — add {\"secrets\": {\"vault\": \"<name>\"}}"
 fi
+[ -n "$account" ] || account="$(kit_get account)"
 
 # --- the .env chain: root/.env, then each directory down to $PWD --------------------------------
 env_chain() {
@@ -82,35 +102,50 @@ env_chain() {
   done
 }
 
-# --- token from the Keychain --------------------------------------------------------------------
-token="$(security find-generic-password -a "$USER" -s "op-sa-$vault" -w 2>/dev/null || true)"
-[ -n "$token" ] || die "no Keychain item op-sa-$vault — run: ~/.claude-kit/scripts/op-sa-bootstrap $vault"
+# --- choose the auth path ------------------------------------------------------------------------
+token=""
+if [ "$auth" != "desktop" ] && command -v security >/dev/null; then
+  token="$(security find-generic-password -a "$USER" -s "op-sa-$vault" -w 2>/dev/null || true)"
+fi
+[ "$auth" = "keychain" ] && [ -z "$token" ] && die "no Keychain item op-sa-$vault — run: op-sa-bootstrap $vault"
 
-# The token must reach op and nothing else. Never export it into the calling shell. (one env assignment on one exec)
-bounded() { OP_SERVICE_ACCOUNT_TOKEN="$token" perl -e "alarm $PREFLIGHT_SECS; exec @ARGV" op "$@"; }
-
-# --- preflight: does the service-account path answer at all? -------------------------------------
-# `op whoami` is honest on the service-account path (it lies only on the desktop-app path).
-if ! who="$(bounded whoami --format json 2>&1)"; then
-  case "$who" in
-    *"Service Account Deleted"*|*"401"*|*"403"*) die "the token for $vault is dead or revoked — re-run op-sa-bootstrap $vault. ($who)" ;;
-    *) die "op did not answer within ${PREFLIGHT_SECS}s (see op-js #216 for the macOS 26 hang). Output: $who" ;;
-  esac
+acct=(); [ -n "$account" ] && acct=(--account "$account")
+if [ -n "$token" ]; then
+  # Service account: the token reaches op and nothing else. Never export it into the calling shell.
+  opx() { env OP_SERVICE_ACCOUNT_TOKEN="$token" op "$@"; }
+  bounded() { env OP_SERVICE_ACCOUNT_TOKEN="$token" perl -e "alarm $PREFLIGHT_SECS; exec @ARGV" op "$@"; }
+  if ! who="$(bounded whoami --format json 2>&1)"; then
+    case "$who" in
+      *"Service Account Deleted"*|*"401"*|*"403"*) die "the token for $vault is dead or revoked — re-run op-sa-bootstrap $vault. ($who)" ;;
+      *) die "op did not answer within ${PREFLIGHT_SECS}s (see op-js #216 for the macOS 26 hang). Output: $who" ;;
+    esac
+  fi
+  authdesc="service account (Keychain op-sa-$vault)"
+else
+  # Desktop app: a stale token in the environment would silently win, so strip it. --account
+  # picks the right account when the app holds more than one.
+  opx() { env -u OP_SERVICE_ACCOUNT_TOKEN op ${acct[@]+"${acct[@]}"} "$@"; }
+  bounded() { env -u OP_SERVICE_ACCOUNT_TOKEN perl -e "alarm $DESKTOP_PREFLIGHT_SECS; exec @ARGV" op ${acct[@]+"${acct[@]}"} "$@"; }
+  if ! vj="$(bounded vault get "$vault" --format json 2>&1)"; then
+    die "cannot reach vault '$vault' through the 1Password app (no Keychain token, so Touch ID is the path). Is the app signed in${account:+ to $account}, with Settings > Developer > 'Integrate with 1Password CLI' on? ($vj)"
+  fi
+  authdesc="desktop app (Touch ID)${account:+, account $account}"
 fi
 
 case "$mode" in
   check)
     echo "vault:   $vault"
-    echo "account: $(echo "$who" | jq -r '.url // .account_uuid // "?"')"
-    echo "service account: $(echo "$who" | jq -r '.service_account_type // "?"') $(echo "$who" | jq -r '.user_uuid // ""')"
+    echo "auth:    $authdesc"
     echo "vaults visible:"
-    bounded vault list --format json | jq -r '.[] | "  - \(.name) (\(.id))"'
+    if command -v jq >/dev/null; then bounded vault list --format json | jq -r '.[] | "  - \(.name) (\(.id))"'; else bounded vault list; fi
     ;;
   read)
     bounded read "$1"
     ;;
+  op)
+    opx "$@"
+    ;;
   get)
-    # Nearest file wins. Values are read raw (quotes stripped) and resolved only if they are references.
     val=""; found="no"
     for f in $(env_chain); do
       line="$(grep -E "^$1=" "$f" | tail -1 || true)"
@@ -120,15 +155,14 @@ case "$mode" in
     val="${val%\"}"; val="${val#\"}"
     case "$val" in op://*) bounded read "$val" ;; *) printf '%s\n' "$val" ;; esac
     ;;
-  op)
-    # Unbounded on purpose: the preflight proved the path answers, and a document upload can be slow.
-    exec env OP_SERVICE_ACCOUNT_TOKEN="$token" op "$@"
-    ;;
   run)
     if [ "$no_env" = "no" ] && [ ${#env_files[@]} -eq 0 ]; then for f in $(env_chain); do env_files+=("$f"); done; fi
-    # bash 3.2 (macOS) treats an empty array as unbound under set -u; the ${a[@]+"${a[@]}"} form is safe.
     args=()
     for f in ${env_files[@]+"${env_files[@]}"}; do args+=("--env-file=$f"); done
-    exec env OP_SERVICE_ACCOUNT_TOKEN="$token" op run ${args[@]+"${args[@]}"} ${passthrough[@]+"${passthrough[@]}"} -- "$@"
+    if [ -n "$token" ]; then
+      exec env OP_SERVICE_ACCOUNT_TOKEN="$token" op run ${args[@]+"${args[@]}"} ${passthrough[@]+"${passthrough[@]}"} -- "$@"
+    else
+      exec env -u OP_SERVICE_ACCOUNT_TOKEN op ${acct[@]+"${acct[@]}"} run ${args[@]+"${args[@]}"} ${passthrough[@]+"${passthrough[@]}"} -- "$@"
+    fi
     ;;
 esac
