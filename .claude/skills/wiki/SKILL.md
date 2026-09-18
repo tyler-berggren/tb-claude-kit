@@ -146,7 +146,7 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
    CLIENT_NAME=$(jq -r '.wiki.clientName // empty' .claude/kit.json 2>/dev/null)
    ```
    If not set, derive from the repo directory name — convert kebab-case to title case
-   (e.g. `land-advisors` → `Land Advisors`).
+   (e.g. `acme-corp` → `Acme Corp`).
 
 6. Run the build:
    ```bash

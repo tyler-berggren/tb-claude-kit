@@ -28,6 +28,12 @@
     "author": null
   },
 
+  "_note_secrets": "Which 1Password vault holds this project's secrets, for ~/.claude-kit/scripts/oprun. One read-only service account per vault (created by op-sa-bootstrap <vault>), token in the macOS Keychain as op-sa-<vault>, never exported globally. account is only used by op-sa-bootstrap to pick the 1Password account the vault lives in.",
+  "secrets": {
+    "vault": null,
+    "account": null
+  },
+
   "_note_plan": "Directories /plan may write to. May contain * wildcards. Subdirectories of a root are found automatically and do not need listing. Numbering is per-directory; plan_id becomes <scope>-NNN for scoped plans.",
   "plan": {
     "roots": ["cowork/plans"]

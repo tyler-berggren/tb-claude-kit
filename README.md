@@ -345,6 +345,43 @@ comfortably in a string is usually a sign it belongs in its own skill — or ups
 
 ---
 
+### `secrets` — one 1Password service account per client vault
+
+Every client gets its own 1Password vault, and a 1Password service account's vault list **cannot be
+changed after it is created**. So instead of one machine-wide token that has to be rebuilt every time
+a client is added, the kit keeps **one read-only service account per vault** and lets the repo say
+which vault it belongs to:
+
+```json
+"secrets": { "vault": "acme-corp", "account": "my.1password.com" }
+```
+
+Two scripts in `scripts/`:
+
+- **`op-sa-bootstrap <vault> [--write]`** — once per client, at the keyboard (Touch ID). Creates a
+  service account named `<vault>-ro-<date>` with `read_items` on that one vault (`--write` adds
+  `write_items` and names it `-rw-`), verifies it sees exactly
+  that vault, and stores the token in the macOS Keychain as `op-sa-<vault>`. `--rotate` replaces it;
+  revoking the old one is a web-console action.
+- **`oprun -- <command>`** — runs a command with the repo's `.env` resolved through that token.
+  `oprun op <args>` runs any `op` command with the same token, so an agent with a `--write`
+  service account can move a secret into the vault or rename a field (`op item create`, `op item edit`).
+  `.env` mixes plain values with `op://vault/item/field` references; only the references are
+  resolved, and `op run` masks them in output. `oprun check` shows what the token can see;
+  `oprun read op://…` prints one value (avoid in agent sessions — it lands in the transcript).
+
+Rules the scripts enforce, learned the hard way:
+
+- **Never export `OP_SERVICE_ACCOUNT_TOKEN` from a shell rc file.** It silently overrides the
+  desktop-app (Touch ID) path for every `op` call, so a dead token breaks `op` for the human too.
+  `oprun` passes the token to one child process and nowhere else.
+- **Every `op` call that could hang runs under a `perl -e 'alarm N'`** — macOS has no `timeout`,
+  and on macOS 26 the service-account path can block forever on a TCC dialog (op-js #216).
+- **`op whoami` is a readiness check only on the service-account path.** On the desktop-app path
+  it says "not signed in" while real calls succeed.
+- Family and Individual plans allow about 1,000 requests a day across all service accounts;
+  reference items by ID (`op://vault/<item-id>/field`) to spend one request per read instead of three.
+
 ## What's in a project after install
 
 ```

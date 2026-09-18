@@ -1,0 +1,74 @@
+#!/bin/bash
+# op-sa-bootstrap — create a read-only 1Password service account for ONE client vault and store
+# its token in the macOS Keychain, where `oprun` finds it.
+#
+#   op-sa-bootstrap <vault> [--write] [--account my.1password.com] [--expires-in 90d] [--rotate]
+#
+# Runs on the desktop-app path (Touch ID), so it needs you at the keyboard once per client.
+# The service account is named "<vault>-ro-<date>", or "<vault>-rw-<date>" with --write, which adds
+# write_items so an agent can create and edit items (move a secret into the vault, rename a field).
+# Either way it can reach that one vault and nothing else.
+# Vault access on a service account is immutable, which is the whole reason there is one per
+# vault: adding a client is one more run of this script, never a rebuild of a shared token.
+#
+# Rotation: --rotate creates a fresh service account and replaces the Keychain item. Revoking the
+# old one is a web-console action (Developer > Service accounts) — the CLI cannot revoke.
+# Expired tokens may still count toward the 100-per-account cap until revoked.
+
+set -euo pipefail
+die() { echo "op-sa-bootstrap: $*" >&2; exit 1; }
+
+vault=""; account=""; expires="90d"; rotate="no"; perms="read_items"; kind="ro"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --account) account="$2"; shift 2 ;;
+    --expires-in) expires="$2"; shift 2 ;;
+    --rotate) rotate="yes"; shift ;;
+    --write) perms="read_items,write_items"; kind="rw"; shift ;;
+    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+    -*) die "unknown flag $1" ;;
+    *) [ -z "$vault" ] && vault="$1" || die "one vault only"; shift ;;
+  esac
+done
+[ -n "$vault" ] || die "usage: op-sa-bootstrap <vault> [--write] [--account <url>] [--expires-in 90d] [--rotate]"
+
+# A repo may name its account next to its vault; use it when --account is absent.
+if [ -z "$account" ]; then
+  root="$PWD"; while [ "$root" != "/" ] && [ ! -f "$root/.claude/kit.json" ]; do root="$(dirname "$root")"; done
+  [ -f "$root/.claude/kit.json" ] && account="$(jq -r '.secrets.account // empty' "$root/.claude/kit.json")"
+fi
+acct_flag=(); [ -n "$account" ] && acct_flag=(--account "$account")
+
+item="op-sa-$vault"
+if security find-generic-password -a "$USER" -s "$item" >/dev/null 2>&1 && [ "$rotate" = "no" ]; then
+  die "Keychain already has $item. Use --rotate to replace it (then revoke the old service account in the web console)."
+fi
+
+# Desktop-app path: the token variable must be unset or it silently takes over. Bounded, because
+# a dismissed Touch ID prompt otherwise leaves this hanging.
+desk() { env -u OP_SERVICE_ACCOUNT_TOKEN perl -e 'alarm 120; exec @ARGV' op "${acct_flag[@]}" "$@"; }
+
+vault_json="$(desk vault get "$vault" --format json 2>&1)" || die "cannot see vault '$vault' on the desktop-app path: $vault_json"
+vault_id="$(echo "$vault_json" | jq -r .id)"
+
+name="${vault}-${kind}-$(date +%Y%m%d)"
+echo "Creating service account '$name' with $perms on vault '$vault' ($vault_id), expiring in $expires ..."
+token="$(desk service-account create "$name" --vault "${vault}:${perms}" --expires-in "$expires" --raw 2>&1)" \
+  || die "service-account create failed: $token"
+case "$token" in ops_*) ;; *) die "unexpected output from service-account create: $token" ;; esac
+
+# Verify the token before trusting it: it must see exactly this vault.
+seen="$(OP_SERVICE_ACCOUNT_TOKEN="$token" perl -e 'alarm 30; exec @ARGV' op vault list --format json 2>&1)" \
+  || die "new token failed its first call: $seen"
+count="$(echo "$seen" | jq 'length')"
+[ "$count" = "1" ] || die "expected the token to see 1 vault, it sees $count: $(echo "$seen" | jq -c '[.[].name]')"
+
+security add-generic-password -U -a "$USER" -s "$item" -w "$token" \
+  -j "1Password service account $name: $perms on vault $vault, created $(date +%F), expires in $expires" \
+  || die "could not write Keychain item $item"
+
+echo "Stored token in Keychain as '$item'."
+echo "Service account: $name ($perms, vault $vault, expires in $expires)"
+echo "Try it:  cd <repo with secrets.vault=$vault> && ~/.claude-kit/scripts/oprun check"
+[ "$rotate" = "yes" ] && echo "Now revoke the previous '${vault}-ro-*' or '${vault}-rw-*' service account at https://start.1password.com (Developer > Service accounts)."
+exit 0

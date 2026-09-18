@@ -43,9 +43,9 @@ Optional argument: `$ARGUMENTS`
    ```json
    {
      "subtrees": {
-       "landtrack": {
-         "prefix": "landtrack",
-         "remote": "landtrack",
+       "app": {
+         "prefix": "app",
+         "remote": "app",
          "branch": "main"
        }
      }
