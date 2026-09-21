@@ -17,6 +17,7 @@
 .claude/skills/web
 .claude/skills/wiki
 .claude/hooks/session-start.sh
+.claude/hooks/background-pbar.sh
 .vscode/extensions.json
 .vscode/settings.json
 cowork/brain/schema.sql

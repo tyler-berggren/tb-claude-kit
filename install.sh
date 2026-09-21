@@ -217,6 +217,7 @@ for skill_dir in "$KIT_DIR/.claude/skills"/*/; do
 done
 KIT_PATHS+=(
   ".claude/hooks/session-start.sh"
+  ".claude/hooks/background-pbar.sh"
   ".vscode/extensions.json"
   ".vscode/settings.json"
   "cowork/brain/schema.sql"
@@ -532,6 +533,28 @@ json.dump(s,open(p,'w'),indent=2,ensure_ascii=False); open(p,'a').write('\n')
   fi
 }
 
+# Register a hook command in the project's settings.json. settings.json is
+# project-owned scaffolding (copied once, never updated), so a hook added to the
+# kit after a project was installed only reaches it through this.
+add_hook() {
+  local event="$1" matcher="$2" cmd="$3" settings="$TARGET_DIR/.claude/settings.json"
+  if [ -f "$settings" ] && ! grep -qF "\"$cmd\"" "$settings" 2>/dev/null; then
+    [ "$DRY_RUN" = "yes" ] && { echo "  [hook] $event $cmd (would add)"; return; }
+    python3 -c "
+import json,sys
+p,event,matcher,cmd=sys.argv[1:5]
+s=json.load(open(p))
+groups=s.setdefault('hooks',{}).setdefault(event,[])
+g=next((g for g in groups if g.get('matcher')==matcher), None)
+if g is None:
+    g={'matcher':matcher,'hooks':[]}; groups.append(g)
+g.setdefault('hooks',[]).append({'type':'command','command':cmd})
+json.dump(s,open(p,'w'),indent=2,ensure_ascii=False); open(p,'a').write('\n')
+" "$settings" "$event" "$matcher" "$cmd"
+    echo "  [hook] $event $cmd"
+  fi
+}
+
 add_mcp_server() {
   local name="$1" frag="$2" mcp="$TARGET_DIR/.mcp.json"
   if [ -f "$mcp" ] && ! grep -q "\"$name\"" "$mcp" 2>/dev/null; then
@@ -688,7 +711,10 @@ init_db "cowork/brain/BRAIN.db"            "cowork/brain/schema.sql"        ""  
 init_db "cowork/vibe-audit/VIBE-AUDIT.db"  "cowork/vibe-audit/schema.sql"   "cowork/vibe-audit/seed.sql"    "VIBE-AUDIT.db"
 init_db "cowork/architecture/CTO.db"       "cowork/architecture/schema.sql" "cowork/architecture/seed.sql"  "CTO.db"
 
-[ "$DRY_RUN" = "no" ] && chmod +x "$TARGET_DIR/.claude/hooks/session-start.sh" 2>/dev/null || true
+[ "$DRY_RUN" = "no" ] && chmod +x "$TARGET_DIR/.claude/hooks/session-start.sh" "$TARGET_DIR/.claude/hooks/background-pbar.sh" 2>/dev/null || true
+
+# Nudge toward /pbar after every background Bash call (see the hook's header).
+add_hook "PostToolUse" "Bash" ".claude/hooks/background-pbar.sh"
 
 # ============================================================
 # OPTIONAL INTEGRATIONS

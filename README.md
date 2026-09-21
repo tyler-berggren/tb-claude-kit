@@ -94,7 +94,7 @@ Seventeen skills, grouped by what they do for you.
 | `/commit` `/push` | Stage, write a real commit message, push. Regenerates SQLite NDJSON sidecars if configured. |
 | `/kill` | Kill dev servers, watchers, and browser instances without touching your Claude session. |
 | `/parse` | Local documents — contracts, decks, spreadsheets, scanned PDFs — converted to markdown Claude can actually read. Point it at a file, a glob, or a directory; the `.md` lands beside the original. |
-| `/pbar` | A live progress display for a job that will run for a while. Hands you one path to paste into any terminal: a bar per stage, an ETA from measured throughput, and — the part a bar alone can never tell you — whether the process is still alive. Read-only, so stopping it cannot disturb the job. |
+| `/pbar` | A live progress display for a job that will run for a while. Hands you one path to paste into any terminal: a bar per stage, an ETA from measured throughput, and — the part a bar alone can never tell you — whether the process is still alive. Read-only, so stopping it cannot disturb the job. Claude runs it on its own whenever it starts a job that may take 5+ minutes, and re-prints the command whenever you might need to restart the display. |
 | `/video-editor` | Transcript-driven video editing — transcribe, script, cut, caption. |
 
 ---
@@ -401,6 +401,7 @@ Rules the scripts enforce, learned the hard way:
   kit.json            # mode + configuration (yours)
   skills/             # kit skills, plus any you add
   hooks/              # session-start: loads brain state, heals schema drift
+                      # background-pbar: nudges /pbar after background Bash calls
   settings.json       # model, permissions, hooks (yours)
 cowork/
   brain/

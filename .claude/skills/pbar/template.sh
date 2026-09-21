@@ -35,6 +35,12 @@ FILL='##############################'   # 30
 BLANK='                              '   # 30
 bar() { local w=30 f=$(( $1 * 30 / 100 )); printf '[%s%s]' "${FILL:0:$f}" "${BLANK:0:$((w-f))}"; }
 
+# Absolute path to this watcher, shown as the restart command. The user may
+# close this terminal and come back hours later — the line to reopen it should
+# be on screen, not buried in the Claude conversation.
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+trap 'printf "\n  restart this display:\n  %s\n" "$SELF"; exit 0' INT TERM
+
 start=$(date +%s); first=-1
 while true; do
   printf '\033[H\033[2J'                # `clear` needs $TERM; this does not
@@ -70,6 +76,7 @@ while true; do
   else echo "  producer: NOT RUNNING"; fi
 
   [ -n "$LOG" ] && tail -1 "$LOG" 2>/dev/null | sed 's/^/  last: /'
+  echo; echo "  restart: $SELF"
 
   [ $done_all -eq 1 ] && { echo; echo "  COMPLETE"; break; }
   sleep "$INTERVAL"

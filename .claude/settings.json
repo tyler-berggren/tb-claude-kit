@@ -27,6 +27,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/background-pbar.sh"
+          }
+        ]
+      }
     ]
   },
   "permissions": {

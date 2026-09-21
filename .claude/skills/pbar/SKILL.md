@@ -1,6 +1,6 @@
 ---
 name: pbar
-description: Build a live terminal progress display for a long-running background job, and hand back one paste-ready command to run it from anywhere. Use when a job will take more than a few minutes and the user wants to watch it themselves instead of asking for status.
+description: REQUIRED, unprompted, right after you start any background job (Bash run_in_background, nohup, a long script, a batch or pipeline) you expect to run 5+ minutes — do not wait to be asked. Builds a live terminal progress display and hands back its paste-ready command in a copyable code block, re-printed whenever the user might need to restart it. Also use when the user asks for status on a running job.
 argument-hint: "[what to watch — a log file, a job name, or nothing to infer from context]"
 ---
 
@@ -13,6 +13,20 @@ self-contained watcher script and gives them one line to paste.
 **The deliverable is the pasted line, not the script.** Finish by printing a single command the
 user can copy into any terminal, from any directory. If they have to `cd` first, or edit a path,
 or remember a flag, this skill has failed.
+
+## When this is mandatory
+
+**Every time you start a job you expect to run 5 minutes or more, run this skill immediately after
+launching it — in the same turn, without being asked.** It does not matter whether the job is a
+`run_in_background` Bash call, a `nohup … &`, a script that loops over an API, or a batch you
+kicked off some other way. The user should never have to ask for a progress bar, and never have to
+ask "status?".
+
+- **Unsure whether it takes 5 minutes? Build it anyway.** An unneeded bar costs one tool call; a
+  missing one costs the user a string of status questions.
+- **Skip it only when you are confident** the job finishes in under 5 minutes.
+- A PostToolUse hook reminds you after each `run_in_background` Bash call. The reminder is only a
+  nudge — the rule applies to every long job, however it was started.
 
 ## What makes a progress bar possible
 
@@ -120,15 +134,44 @@ never `for x in $VAR`.
 chmod +x .claude/pbar/watch-<job-name>.sh
 ```
 
-Then print exactly one paste-ready command as the last thing in your reply — the **absolute**
-path, so it works from any directory:
+Then print the command **in its own fenced code block, as the last thing in your reply** — the
+**absolute** path, so it works from any directory. Always this exact shape:
+
+````
+Watch it live (paste into any terminal):
 
 ```
 /abs/path/to/project/.claude/pbar/watch-<job-name>.sh
 ```
+````
+
+The code block is the point: most terminals and editors give it a one-click copy, and it cannot be
+mistaken for prose. **Never** put the command inline in a sentence, inside backticks mid-paragraph,
+or in a table. The block holds that one line only — no `$ ` prompt, no `cd`, no comment, no second
+command.
 
 Say in one sentence what it shows and that stopping it cannot affect the job. Do not print the
 script's source unless asked — they wanted a display, not a code review.
+
+### 4b. Re-print the block whenever the user might need to restart it
+
+The watcher runs in a terminal the user controls. Terminals get closed, tabs get killed, laptops
+sleep, and the watcher exits on its own at COMPLETE. Scrolling back through a long session to find
+the line is exactly the friction this skill exists to remove. **Re-print the same code block, as
+the last thing in your reply, whenever the job is still relevant and any of these is true:**
+
+- You give **any status update** on the job — a Monitor event, a background-task notification,
+  an answer to "how's it going?".
+- The job was **restarted, resumed, or relaunched** (after a crash, a fix, a rate limit). If its
+  outputs, log path or totals changed, rebuild the watcher first, then print the block.
+- The job **crashed or stalled** — the user will want to watch the retry.
+- The user says the display **stopped, froze, looks wrong, or they closed it**.
+- The session **resumed or was compacted** while the job is still running.
+- You are **wrapping up a turn** while the job is still running.
+
+When in doubt, print it. A repeated three-line block is cheap; hunting for a lost command is not.
+The watcher itself also shows its own restart command at the bottom of every redraw and again on
+Ctrl-C, so the line is on screen even when the conversation is not.
 
 ### 5. Arm a notification too
 
@@ -167,6 +210,8 @@ declare -a TOTAL=(1000 2000)
 FILL='##############################'
 BLANK='                              '
 bar() { local w=30 f=$(( $1 * 30 / 100 )); printf '[%s%s]' "${FILL:0:$f}" "${BLANK:0:$((w-f))}"; }
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"   # shown as the restart command
+trap 'printf "\n  restart this display:\n  %s\n" "$SELF"; exit 0' INT TERM
 
 start=$(date +%s); first=-1
 while true; do
@@ -191,6 +236,7 @@ while true; do
   # Liveness is NOT progress — a stalled bar looks exactly like a finishing one.
   if pgrep -f "$PATTERN" >/dev/null; then echo "  producer: running"; else echo "  producer: NOT RUNNING"; fi
   tail -1 "$LOG" 2>/dev/null | sed 's/^/  last: /'
+  echo; echo "  restart: $SELF"
   [ $done_all -eq 1 ] && { echo; echo "  COMPLETE"; break; }
   sleep 5
 done
@@ -202,7 +248,11 @@ done
 - **Read-only, always.** The watcher may never write, kill, or lock anything the job touches.
 - **Never fabricate a total.** No honest denominator means no bar — show count, rate and elapsed.
 - **Liveness on every redraw.** Without it the display cannot distinguish stalled from finishing.
-- **One line at the end.** Absolute path, no `cd`, no arguments, no editing.
+- **Mandatory for 5+ minute jobs.** Build it right after launch, unprompted.
+- **One line at the end, in its own fenced code block.** Absolute path, no `cd`, no arguments, no
+  editing, never inline in prose.
+- **Re-print the block** on every status update, restart, crash, resume, or turn that ends with the
+  job still running.
 
 ---
 

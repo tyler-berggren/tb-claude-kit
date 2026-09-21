@@ -117,10 +117,21 @@ PY
 
 kit_sync
 
+# --- Standing rule: long background jobs get a /pbar display, unprompted ---
+# Why: /pbar used to fire only when the user asked for a progress bar, which they
+# never do at launch time — so they ended up asking "status?" instead. Emitted in
+# every project, brain DB or not.
+PBAR_RULE="### Long-running jobs
+Whenever you start a background job you expect to run 5+ minutes (Bash run_in_background, nohup, a long script or batch), invoke the /pbar skill immediately after launching it, without being asked. Hand back its command as a single absolute path in its own fenced code block, as the last thing in your reply. Re-print that same block whenever the user might need to restart the display: every status update, restart, crash, resume, or turn that ends with the job still running."
+
 if [ ! -f "$DB" ]; then
-  # Still surface the notice in a project with no brain DB.
-  [ -n "$KIT_NOTICE" ] && printf '{"hookSpecificOutput":{"additionalContext":%s}}\n' \
-    "$(printf '%s' "$KIT_NOTICE" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+  # Still surface the notice and standing rules in a project with no brain DB.
+  NODB_CTX="$PBAR_RULE"
+  [ -n "$KIT_NOTICE" ] && NODB_CTX="$KIT_NOTICE
+
+$NODB_CTX"
+  printf '{"hookSpecificOutput":{"additionalContext":%s}}\n' \
+    "$(printf '%s' "$NODB_CTX" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
   exit 0
 fi
 
@@ -298,6 +309,8 @@ CTX="$CTX
 
 ### Mantra Review
 Review the last session's work above and the current mantra. If the last session surfaced patterns, non-obvious knowledge, shifted assumptions, or tricky areas that a fresh session would benefit from — update the mantra silently (DB + MANTRA.md + CLAUDE.md block) before starting your work. Skip if the last session was routine or the mantra already captures it. Do not ask the user — just update or skip.
+
+$PBAR_RULE
 
 ### Compound Lesson
 Before wrapping up a substantive session, consider: did a reusable lesson or pattern emerge? If yes, write it as a brain insight tagged 'lesson' — one sentence stating the rule, then Why and How to apply. If nothing novel was learned, skip this entirely."
