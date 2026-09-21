@@ -6,6 +6,7 @@
 
 This project uses Claude Code skills for structured workflows:
 
+- `/1password` — Set up, check, or migrate 1Password secret management — bootstrap service accounts, convert plaintext .env to op:// references.
 - `/brain` — Project knowledge management (decisions, tasks, questions, insights). Single source of truth in `cowork/brain/BRAIN.db`.
 - `/brainstorm` — Conversational idea development. All outputs logged to brain DB with parent linking.
 - `/bridge` — Start artifact bridge server (port 4444) for HTML artifacts to read/write project files.

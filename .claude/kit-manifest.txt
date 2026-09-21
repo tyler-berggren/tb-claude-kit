@@ -1,3 +1,4 @@
+.claude/skills/1password
 .claude/skills/brain
 .claude/skills/brainstorm
 .claude/skills/bridge

@@ -132,6 +132,28 @@ curl -s http://127.0.0.1:${LOOK_PORT}/status
 
 Returns: URL, title, viewport width/height, device pixel ratio, scroll position, document height, profile name, port. Use to confirm what viewport the user has set.
 
+### viewport — Pin a width, to check a responsive layout
+
+```bash
+# A phone-sized viewport
+curl -s -X POST http://127.0.0.1:${LOOK_PORT} \
+  -d '{"command":"viewport","width":390,"height":844,"isMobile":true}'
+
+# Hand it back to the real window — ALWAYS do this when finished
+curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"viewport","width":null}'
+```
+
+The browser runs with `defaultViewport: null`, so the page normally follows the real window
+and there is no way to hold a fixed width without this. `window.resizeTo` does not do it —
+it moves the outer frame while `innerWidth` stays put, so a layout check against it is
+measuring nothing.
+
+`height` defaults to 844 and `deviceScaleFactor` to 2; `isMobile` also turns on touch. A
+width under 200 is refused.
+
+**Ask before using it, and always reset afterwards.** It changes what the user sees on their
+own screen — see the viewport rule below.
+
 ## Procedure
 
 When the user says "look at X":
@@ -172,7 +194,11 @@ curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"dom","selector":".
 - **DOM-first** — never screenshot unless the user explicitly asks. Inspect is always the default.
 - **Re-inspect after edits** — always verify your fix by re-inspecting the element after the dev server reloads
 - **Report concisely** — don't dump raw JSON at the user. Summarize the relevant values and what they mean for the issue
-- **Viewport is the user's** — never resize or navigate the browser. The user controls Chrome directly.
+- **Viewport is the user's** — do not navigate the browser, and do not resize it on your own
+  initiative. The user controls Chrome directly. The one exception is checking a responsive
+  layout, which cannot be done any other way: ask first, use the `viewport` command, and hand
+  the width back with `{"width": null}` as soon as you have the answer. Never leave a session
+  pinned to a width the user did not choose.
 
 ---
 

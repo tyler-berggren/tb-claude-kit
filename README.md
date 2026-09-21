@@ -48,7 +48,13 @@ That's it. Open the project in Claude Code and the skills are available.
 
 ## The skills
 
-Sixteen skills, grouped by what they do for you.
+Seventeen skills, grouped by what they do for you.
+
+**Secrets — so credentials stay out of your repo and your transcripts**
+
+| | |
+|---|---|
+| `/1password` | Set up, check, or migrate 1Password integration. Bootstraps a per-vault service account, converts plaintext `.env` files to `op://` references, verifies resolution, and diagnoses failures. |
 
 **Memory — so context accumulates instead of resetting**
 

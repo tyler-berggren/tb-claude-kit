@@ -310,6 +310,32 @@ async function handleStatus() {
   };
 }
 
+/**
+ * Set (or clear) an explicit viewport, for checking a responsive layout at a
+ * width nobody's monitor is. `{ width: null }` hands the page back to the real
+ * window, which is how the browser normally runs here (`defaultViewport: null`).
+ */
+async function handleViewport(body) {
+  const p = await getActivePage();
+  if (body.width === null) {
+    await p.setViewport(null);
+    return { viewport: null, note: 'following the window again' };
+  }
+  const width = Number(body.width);
+  const height = Number(body.height ?? 844);
+  if (!Number.isFinite(width) || width < 200) {
+    return { error: 'viewport requires a width of at least 200, or width: null to reset' };
+  }
+  await p.setViewport({
+    width,
+    height,
+    deviceScaleFactor: Number(body.deviceScaleFactor ?? 2),
+    isMobile: !!body.isMobile,
+    hasTouch: !!body.isMobile,
+  });
+  return { viewport: p.viewport() };
+}
+
 async function handleCommand(body) {
   const { command, selector, expression, children } = body;
 
@@ -332,6 +358,9 @@ async function handleCommand(body) {
     case 'status':
       return handleStatus();
 
+    case 'viewport':
+      return handleViewport(body);
+
     case 'console': {
       const filter = body.filter || '';
       const limit = body.limit || 50;
@@ -342,7 +371,7 @@ async function handleCommand(body) {
     }
 
     default:
-      return { error: `Unknown command: ${command}. Available: inspect, dom, screenshot, eval, status` };
+      return { error: `Unknown command: ${command}. Available: inspect, dom, screenshot, eval, status, viewport, console` };
   }
 }
 
