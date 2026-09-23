@@ -67,7 +67,7 @@ Seventeen skills, grouped by what they do for you.
 
 | | |
 |---|---|
-| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **Handoff** (`/plan handoff`) gets a plan ready for another agent to take over: it ticks off what is done after checking the code, tidies the file, and writes what exists only in the current conversation (decisions and why, dead ends, gotchas, uncommitted state, open questions) into a section the next session reads first. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is cut into slices — one concern, one session, one small PR that merges the same day — split by layer so users never see half a change, with wide refactors done expand–contract. Inside each slice the owner looks at user-facing changes before tests are written around them, and the full checks run once, at ship time; the draft-or-ready question is asked every time. It reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and stays short enough to travel with each PR for reviewers who have never seen your notes. |
+| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **Handoff** (`/plan handoff`) gets a plan ready for another agent to take over: it ticks off what is done after checking the code, tidies the file, and writes what exists only in the current conversation (decisions and why, dead ends, gotchas, uncommitted state, open questions) into a section the next session reads first. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is cut into slices — one concern, one session, one small PR that merges the same day — split by layer so users never see half a change, with wide refactors done expand–contract. Inside each slice the owner looks at user-facing changes before tests are written around them, and the full checks run once, at ship time. Draft or ready follows the project's standing ship policy (asked every time when there is none). Because such work usually changes code and decisions other people made, every epic, issue and PR body is a **decision record**. It gives each decision's why, gains and costs, and the alternatives not taken. It credits the prior work found by a prior-art sweep (blame of the replaced lines, the PRs behind them, open PRs over the same files, decision records), and mentions each person it changes with a reason. It reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and stays short enough to travel with each PR for reviewers who have never seen your notes. |
 | `/research` | Parallel agents across a six-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Each writes its own report under an anti-fabrication contract with a mandatory "what I could not verify" section; the orchestrator only synthesizes. Reports accumulate as sourced, dated folders. |
 | `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves a report of every decision made in your absence. On a PR-mode plan it runs one **lane** per adopter side by side, ships every invisible slice through your ship command as soon as it is green (ready, when you have pre-approved that), parks user-facing slices for **one batch look** — a single table of URLs and what to test — and never merges into a team's default branch. |
 
@@ -153,12 +153,14 @@ fresh-eyes reconciliation pass, re-reading the plan against the current code to 
 between what was planned and what actually got built.
 
 **When the code lands in someone else's repo** — a client's, an employer's, an open-source
-project's — use `/plan pr <topic>`. The build order becomes as few PRs as the work honestly
-allows, because every PR costs a review cycle and a CI run, so each split names the boundary that
-justifies it. Every item is a step a cold coding agent can tick off, and the plan file itself
-ships inside each PR body with the goal, summary and design decisions at the top. A project's
-`kit.json` `rules.plan` names the team's ship command, branch conventions, priority tiers and CI
-path map so the kit stays generic.
+project's — use `/plan pr <topic>`. The build order becomes slices: one concern, one session,
+one small PR that merges the same day, split by layer so users never see half a change. The next
+slice's items are steps a cold coding agent can tick off, and the plan travels with each PR.
+Every body opens with the goal, the summary, and every decision with its trade-offs and the
+alternatives not taken. It credits the work it builds on and mentions the people whose code or
+decisions it changes, from a prior-art sweep run before the body is written. A project's
+`kit.json` `rules.plan` names the team's ship command and policy, branch conventions, priority
+tiers, CI path map and sweep agent, so the kit stays generic.
 
 **When the plan should complete itself,** hand it to `/swarm` instead of implementing phase by
 phase:
@@ -352,8 +354,10 @@ In order of preference — reach for the first one that fits:
 
 1. **A value** → `kit.json` (dev ports, commit author, plan directories)
 2. **A short rule** → `kit.json` `rules.<skill>`, applied whenever that skill runs
-3. **A procedure** → a project-owned skill with its own name, sitting alongside the kit's. Your
-   own skills in `.claude/skills/` are never touched by the installer.
+3. **A procedure** → a project-owned skill with its own name, sitting alongside the kit's, or a
+   project-owned subagent in `.claude/agents/` that a kit skill's rule points at (for example,
+   the prior-art sweep `/plan`'s PR mode runs before a body is written). The installer never
+   touches your own skills or agents.
 4. **`fork`** → last resort, when the kit's own behavior has to change
 
 The ordering matters: JSON keeps overrides deliberately small, and a rule that won't fit

@@ -373,8 +373,10 @@ The plan file is updated as you go, so a future session can pick up where you le
 The default flows assume one developer on one repo: phases, a checkout, commit when done. PR
 mode is for work that lands in a **team repository** through pull requests reviewed by other
 people, often on a codebase you do not own. The plan stays private (it lives in your own repo),
-but its build order is a sequence of clean PRs, and the plan file itself travels inside each PR
-body, so it has to read well to a reviewer who has never seen your notes.
+but its build order is a sequence of clean PRs, and the plan file travels with each PR, so it
+has to read well to a reviewer who has never seen your notes. Most of that work changes code
+and decisions other people made. So every body records its decisions, credits the prior work,
+and tells the people it changes (see P5).
 
 Usage: `pr <topic>` (generate), or `NNN pr` (convert an existing plan, then resume). A PR-mode plan
 carries `**Mode:** pr` in its header; Resume detects it and applies these rules automatically.
@@ -443,8 +445,9 @@ The rules:
 3. **Then the tests,** pinning what was approved. Data-layer logic — queries, predicates,
    permission rules — is the exception: prove it against a real engine as it is written. It does
    not depend on taste, and it is where the serious bugs hide.
-4. **Ship through the project's ship command:** rebase once, run the team's scoped checks once, the
-   team's review bot locally if it has one, then the draft-or-ready question.
+4. **Ship through the project's ship command:** rebase once, run the team's scoped checks once
+   with the prior-art sweep beside them (see P5), then the team's review bot locally if it has one.
+   Then ship ready or as a draft, as the project's ship policy says.
 5. **While CI runs, start the next slice.** When a CI group fails, push the fix as soon as it is
    ready: that run is already lost, and waiting for the rest of the verdict only gives the default
    branch time to move under the PR.
@@ -463,6 +466,14 @@ This phase is marked done in the plan with its findings summarised **in plain te
 Context; the evidence detail can live in a companion file for you, but the plan must stand
 without it.
 
+**Record who is behind each finding**: who built the component, wrote the decision record,
+opened the issue, or has an open pull request over the same files. Most team-repo work
+changes something someone else built or decided. P2 credits those people, and P5 tells them
+what changes. Run this sweep in a fresh subagent when one is available, so its reading stays
+out of the planning context. The project's `rules."plan"` may name a dedicated sweep agent or
+script. Blame the lines the work will replace, read the pull requests they came from, and
+search the host's issues and pull requests by concept, not only by file.
+
 ### Step P2 — Decide, with defaults
 
 Two tables in the plan, before Build Order:
@@ -470,9 +481,16 @@ Two tables in the plan, before Build Order:
 - **The new standard** (when the plan standardises something): each existing component the
   plan names as *the* one, where it lives, and **why that one** over the alternatives found in P1.
   Reviewers accept "we chose X" far more readily when the table shows what else existed.
-- **Decisions**: every open decision, its **owner**, the **default the plan proceeds on**, and
-  where in the build order it bites. A missing decision never blocks a PR; the default ships and
-  the PR body flags it. Record answers in a **Decisions taken** table as they arrive.
+- **Decisions**: every decision, its **owner**, the **default the plan proceeds on**, and
+  where in the build order it bites. Record for each one:
+  - **why** it was made;
+  - the **alternatives**, with what each would have gained and cost;
+  - the **prior record** it builds on, changes or reverses (linked, author named);
+  - **who it affects**.
+
+  This is what every body in P5 draws from, so write it once here, tersely. A missing decision
+  never blocks a PR. The default ships, and the PR body flags it and tells the people it
+  affects. Record answers in a **Decisions taken** table as they arrive.
 
 ### Step P3 — Write the plan (PR mode template)
 
@@ -486,8 +504,9 @@ Same top-level sections as the default (`Source`, `Context`, `Build Order`, `Out
 3. **Priority tiers**, if the team has them: which adopters get full work and which are
    "wire only" (pointed at the standard, listed with a reason, never optimised). Put the tier
    next to every adopter that appears later.
-4. **PR conventions for this plan** — how every PR body opens (see P5), that the plan file is
-   inlined, and any preview-before-ship rule the project has.
+4. **PR conventions for this plan**: how every body opens (see P5), who gets told what
+   changes, how the plan file travels with the PR, and any preview-before-ship rule the
+   project has.
 5. **Handoff: ground rules for whoever codes this** — the reading list in order (the team's
    agent/contributor rules first), where and how to work (package manager, runtime, worktree,
    branch naming copied from the team's history, issue-first if the team requires it, one
@@ -510,24 +529,59 @@ entry per row of **Decisions taken**; the open decisions as one question entry.
 
 ### Step P5 — PR bodies, previews, and shipping
 
-- **A PR body is written for the humans who review it, decisions first.** It opens with **Goal**
-  (one or two sentences), **Summary** (what changed, plain language, the standard or component
-  it introduces named), and **Key UI / UX / design decisions** (each decision, the alternative,
-  why, and whether it is open for the reviewer's call) — before anything technical, and before
-  the team's own template sections if they have one. Then the technical sections. **The plan
-  travels with the PR:** inline it in a collapsed block when it is short; when it is long, or the
-  team keeps plans in the repo, commit it there and link it by a **commit-pinned** permalink (a
-  relative link resolves against the default branch, where the file does not exist until merge;
-  hosts also cap body size).
+- **Every body is a decision record, written for the humans who read it.** This covers the
+  epic, each issue and each PR. A PR body opens with, in order:
+  - **Goal**: one or two sentences.
+  - **Summary**: what changed, in plain language, naming the standard or component it
+    introduces.
+  - **Decisions**: every one, UI / UX / design first, then data, API and architecture. For
+    each: why, what it gains and costs, the alternatives not taken and why, the prior record
+    it builds on or changes (linked, author named), and whose call it is.
+  - **Who this touches**.
+
+  All of this comes before anything technical, and before the team's own template sections if
+  it has any. A decision that changes or reverses someone's recorded decision says so in its
+  first line. **The plan travels with the PR:** inline it in a collapsed block when it is
+  short. When it is long, or the team keeps plans in the repo, commit it there and link it by
+  a **commit-pinned** permalink. A relative link resolves against the default branch, where
+  the file does not exist until merge, and hosts cap body size.
+- **Credit the work you build on, and tell the people you change.** Most work in a team repo
+  changes code or decisions someone else made. Before each body goes up, run the prior-art
+  sweep (P1's, re-run on the actual diff for a PR). It covers the blame of the replaced lines,
+  the pull requests behind them, open pull requests over the same files, code owners,
+  decision records, and issue threads on the same concepts.
+  - **Credit** each piece of prior work by link and author name.
+  - **Mention** (`@login`) each person with a real stake once, under **Who this touches**,
+    with a line saying what changes for them. A real stake means their code is replaced,
+    their recorded decision changed, their idea built on directly, or their open work
+    overlaps. No reason, no mention.
+  - **Leave out:** bots, and a code owner whose only stake is ownership where the host
+    already requests their review.
+  - **Once per concern.** Tag people on the epic and on the PR that changes their work, not
+    on every issue in between.
+  - **Timing.** Mention people when the text is created. A mention edited into a body is not
+    reliably notified, so people found later go in a new comment.
+  - **Package names.** Keep scoped package names (`@scope/pkg`) in code spans: hosts read a
+    bare `@owner/name` as a team mention.
 - **Look first.** Any user-facing change is viewed and confirmed on a local run by the person who
   owns the plan **before its tests are written and before the checks run** — not just before the
   push, when a change of mind throws both away. The plan lists the route(s) to check and a
   checkbox for the confirmation.
-- **Draft or ready is the owner's call, asked at ship time, every time.** Many teams auto-merge a
-  ready PR, so ready is a shipping action: the ship command says what each choice does and marks
-  ready only on the owner's explicit choice in that session. A draft is for a decision someone
-  else owns, and it needs a direct ask to that person — review requests alone are easy to ignore.
-  Never merge from the skill.
+- **Draft or ready is the project's ship policy** (`swarm.ship` in `.claude/kit.json`, or the
+  `rules."plan"` override). The options:
+  - `ready`: the owner has approved ready PRs in advance, and a PR is a draft only on their
+    word for it.
+  - `draft`: every PR opens as a draft.
+  - `ask`: the question is put at ship time, every time. This is the default when no policy
+    exists.
+
+  Many teams auto-merge a ready PR, so ready is a shipping action. It happens only under a
+  standing policy or the owner's explicit choice in that session. **A decision someone else
+  owns does not by itself make a PR a draft.** The body records it, says plainly whose call
+  it was, and tells the owner. Whether the PR waits for them is the policy's call; many teams
+  prefer reacting to live code over debating drafts. A draft that waits on someone needs a
+  direct ask to that person, because review requests alone are easy to ignore. Never merge
+  from the skill.
 - **Ship only through the project's ship command** (the `rules."plan"` override names it); that
   command is where the team's checks, review bot and body template are enforced.
 
@@ -872,9 +926,17 @@ fill each gap it names.
 
 If `.claude/kit.json` has a `rules."plan"` entry, read it and apply it as an additional
 instruction for this skill. Absent file or key means no overrides — that is the normal case.
-For **PR mode** the override is where a project names its ship command, its branch and title
-conventions, its issue-first rule, its priority tiers, its look-first rule, its quick and full
-check commands, its slice-size signal, and the map of which paths trigger what in its CI.
+For **PR mode**, the override is where a project names:
+
+- its ship command and ship policy;
+- its branch and title conventions;
+- its issue-first rule;
+- its priority tiers;
+- its look-first rule;
+- its quick and full check commands;
+- its slice-size signal;
+- the map of which paths trigger what in its CI;
+- its prior-art sweep agent or script, and its rules for who gets mentioned where.
 
 ```bash
 jq -r '.rules."plan" // empty' .claude/kit.json 2>/dev/null
