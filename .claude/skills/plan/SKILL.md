@@ -1,7 +1,7 @@
 ---
 name: plan
-description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. "pr <topic>" or "NNN pr" -> PR mode, a plan organised as a sequence of clean pull requests for a team repo. Supports scoped plan directories via for:<scope>. Topic/no arg -> generate from brain DB tasks and codebase context.
-argument-hint: "[plan number | scope NNN | for:<scope> topic | NNN brainstorm | pr topic | NNN pr | topic | update | carry | status | review]"
+description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. "pr <topic>" or "NNN pr" -> PR mode, a plan organised as a sequence of clean pull requests for a team repo. "handoff" or "NNN handoff" -> get the plan ready for another agent to take over: current, cleaned up, and holding the critical context that so far exists only in this conversation. Supports scoped plan directories via for:<scope>. Topic/no arg -> generate from brain DB tasks and codebase context.
+argument-hint: "[plan number | scope NNN | for:<scope> topic | NNN brainstorm | pr topic | NNN pr | topic | update | carry | status | review | handoff | NNN handoff]"
 ---
 
 ## Available Plans
@@ -21,6 +21,7 @@ Generate a new plan or resume an existing one. Routing is based on the argument:
 - **`carry`** -> Sweep unfinished plan items back to brain DB
 - **`status`** -> Status check of the current session's bound plan (or most recent active plan)
 - **`review`** -> Review user's `{{bracketed}}` proposed changes to the bound plan
+- **`handoff`** or **`NNN handoff`** -> Prepare the plan for another agent to take over: bring it current, clean it up, and write in the critical context that exists only in this conversation
 - **`pr <topic>`** or **`NNN pr`** -> PR mode (see **PR Mode**): Generate or convert, with the plan organised by pull request for a team repo
 - **Topic, description, or no argument** -> Generate flow (research + brainstorm + write plan file)
 
@@ -33,6 +34,7 @@ Optional argument: `$ARGUMENTS`
 - `carry` -> **Carry flow**
 - `status` -> **Status flow**
 - `review` -> **Review flow**
+- `handoff` -> **Handoff flow** on the bound plan; a plan ref + `handoff` (`003 handoff`, `mvp 001 handoff`) -> **Handoff flow** on that plan
 - A bare number (`003`) that matches an existing plan file -> **Resume flow**
 - A scope + number (`mvp 001`, `data-portal 000`) -> **Resume flow** for that scope's plan
 - A number + `brainstorm` (e.g. `013 brainstorm`), optionally scoped (`mvp 001 brainstorm`) -> **Brainstorm flow**
@@ -240,6 +242,7 @@ Resume work on an existing plan. Every invocation begins with a fresh-eyes recon
    - Which phases are marked `**Status:** done`?
    - Which phases have a mix of `- [x]` and `- [ ]`?
    - Is there an existing RESUME WORK HERE banner? If so, note its location — that's where the last session stopped.
+   - Is there a `## Handoff` section (see **Handoff Flow**)? It is the last agent's account of state, decisions and dead ends. Read it before anything else, and check its **State** against `git status` and the current branch before trusting it.
 
 ### Step R2 — Fresh-eyes reconciliation
 
@@ -380,12 +383,36 @@ carries `**Mode:** pr` in its header; Resume detects it and applies these rules 
 
 | Default | PR mode |
 |---|---|
-| Build order in phases | Build order in **PRs**, one concern each: PR-1 is the foundation (the shared thing, the standard, the primitive), opened as a draft for review before anything depends on it; then the exemplar (one real adopter that proves it); then **isolated PRs for anything a team reviews separately** (schema, data backfills, auth, money); then rollout PRs, one per adopter, owned by whoever owns that surface |
+| Build order in phases | Build order in **PRs**, and **as few of them as the work honestly allows** — default to one. Split only at a real boundary: a different surface owner who reviews separately, a data dependency on the previous PR being *live*, or an isolated risk a reviewer should see alone (schema, data backfills, auth, money). The textbook sequence (foundation → exemplar → isolated → rollout) is a list of boundaries to look for, not a shape to fill. See **How many PRs** below |
 | Reads the working tree | Reads the **remote default branch** (`git fetch`, then `git show origin/<default>:<path>`, `git grep <pat> origin/<default> -- <dir>`). A checkout on a feature branch is stale by definition |
 | One brain task per phase | One brain task per PR: `Plan <id> PR-k: <title>` |
 | Reply header `Plan NNN / Phase X` | `Plan NNN / PR-k` |
 | Companion files cited freely | **No references a reviewer cannot follow**: no other plan numbers, no private companion files, no personal notes. Cite the code (path and line on the default branch), issues, PRs and ADRs instead |
 | Items may name a phase's work loosely | **Every item is one checkable step with a path**, small enough that a coding agent with no memory of the conversation can do it, tick it with ` — done: <note>`, and commit |
+
+### How many PRs: CI/CD efficiency beats PR shape
+
+Every PR costs a full cycle — a reviewer's attention, the team's review bot, a CI run, a rebase,
+and the calendar time between them. A plan that spends three cycles on one 15-file diff because
+a template said "foundation, then exemplar, then rollout" has optimised for the wrong thing.
+The rule: **the fewest review and CI cycles, not a textbook sequence.**
+
+- **Default to one PR.** Before proposing a second, name the boundary the split crosses. If the
+  only reason is "it is a different concern", it is the same PR with a lettered section.
+- **Shape the diff for the pipeline.** Learn which paths trigger what in the team's CI. A diff
+  confined to docs and agent config often runs a light gate, while build scripts or shared
+  tooling pull in extra test groups and invalidate caches. Batch the expensive-path changes into
+  one PR instead of spreading them across several, and say in the plan which section carries the
+  cost so it can be dropped or deferred as a unit. The project's `rules.plan` override is where
+  its CI path map belongs.
+- **One review cycle end to end.** Run the team's gate tier and their review bot locally before
+  opening; open as a draft for the human read (match rules, calibration lists, design calls);
+  mark ready once.
+- **Work that depends on data collected after merge is not a planned PR.** Put it in the close
+  phase as a conditional follow-up and open it only if the data says so.
+- **Real boundaries still split.** A rollout across surfaces owned by different people, a schema
+  change, a backfill, anything touching auth or money: those get their own PR because a reviewer
+  needs to see them alone, not because the template has a slot for them.
 
 ### Step P1 — Investigate on the default branch (Phase 0 of the plan)
 
@@ -460,6 +487,7 @@ entry per row of **Decisions taken**; the open decisions as one question entry.
   the team repo.
 - Tick items with ` — done: <note>`; never delete an item; if a step is impossible as written,
   say so in the note and do the nearest correct thing without widening or narrowing scope.
+- When proposing more than one PR, the plan names the boundary each split crosses (owner, live-data dependency, isolated risk). No boundary, no split.
 - When the team's rules and this skill disagree, the team's rules win, and the plan says so.
 
 ## During the session
@@ -628,12 +656,155 @@ Usage: `review` (uses the currently bound plan, or asks which plan)
 
 ---
 
+## Handoff Flow
+
+Get the plan ready for a different agent to take over: a fresh session, a cloud session, a
+teammate's agent, or `/swarm`. That agent sees the repo and this file, not this conversation, so
+anything that matters and lives only in the conversation is lost unless it goes into the plan.
+Handoff leaves the plan **current**, **clean**, and **carrying that context**.
+
+Usage: `handoff` (uses the currently bound plan), or a plan ref + `handoff` (`003 handoff`, `mvp 001 handoff`)
+
+### Step H1 — Load
+
+Resolve, read and bind the plan as in R1. With no plan bound and no ref given, use the plan this
+session has been editing; if that is not clear, ask. That is the only question. Everything else
+runs without stopping.
+
+### Step H2 — Bring it current
+
+Check every claim against the code and `git`, not against your memory of the session:
+
+- Tick every item this session finished, with ` — done: <note>`, and mark finished phases
+  `**Status:** done`. Verify each one first: the change is in the code, and the test that proves
+  it has passed. Code that is written but untested stays open, with a note saying so.
+- On the item in progress, write what is done and what is left.
+- Work that happened but was never an item goes in as a new, ticked item (see **New items**).
+- Place exactly one RESUME WORK HERE banner, on the first open item.
+
+### Step H3 — Capture what only this conversation knows
+
+Go back through the conversation for anything the next agent would otherwise get wrong, redo,
+or have to ask about:
+
+- **Constraints** — instructions from the user that shaped the work: scope changes, things to
+  avoid, preferences, who reviews what. Quote the user when their words are the reason.
+- **Decisions** — what was decided and why, and the alternative that lost.
+- **Dead ends** — approaches tried and abandoned, with what happened (the error, the
+  measurement), so nobody tries them again.
+- **Gotchas** — non-obvious facts learned the hard way: a flaky test, a required env var, a
+  command that works where the obvious one fails.
+- **State** — branch and worktree, uncommitted or unpushed work, stashes, open PRs and their
+  review state, running servers, migrations or data changes applied, deploys, messages sent;
+  and what was verified (command and result) versus not yet verified.
+- **Open questions** — who answers each one, and the default assumed until they do.
+
+Leave out what the plan already says, what the code or `git log` shows in a minute, and the
+story of the session. Never write a secret; say where it lives instead.
+
+Put each finding where the next agent will look for it:
+
+- About one item -> on that item, as a note or sub-bullet.
+- Outlives this plan (a project-wide convention, a tool quirk) -> the brain DB as an `insight`,
+  not the plan.
+- A decision -> the Handoff section's **Decisions** (in PR mode, the **Decisions taken** table
+  instead), and the brain DB as a `decision` entry with `plan_id` and `plan_path` in `meta`.
+- Everything else -> the Handoff section.
+
+The Handoff section sits directly under the plan's title. Each handoff rewrites it instead of
+appending: carry forward what is still true, drop what no longer holds, and leave out any empty
+part except **State** and **Next**.
+
+```markdown
+## Handoff
+
+**Updated:** YYYY-MM-DD · **Resume at:** <phase or PR> — <the item under the RESUME banner>
+
+**State**
+- Branch `<branch>` at `<sha>`; uncommitted: <paths, or none>; unpushed: <count, or none>
+- Running or half-applied: <servers, migrations, deploys, open PRs, or nothing>
+- Verified: <command -> result>; not yet verified: <what>
+
+**Next:** <the first concrete action: file, function, command>
+
+**Constraints**
+- <instruction> — <from whom, and why>
+
+**Decisions**
+- <decision> — <why>; not <alternative>, because <reason>
+
+**Dead ends**
+- <approach> — <what happened>
+
+**Gotchas**
+- <fact>
+
+**Open questions**
+- <question> — <who answers>; assuming <default> until then
+```
+
+In PR mode the plan is inlined into every PR body, so the snapshot opens the existing
+ground-rules handoff section (P3, item 5) instead of adding a new one, and meets the same
+reviewer standard as the rest of the plan: plain terms, no private references.
+
+### Step H4 — Clean up
+
+The plan should read as one coherent document, not a trail of session notes. Clean-up removes
+noise, never history:
+
+- Fold scratch notes, reminders-to-self and duplicate bullets into the item or section they
+  belong to.
+- Where a decision changed the approach, rewrite the affected open items to match. Completed
+  items keep their text, with a note if the new direction makes them misleading.
+- Correct paths, names and line numbers this session proved stale.
+- Amend **Context** or **Verification** only where this session proved them wrong, in place,
+  with `(corrected YYYY-MM-DD: …)`. Handoff counts as the explicit request the **Context is
+  sacred** rule asks for, for corrections only.
+- Leave `{{bracketed}}` proposals as they are and list them under **Open questions**, so the
+  next session runs `/plan review`.
+- Never delete a completed item or its note.
+
+### Step H5 — Cold read
+
+Read the plan top to bottom as the next agent will: no memory of this conversation, only this
+file and the repo. Every question you would have to ask before starting is a gap; answer it in
+the plan. When subagents are available, a fresh one is the better reader: give it only the plan
+path, tell it to change nothing, ask what it would do first and what it would need to know, and
+fill each gap it names.
+
+### Step H6 — Sync, commit, report
+
+1. Sync the brain DB as in the **Update Flow**.
+2. Commit the plan file in the repo that holds it (`Plan <id>: handoff — <one line>`). Finished,
+   tested code goes in the same commit under the usual rule; half-done code stays uncommitted,
+   and **State** says so.
+3. Report:
+
+   ```
+   **Plan NNN — ready for handoff**
+
+   Resume with: `/plan NNN` -> <phase or PR> — <item>
+   Captured: <count per part of the Handoff section>
+   Corrected: <stale claims fixed, or none>
+   Open for you: <questions, or none>
+   Left uncommitted: <paths, or none>
+   ```
+
+### Rules
+
+- **Records, never builds.** Handoff verifies, writes and tidies. It does not start the next item.
+- **Critical means the next agent would act differently without it.** If you're unsure whether a fact belongs, check whether the code or `git log` already shows it. If it does, leave it out.
+- **Safe to repeat.** The Handoff section is rewritten each time, so running handoff twice
+  duplicates nothing.
+
+---
+
 ## Global rules
 
 - **No permission needed** — Execute immediately without asking.
 - **Fresh eyes are mandatory** — Every `/plan` invocation does the reconciliation pass, even if you were just working on this plan 5 minutes ago.
 - **One plan per session** — A session binds to one plan at a time. If the user wants to switch, they run `/plan <different-ref>` which rebinds.
-- **The plan file is a baton.** Every edit should serve the handoff to the next session. A future Claude — with zero memory of this conversation — will open this file cold and need to resume within a minute.
+- **The plan file is a baton.** Every edit should serve the handoff to the next session. A future Claude — with zero memory of this conversation — will open this file cold and need to resume within a minute. `/plan handoff` is the deliberate version: run it before a session ends or another agent takes over.
 
 ---
 

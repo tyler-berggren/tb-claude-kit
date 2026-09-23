@@ -67,7 +67,7 @@ Seventeen skills, grouped by what they do for you.
 
 | | |
 |---|---|
-| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is organised as a sequence of clean pull requests (foundation as a draft, an exemplar, isolated PRs for schema or auth, per-adopter rollout), reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and is written to be inlined into each PR body for reviewers who have never seen your notes. |
+| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **Handoff** (`/plan handoff`) gets a plan ready for another agent to take over: it ticks off what is done after checking the code, tidies the file, and writes what exists only in the current conversation (decisions and why, dead ends, gotchas, uncommitted state, open questions) into a section the next session reads first. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is organised as clean pull requests, as few as the work honestly allows, each split justified by a real boundary (a different owner, a schema change, auth, money). It reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and is written to be inlined into each PR body for reviewers who have never seen your notes. |
 | `/research` | Parallel agents across a six-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Each writes its own report under an anti-fabrication contract with a mandatory "what I could not verify" section; the orchestrator only synthesizes. Reports accumulate as sourced, dated folders. |
 | `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves a report of every decision made in your absence. |
 
@@ -153,10 +153,12 @@ fresh-eyes reconciliation pass, re-reading the plan against the current code to 
 between what was planned and what actually got built.
 
 **When the code lands in someone else's repo** — a client's, an employer's, an open-source
-project's — use `/plan pr <topic>`. The build order becomes one PR per concern, every item is a
-step a cold coding agent can tick off, and the plan file itself ships inside each PR body with
-the goal, summary and design decisions at the top. A project's `kit.json` `rules.plan` names the
-team's ship command, branch conventions and priority tiers so the kit stays generic.
+project's — use `/plan pr <topic>`. The build order becomes as few PRs as the work honestly
+allows, because every PR costs a review cycle and a CI run, so each split names the boundary that
+justifies it. Every item is a step a cold coding agent can tick off, and the plan file itself
+ships inside each PR body with the goal, summary and design decisions at the top. A project's
+`kit.json` `rules.plan` names the team's ship command, branch conventions, priority tiers and CI
+path map so the kit stays generic.
 
 **When the plan should complete itself,** hand it to `/swarm` instead of implementing phase by
 phase:
@@ -184,6 +186,14 @@ of the plan before applying it.
 ```
 - [ ] **API design** — {{use GraphQL instead of REST for the query layer}}
 ```
+
+**Handing a plan to another agent.** Before a session ends, or before a teammate, a cloud session
+or `/swarm` picks the plan up, run `/plan handoff`. It ticks off what is done (checked against the
+code, not memory), tidies the file, and writes what exists only in the current conversation into
+a `## Handoff` section under the title: the user's instructions, decisions and why, dead ends,
+gotchas, uncommitted or half-applied state, and open questions. Then it reads the plan cold, the
+way the next agent will, and fills the gaps it finds. The next session resumes with `/plan N` as
+usual and reads that section first.
 
 ---
 
