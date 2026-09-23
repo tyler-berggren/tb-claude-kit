@@ -18,5 +18,5 @@ except Exception: print("false")
 [ "$bg" = "true" ] || exit 0
 
 cat <<'EOF'
-{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"You just started a background job. If it may run 5+ minutes, invoke the /pbar skill NOW, before anything else, and end your reply with its command: one absolute path, alone in its own fenced code block. Re-print that block on every later status update, restart, crash, or resume. Skip only if you are confident this job finishes in under 5 minutes."}}
+{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"You just started a background job. If it may run 5+ minutes, invoke the /pbar skill NOW, before anything else, and end your reply with its command: one absolute path, alone in its own fenced code block. Re-print that block on every later status update, restart, crash, or resume. Skip only if you are confident this job finishes in under 5 minutes. If you also wait or poll for the job to end, never pgrep -f a pattern your own poll command contains: it matches itself and never exits. Wait on the PID, on a done-file the job writes, or write the pattern as [p]attern."}}
 EOF

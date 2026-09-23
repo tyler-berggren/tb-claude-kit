@@ -13,7 +13,7 @@ This project uses Claude Code skills for structured workflows:
 - `/commit` — Stage all files and commit with auto-generated message.
 - `/cto` — Architecture observatory — scans codebase, maps components into SQLite, generates HTML with Mermaid C4 diagrams.
 - `/kill` — Kill dev processes (servers, watchers, bridge) without touching Claude Code.
-- `/look` — Inspect shared Chrome viewport via Puppeteer (DOM-first, not screenshot-first).
+- `/look` — Inspect shared Chrome viewport via Puppeteer (DOM-first to diagnose; a screenshot to confirm a visual change landed).
 - `/plan` — Multi-phased project planning with fresh-eyes reconciliation on every resume.
 - `/push` — Commit and push to remote.
 - `/research` — Web and project research with numbered reports in `cowork/research/`.
@@ -41,11 +41,11 @@ All project knowledge lives in `cowork/brain/BRAIN.db` — a SQLite database wit
 The mantra is Claude's self-authored evolving context — patterns, non-obvious knowledge, tricky areas, current momentum, and working assumptions that CLAUDE.md doesn't cover. It lives in three synced locations:
 1. `mantra` table in BRAIN.db (source of truth)
 2. `cowork/brain/MANTRA.md` (readable export for Obsidian)
-3. `<!-- BEGIN:mantra -->` block in this file (inline for fresh sessions)
+3. The mantra block at the end of this file, between the `BEGIN:mantra` and `END:mantra` comment lines (inline for fresh sessions)
 
 **Automatic review-on-start:** The session-start hook loads the last session's logs, journal, and summary. At the start of each session, review this context against the current mantra. If the last session surfaced something a fresh session would need — update the mantra silently (all three locations). If it was routine, skip. No user action required.
 
-**How to update:** `UPDATE mantra SET content = '...', updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime');` (or INSERT if empty). Then write `cowork/brain/MANTRA.md` and update the BEGIN:mantra block in CLAUDE.md.
+**How to update:** `UPDATE mantra SET content = '...', updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime');` (or INSERT if empty). Then write `cowork/brain/MANTRA.md` and replace the lines between the BEGIN:mantra and END:mantra comment lines at the end of this file — matching whole marker lines, never the first place the marker's text appears.
 
 <!-- BEGIN:mantra -->
 <!-- END:mantra -->

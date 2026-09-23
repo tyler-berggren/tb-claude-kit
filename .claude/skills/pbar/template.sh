@@ -11,13 +11,18 @@
 #
 # This script is READ-ONLY. Stopping it, closing the terminal, or running five
 # copies cannot affect the job it watches.
+#
+# PBAR_ONCE=1 draws a single frame and exits — check it shows the job's real
+# numbers before handing the line to anyone.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── settings ─────────────────────────────────────────────────────────────────
 JOB="my job"                                   # shown in the header
 LOG=/abs/path/to/job.log                       # tailed for the last line ("" to skip)
 DIR=/abs/path/to/output                        # where the counted files live
-PATTERN='my-worker'                            # pgrep pattern proving the producer is ALIVE
+PATTERN='[m]y-worker'                          # pgrep -f pattern proving the producer is ALIVE;
+                                               # the [x] form stops it matching any shell whose
+                                               # command line merely CONTAINS the pattern
 EXT=out                                        # extension of the counted files
 
 # One entry per stage, in order. TOTALS ARE AN ASSUMPTION: probe them once from
@@ -79,5 +84,6 @@ while true; do
   echo; echo "  restart: $SELF"
 
   [ $done_all -eq 1 ] && { echo; echo "  COMPLETE"; break; }
+  [ -n "${PBAR_ONCE:-}" ] && break      # one frame, for checking the settings
   sleep "$INTERVAL"
 done

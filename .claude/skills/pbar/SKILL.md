@@ -128,11 +128,19 @@ divide. Show `--` until there is enough signal, rather than a confident wrong nu
 **zsh does not word-split unquoted expansions.** Iterate with `echo "$VAR" | while IFS= read -r`,
 never `for x in $VAR`.
 
-### 4. Make it executable and hand over the line
+### 4. Make it executable, check one frame, and hand over the line
 
 ```bash
 chmod +x .claude/pbar/watch-<job-name>.sh
+PBAR_ONCE=1 .claude/pbar/watch-<job-name>.sh    # draws ONE frame and exits
 ```
+
+**Read that frame before handing anything over.** A display that shows nothing — a zero count
+for a job that has clearly started, a missing log, `producer: NOT RUNNING` for a live job — is
+worse than no display: the user watches it, sees nothing move, and stops trusting the next one.
+The usual causes are a log path the job never writes to (its output went to a pipe or another
+file), a counted file with a different extension, or a pattern that matches nothing. Fix the
+settings until the frame shows the job as it actually is, then hand over the line.
 
 Then print the command **in its own fenced code block, as the last thing in your reply** — the
 **absolute** path, so it works from any directory. Always this exact shape:
@@ -186,6 +194,12 @@ completes OR when the producer process disappears.
 Covering only success is the classic mistake — the monitor then stays silent through a crash, and
 silence is indistinguishable from "still working". Ask yourself: *if this job died right now, would
 anything fire?*
+
+**A poll loop must not match itself.** `while pgrep -f 'my-job' …` written into a Bash command or a
+Monitor has `my-job` in its own command line, so `pgrep -f` finds the loop and the loop never
+exits — the waiter outlives the job by hours. Wait on the job's PID (`while kill -0 "$PID"`), on a
+file the job writes when it ends (`cmd; echo $? > /abs/done`), or write the pattern as
+`'[m]y-job'`: the regex still matches the job, but no longer matches the literal text in the loop.
 
 ## Template
 
@@ -248,6 +262,10 @@ done
 - **Read-only, always.** The watcher may never write, kill, or lock anything the job touches.
 - **Never fabricate a total.** No honest denominator means no bar — show count, rate and elapsed.
 - **Liveness on every redraw.** Without it the display cannot distinguish stalled from finishing.
+- **Check one frame first** (`PBAR_ONCE=1`). Never hand over a display you have not seen show the
+  job's real numbers.
+- **No self-matching waiters.** A poll that `pgrep -f`s a pattern in its own command line never
+  exits; wait on a PID or a done-file, or use the `[p]attern` form.
 - **Mandatory for 5+ minute jobs.** Build it right after launch, unprompted.
 - **One line at the end, in its own fenced code block.** Absolute path, no `cd`, no arguments, no
   editing, never inline in prose.

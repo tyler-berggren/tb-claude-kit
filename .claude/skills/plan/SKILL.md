@@ -1,6 +1,6 @@
 ---
 name: plan
-description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. "pr <topic>" or "NNN pr" -> PR mode, a plan organised as a sequence of clean pull requests for a team repo. "handoff" or "NNN handoff" -> get the plan ready for another agent to take over: current, cleaned up, and holding the critical context that so far exists only in this conversation. Supports scoped plan directories via for:<scope>. Topic/no arg -> generate from brain DB tasks and codebase context.
+description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. "pr <topic>" or "NNN pr" -> PR mode, a plan for a team repo cut into same-day slices, one small pull request each. "handoff" or "NNN handoff" -> get the plan ready for another agent to take over: current, cleaned up, and holding the critical context that so far exists only in this conversation. Supports scoped plan directories via for:<scope>. Topic/no arg -> generate from brain DB tasks and codebase context.
 argument-hint: "[plan number | scope NNN | for:<scope> topic | NNN brainstorm | pr topic | NNN pr | topic | update | carry | status | review | handoff | NNN handoff]"
 ---
 
@@ -22,7 +22,7 @@ Generate a new plan or resume an existing one. Routing is based on the argument:
 - **`status`** -> Status check of the current session's bound plan (or most recent active plan)
 - **`review`** -> Review user's `{{bracketed}}` proposed changes to the bound plan
 - **`handoff`** or **`NNN handoff`** -> Prepare the plan for another agent to take over: bring it current, clean it up, and write in the critical context that exists only in this conversation
-- **`pr <topic>`** or **`NNN pr`** -> PR mode (see **PR Mode**): Generate or convert, with the plan organised by pull request for a team repo
+- **`pr <topic>`** or **`NNN pr`** -> PR mode (see **PR Mode**): Generate or convert, with the plan cut into same-day slices, one pull request each, for a team repo
 - **Topic, description, or no argument** -> Generate flow (research + brainstorm + write plan file)
 
 ## Input
@@ -383,36 +383,75 @@ carries `**Mode:** pr` in its header; Resume detects it and applies these rules 
 
 | Default | PR mode |
 |---|---|
-| Build order in phases | Build order in **PRs**, and **as few of them as the work honestly allows** — default to one. Split only at a real boundary: a different surface owner who reviews separately, a data dependency on the previous PR being *live*, or an isolated risk a reviewer should see alone (schema, data backfills, auth, money). The textbook sequence (foundation → exemplar → isolated → rollout) is a list of boundaries to look for, not a shape to fill. See **How many PRs** below |
+| Build order in phases | Build order in **slices**: each one concern, built in one session, shipped as one PR that merges the same day it was branched — at most ~20 files / ~1,000 changed lines, or the size the team's own review tooling treats as light. Split by layer so users never see half a change. See **How to cut the work** below |
+| Proposed phases (Generate, G2) | Proposed **slices**, one line each: what it delivers, what the owner will see, rough size |
 | Reads the working tree | Reads the **remote default branch** (`git fetch`, then `git show origin/<default>:<path>`, `git grep <pat> origin/<default> -- <dir>`). A checkout on a feature branch is stale by definition |
 | One brain task per phase | One brain task per PR: `Plan <id> PR-k: <title>` |
 | Reply header `Plan NNN / Phase X` | `Plan NNN / PR-k` |
 | Companion files cited freely | **No references a reviewer cannot follow**: no other plan numbers, no private companion files, no personal notes. Cite the code (path and line on the default branch), issues, PRs and ADRs instead |
-| Items may name a phase's work loosely | **Every item is one checkable step with a path**, small enough that a coding agent with no memory of the conversation can do it, tick it with ` — done: <note>`, and commit |
+| Items may name a phase's work loosely | **The next slice's items are checkable steps with a path**, each small enough that a coding agent with no memory of the conversation can do it, tick it with ` — done: <note>`, and commit. **Later slices stay one line each** (what it delivers, what the owner will see) until they are next — detail written far ahead of the code goes stale and has to be corrected before it can be built |
 
-### How many PRs: CI/CD efficiency beats PR shape
+### How to cut the work: slices that merge the same day
 
-Every PR costs a full cycle — a reviewer's attention, the team's review bot, a CI run, a rebase,
-and the calendar time between them. A plan that spends three cycles on one 15-file diff because
-a template said "foundation, then exemplar, then rollout" has optimised for the wrong thing.
-The rule: **the fewest review and CI cycles, not a textbook sequence.**
+The unit of work in a team repo is a **slice**: one concern, built in one session, shipped as one
+PR that merges the same day it was branched. Weigh both costs before choosing fewer, bigger PRs:
 
-- **Default to one PR.** Before proposing a second, name the boundary the split crosses. If the
-  only reason is "it is a different concern", it is the same PR with a lettered section.
-- **Shape the diff for the pipeline.** Learn which paths trigger what in the team's CI. A diff
-  confined to docs and agent config often runs a light gate, while build scripts or shared
-  tooling pull in extra test groups and invalidate caches. Batch the expensive-path changes into
-  one PR instead of spreading them across several, and say in the plan which section carries the
-  cost so it can be dropped or deferred as a unit. The project's `rules.plan` override is where
-  its CI path map belongs.
-- **One review cycle end to end.** Run the team's gate tier and their review bot locally before
-  opening; open as a draft for the human read (match rules, calibration lists, design calls);
-  mark ready once.
+- **A PR's fixed cost is usually small and unattended:** one CI run and a review bot, often in
+  parallel, that nobody has to watch. Work goes on while they run.
+- **A long-lived branch's costs grow with its size and its age.** The default branch moves under
+  it, so it rebases again and again and re-verifies after each; features other people merge onto
+  the model it is changing have to be ported onto it; a bigger diff draws more findings per review
+  round; scope creeps in because the PR is "still open"; and every extra file is conflict surface.
+  A dozen small PRs usually land sooner than one big one, and each is easier to review.
+
+The rules:
+
+- **Size signal.** At most ~20 files and ~1,000 changed lines, not counting generated files — or,
+  better, the threshold the team's own review tooling uses for its lighter review. When a branch
+  passes it, ship what is there and start the next slice. A slice that needs lettered sections is
+  probably two slices.
+- **Split by layer, not by adopter, when the visible result must land consistently.** Invisible
+  plumbing first — the shared library capability, the new component, the additive column — each a
+  PR that changes nothing a user sees; then one small PR that switches the visible change on
+  everywhere at once. Users never see half a change, and reviewers never see a 200-file diff.
+- **Shared code first, adopters after.** A change to a widely used package tends to pull every
+  dependent into CI; an adopter-only change usually runs only that adopter's checks.
+- **A wide refactor is expand–contract, never a big bang.** Add the new form beside the old so
+  nothing breaks; move callers over in batches, each its own green PR; delete the old form once no
+  caller remains. Other people's work keeps landing on a codebase that compiles both ways, instead
+  of arriving on the old form and having to be ported.
+- **Real isolation boundaries still split:** a schema change, a data backfill, anything touching
+  auth or money gets its own PR, because a reviewer needs to see it alone.
+- **Never hold two open branches over the same files.** Sequence them; the second rebases once,
+  after the first merges.
+- **Shape each slice for the pipeline.** Learn which paths trigger what in the team's CI. A diff
+  confined to docs and agent config often runs a light gate, while build scripts or shared tooling
+  pull in extra test groups and invalidate caches — batch those expensive-path changes into one
+  slice. The project's `rules.plan` override is where its CI path map belongs.
 - **Work that depends on data collected after merge is not a planned PR.** Put it in the close
   phase as a conditional follow-up and open it only if the data says so.
-- **Real boundaries still split.** A rollout across surfaces owned by different people, a schema
-  change, a backfill, anything touching auth or money: those get their own PR because a reviewer
-  needs to see them alone, not because the template has a slot for them.
+
+### Inside a slice: look first, test once
+
+1. **Build with quick checks only:** type-check the package being edited and run only the tests
+   related to the changed files (the test runner's related or changed-files mode, or the files by
+   name). Seconds, not minutes. Never a whole suite mid-build, never the whole repo.
+2. **The owner looks** at every user-facing change on a local run **before tests are written
+   around it.** Start the app, request every changed page yourself first (a passing check is not a
+   running app), then hand over the route, what changed and what right looks like. Changing their
+   mind here is cheap, because nothing has been pinned yet. New ideas go to the next slice.
+3. **Then the tests,** pinning what was approved. Data-layer logic — queries, predicates,
+   permission rules — is the exception: prove it against a real engine as it is written. It does
+   not depend on taste, and it is where the serious bugs hide.
+4. **Ship through the project's ship command:** rebase once, run the team's scoped checks once, the
+   team's review bot locally if it has one, then the draft-or-ready question.
+5. **While CI runs, start the next slice.** When a CI group fails, push the fix as soon as it is
+   ready: that run is already lost, and waiting for the rest of the verdict only gives the default
+   branch time to move under the PR.
+
+Keep the full output of every check in a log and search it — never re-run a check just to see
+more of its output. Do not rebase mid-build: rebase once at ship time, when the host reports a
+conflict, or when the slice needs something that just landed.
 
 ### Step P1 — Investigate on the default branch (Phase 0 of the plan)
 
@@ -440,7 +479,9 @@ Two tables in the plan, before Build Order:
 Same top-level sections as the default (`Source`, `Context`, `Build Order`, `Out of Scope`,
 `Verification`), plus these, in this order after the header:
 
-1. **The short version** — what ships, in which PRs, for someone who reads nothing else.
+1. **The short version** — what ships, in which slices, for someone who reads nothing else —
+   and a small **Status** block: where the work is, what is next. The whole plan stays short:
+   goal, decisions, the slice list, status. History belongs in commits and PR bodies.
 2. **The new standard** and **Decisions** (P2).
 3. **Priority tiers**, if the team has them: which adopters get full work and which are
    "wire only" (pointed at the standard, listed with a reason, never optimised). Put the tier
@@ -451,13 +492,15 @@ Same top-level sections as the default (`Source`, `Context`, `Build Order`, `Out
    agent/contributor rules first), where and how to work (package manager, runtime, worktree,
    branch naming copied from the team's history, issue-first if the team requires it, one
    commit per section), the **stay-current steps** (fetch; fast-forward the primary checkout's
-   default branch; read the log of the surface since the last session; rebase the branch), the
-   exact test commands, the ship command, and what to do when the plan turns out to be wrong.
-6. **Build Order, by PR.** Each PR block has: a `**Status:** open · **Waits on:** …` line; an
-   **In plain terms** paragraph (what it does and why, for a non-engineer); its checkable items,
-   grouped in lettered sections for a large PR; and an **Exit** line. Rollout PRs get **one
-   item per adopter**, each naming its files, plus a shared recipe above them so the items stay
-   short. The `RESUME WORK HERE` banner sits on the first open item, as always.
+   default branch; read the log of the surface since the last session — and do not rebase a
+   feature branch on a schedule: once, at ship time), the quick check for building and the full
+   check for shipping, the ship command, and what to do when the plan turns out to be wrong.
+6. **Build Order, by slice.** Each slice has: a `**Status:** open · **Waits on:** …` line; an
+   **In plain terms** paragraph (what it does and why, for a non-engineer); for the NEXT slice,
+   its checkable items, and for later slices one line (what it delivers, what the owner will see,
+   rough size) until they are next; and an **Exit** line. A rollout is **one slice per adopter**,
+   under a shared recipe so each stays short. The `RESUME WORK HERE` banner sits on the first
+   open item, as always.
 7. **Verification per PR** and **Risks**, as tables or short lists.
 
 ### Step P4 — Register
@@ -471,23 +514,35 @@ entry per row of **Decisions taken**; the open decisions as one question entry.
   (one or two sentences), **Summary** (what changed, plain language, the standard or component
   it introduces named), and **Key UI / UX / design decisions** (each decision, the alternative,
   why, and whether it is open for the reviewer's call) — before anything technical, and before
-  the team's own template sections if they have one. Then the technical sections, then the
-  **entire plan file inlined** in a collapsed block.
-- **Previews before drafts.** Any user-facing iteration is viewed and confirmed on a local run by
-  the person who owns the plan before the draft PR is pushed. The plan lists the route(s) to
-  check and a checkbox for the confirmation.
-- **Drafts by default; ready is a human's action.** Never mark ready or merge from the skill.
+  the team's own template sections if they have one. Then the technical sections. **The plan
+  travels with the PR:** inline it in a collapsed block when it is short; when it is long, or the
+  team keeps plans in the repo, commit it there and link it by a **commit-pinned** permalink (a
+  relative link resolves against the default branch, where the file does not exist until merge;
+  hosts also cap body size).
+- **Look first.** Any user-facing change is viewed and confirmed on a local run by the person who
+  owns the plan **before its tests are written and before the checks run** — not just before the
+  push, when a change of mind throws both away. The plan lists the route(s) to check and a
+  checkbox for the confirmation.
+- **Draft or ready is the owner's call, asked at ship time, every time.** Many teams auto-merge a
+  ready PR, so ready is a shipping action: the ship command says what each choice does and marks
+  ready only on the owner's explicit choice in that session. A draft is for a decision someone
+  else owns, and it needs a direct ask to that person — review requests alone are easy to ignore.
+  Never merge from the skill.
 - **Ship only through the project's ship command** (the `rules."plan"` override names it); that
   command is where the team's checks, review bot and body template are enforced.
 
 ### Behavioral rules in PR mode
 
-- Run the stay-current steps before writing code in any session, and rebase before every push.
+- Run the stay-current steps before writing code in any session. Rebase a feature branch once,
+  at ship time — not every session, and not because the default branch moved.
+- Build with quick checks, let the owner look before tests are written, and run the full scoped
+  checks once at ship time (see **Inside a slice**).
 - One commit per lettered section; commit the plan file in **your** repo alongside, never into
   the team repo.
 - Tick items with ` — done: <note>`; never delete an item; if a step is impossible as written,
   say so in the note and do the nearest correct thing without widening or narrowing scope.
-- When proposing more than one PR, the plan names the boundary each split crosses (owner, live-data dependency, isolated risk). No boundary, no split.
+- When a slice grows past the size signal, ship what is there and move the rest to the next
+  slice. When a plan proposes one large PR instead, it names why a split by layer cannot work.
 - When the team's rules and this skill disagree, the team's rules win, and the plan says so.
 
 ## During the session
@@ -743,9 +798,14 @@ part except **State** and **Next**.
 - <question> — <who answers>; assuming <default> until then
 ```
 
-In PR mode the plan is inlined into every PR body, so the snapshot opens the existing
-ground-rules handoff section (P3, item 5) instead of adding a new one, and meets the same
-reviewer standard as the rest of the plan: plain terms, no private references.
+In PR mode the plan travels with every PR, so the snapshot opens the existing ground-rules
+handoff section (P3, item 5) instead of adding a new one, and meets the same reviewer standard
+as the rest of the plan: plain terms, no private references.
+
+**Keep it to a screen.** Work cut into same-day slices hands off at a slice boundary, where the
+open PR already carries most of the state. A Handoff section that runs past a screen means the
+work in flight is too big or the section is carrying history — move history onto the items it
+concerns, or drop it.
 
 ### Step H4 — Clean up
 
@@ -804,7 +864,7 @@ fill each gap it names.
 - **No permission needed** — Execute immediately without asking.
 - **Fresh eyes are mandatory** — Every `/plan` invocation does the reconciliation pass, even if you were just working on this plan 5 minutes ago.
 - **One plan per session** — A session binds to one plan at a time. If the user wants to switch, they run `/plan <different-ref>` which rebinds.
-- **The plan file is a baton.** Every edit should serve the handoff to the next session. A future Claude — with zero memory of this conversation — will open this file cold and need to resume within a minute. `/plan handoff` is the deliberate version: run it before a session ends or another agent takes over.
+- **The plan file is a baton, and a baton is short.** Every edit should serve the handoff to the next session. A future Claude — with zero memory of this conversation — will open this file cold and need to resume within a minute, which a plan of goal, decisions, slices and a status block allows and a long execution log does not. `/plan handoff` is the deliberate version: run it before a session ends or another agent takes over.
 
 ---
 
@@ -813,7 +873,8 @@ fill each gap it names.
 If `.claude/kit.json` has a `rules."plan"` entry, read it and apply it as an additional
 instruction for this skill. Absent file or key means no overrides — that is the normal case.
 For **PR mode** the override is where a project names its ship command, its branch and title
-conventions, its issue-first rule, its priority tiers, and any preview-before-ship rule.
+conventions, its issue-first rule, its priority tiers, its look-first rule, its quick and full
+check commands, its slice-size signal, and the map of which paths trigger what in its CI.
 
 ```bash
 jq -r '.rules."plan" // empty' .claude/kit.json 2>/dev/null

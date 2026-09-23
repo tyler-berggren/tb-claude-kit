@@ -1,6 +1,6 @@
 ---
 name: look
-description: Inspect the shared Chrome viewport — DOM queries, computed styles, box model. Screenshots only when explicitly asked.
+description: Inspect the shared Chrome viewport — DOM queries, computed styles, box model to diagnose; one screenshot to confirm a visual change landed, otherwise only when asked.
 user_only: true
 ---
 
@@ -8,7 +8,7 @@ user_only: true
 
 Inspect elements in the shared Chrome browser that both you and the user are looking at. The user drives the browser (navigating, setting mobile viewport via Chrome's device toolbar). You inspect programmatically via a Puppeteer server.
 
-**DOM-first, not screenshot-first.** Always use `inspect` or `dom` commands to get exact values. Only take a screenshot when the user explicitly asks for one.
+**DOM-first to diagnose, eyes to confirm.** Use `inspect` or `dom` for exact values when diagnosing a known problem — computed styles answer "why is this 40px too wide" better than a picture does. But a measurement only reports on the elements you chose to measure, and a layout regression usually lands somewhere else. So **after making a visual change, take one screenshot of the affected area and look at it before calling the change done.** Otherwise, screenshot only when the user asks.
 
 ## Multi-profile support
 
@@ -102,7 +102,7 @@ curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"dom","selector":".
 
 Returns: outerHTML, attributes, child elements (tag, class, id, text). Use `children: true` to see immediate children.
 
-### screenshot — Viewport or element capture (only when user asks)
+### screenshot — Viewport or element capture (to confirm a visual change, or when the user asks)
 
 ```bash
 # Full viewport
@@ -114,7 +114,7 @@ curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"screenshot","selec
 
 Returns: `{ "path": "/tmp/puppeteer-screenshot-<ts>.png" }`. Read the file to view it.
 
-**Only use this when the user explicitly asks to see a screenshot.** DOM inspection is always the default.
+Use it for two things only: **confirming a visual change you just made** (one capture of the affected area, looked at before you say it works), and when the user asks. Diagnosis stays DOM-first.
 
 ### eval — Run JS in page context
 
@@ -165,6 +165,7 @@ When the user says "look at X":
 5. **If you need more context** — use `dom` to see the HTML structure, or inspect parent/sibling elements to understand the layout context
 6. **Edit the source** — make the CSS/HTML fix in the appropriate source file
 7. **Re-inspect to verify** — after the dev server hot-reloads (~1-2 seconds), inspect the same element again to confirm the computed values changed as expected
+8. **Look at it** — for a change to how something looks, take one screenshot of the affected region and check the whole area, not just the element you measured. Numbers that are right in isolation can sit beside a neighbour the change broke
 
 ## Common Inspection Patterns
 
@@ -182,6 +183,12 @@ Inspect the element — check `padding-*`, `margin-*`, `gap` in computed styles.
 ### Media query state
 Use `status` to get current viewport width, then check what CSS values apply at that width by inspecting the element. The computed styles reflect the active media queries.
 
+### Scope queries to the open overlay
+Popovers, dialogs and menus usually portal their content to the end of `<body>`, and a page that renders several instances of a component puts the first one first in document order. A bare `document.querySelector` then reads a closed or different instance — and can produce a convincing false confirmation. Find the open overlay first and query inside it:
+```bash
+curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"eval","expression":"const d = document.querySelector(\"[role=dialog], [data-state=open]\"); d ? d.querySelectorAll(\"button\").length : \"no open overlay\""}'
+```
+
 ### Finding the right selector
 ```bash
 curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"eval","expression":"document.querySelectorAll(\".hero-section\").length"}'
@@ -191,7 +198,7 @@ curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"dom","selector":".
 ## Rules
 
 - **No confirmation needed** — execute immediately
-- **DOM-first** — never screenshot unless the user explicitly asks. Inspect is always the default.
+- **DOM-first to diagnose; one screenshot to confirm a visual change** — inspect is the default for finding a problem; after changing how something looks, look at it before saying it works. Otherwise screenshot only when asked.
 - **Re-inspect after edits** — always verify your fix by re-inspecting the element after the dev server reloads
 - **Report concisely** — don't dump raw JSON at the user. Summarize the relevant values and what they mean for the issue
 - **Viewport is the user's** — do not navigate the browser, and do not resize it on your own

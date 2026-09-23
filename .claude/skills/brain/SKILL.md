@@ -510,7 +510,10 @@ Reflect on recent work and consider updating the mantra. Same as the mantra chec
 
    {narrative}
    ```
-5. Update the `<!-- BEGIN:mantra -->` block in CLAUDE.md with the same content. If the block doesn't exist yet, append it after the Brain section.
+5. Update the mantra block in CLAUDE.md with the same content: replace the lines between the line that is exactly
+   `<!-- BEGIN:mantra -->` and the next line that is exactly `<!-- END:mantra -->`. Match WHOLE LINES — never the
+   first occurrence of the marker text, which prose elsewhere in the file may quote; a first-match edit once
+   swallowed the file's own explanation of the mantra. If the block doesn't exist yet, append it after the Brain section.
 6. Confirm.
 
 ---

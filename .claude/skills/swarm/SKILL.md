@@ -123,7 +123,7 @@ This is the heart of setup. Collect and present, via AskUserQuestion (batched, w
 
 1. Every item in the plan's Risks / Open Questions section that requires human judgment
 2. Every ambiguity or drift found in S1/S2
-3. Run policy for THIS swarm: may agents touch the live/prod database? May the swarm deploy, or does the deploy phase get excluded and left for the user? Merge to main at the end, or leave the integration branch for review? Max concurrent agents (default from `.claude/kit.json` `swarm.maxAgents`, else 6)?
+3. Run policy for THIS swarm: may agents touch the live/prod database? May the swarm deploy, or does the deploy phase get excluded and left for the user? Merge to main at the end, or leave the integration branch for review? (For a PR-mode plan — a team repository — the answer is never "merge to main"; see **Team repositories** below.) Max concurrent agents (default from `.claude/kit.json` `swarm.maxAgents`, else 6)?
 4. Show the per-unit model assignments (from the S2 policy table) as part of the setup summary. Only ask about assignments that are genuine judgment calls — a plan that's all-`opus` needs no question, just the table
 5. Lead the summary with the parallelism profile and expected wall-clock shape, so the user knows what kind of run they're approving — a wide fan-out or a supervised serial march
 
@@ -147,6 +147,24 @@ Then:
 ### Step S5 — Hand off
 
 Tell the user: review `SWARM.md` (especially the decision record), commit (`/commit`), then start a **fresh session** and invoke `/swarm <ref>` — and that starting that session with `/rc` gives remote monitoring of the run. **Never start the run in the setup session** — the run deserves a full context window.
+
+### Team repositories (PR-mode plans)
+
+A plan carrying `**Mode:** pr` lands in a repository other people own, through reviewed pull
+requests, so the swarm's usual finish — merge the integration branch into main — does not apply:
+
+- **The unit of shipping is the plan's slice, not the swarm.** Give each slice its own integration
+  branch (`swarm/<plan_id>-<slice>`), cut from the remote default branch; that slice's units merge
+  there, and each slice ships as its own PR through the project's ship command (`rules.plan` names
+  it). One integration PR for the whole plan is exactly the long-lived branch that slicing exists
+  to prevent. Slices that touch the same files run one after another, never side by side.
+- **User-facing slices stop at "ready for the owner's look".** The owner confirms every
+  user-facing change on a local run before it ships, and an unattended run cannot get that. The
+  report lists, per slice, the routes to look at and what should be seen there.
+- **Shipping still asks.** The ship command's draft-or-ready question needs the owner present, so
+  an autonomous run never marks a PR ready. At setup the owner may delegate pushing invisible
+  slices (plumbing, shared packages) as drafts; everything else waits on the branch.
+- **Never merge anything into the team's default branch locally.**
 
 ---
 
@@ -186,7 +204,7 @@ When all units are terminal:
 
 ### Step R4 — Finalize
 
-1. Merge the integration branch into the merge target per the setup decision (default: merge to main locally, no push; or leave the branch if that was the decision — then say so prominently).
+1. Merge the integration branch into the merge target per the setup decision (default: merge to main locally, no push; or leave the branch if that was the decision — then say so prominently). A PR-mode plan merges nothing into the default branch: each slice's branch is left for the ship command, per **Team repositories**.
 2. Update the plan: `**Status:** done` on completed phases, RESUME WORK HERE banner on the first failed/skipped item if any. Mark linked brain tasks done (per `/plan` update conventions).
 3. Write `cowork/swarm/<plan_id>/REPORT.md` — **the user's morning-after read**:
    - Outcome summary: units merged / failed / skipped, wall-clock, phases done
