@@ -36,7 +36,18 @@
 
   "_note_plan": "Directories /plan may write to. May contain * wildcards. Subdirectories of a root are found automatically and do not need listing. Numbering is per-directory; plan_id becomes <scope>-NNN for scoped plans.",
   "plan": {
-    "roots": ["cowork/plans"]
+    "roots": ["cowork/plans"],
+
+    "_note_issues": "Tracker settings for /plan's epic and issue modes (PR-mode plans). publish: ahead = `/plan NNN epic` puts every slice on the tracker as a sub-issue before building starts; on-start (default) = the epic alone, and each slice's issue is created by `/plan NNN issue <slice>` when it starts. repo: the tracker repo when it is not this one. assignee and labels go on every issue created; neverLabels are labels the team's automation acts on (an agent queue, an auto-close rule) and are never applied. check: a command that lints a body file before posting, with {file} and {kind} (epic, issue, pr, comment) filled in. sweep: the prior-art sweep agent or script. Nothing is posted without the owner's go.",
+    "issues": {
+      "publish": "on-start",
+      "repo": null,
+      "assignee": null,
+      "labels": [],
+      "neverLabels": [],
+      "check": null,
+      "sweep": null
+    }
   },
 
   "_note_research": "Same as plan.roots, for /research output folders.",

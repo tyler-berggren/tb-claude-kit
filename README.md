@@ -67,7 +67,7 @@ Seventeen skills, grouped by what they do for you.
 
 | | |
 |---|---|
-| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **Handoff** (`/plan handoff`) gets a plan ready for another agent to take over: it ticks off what is done after checking the code, tidies the file, and writes what exists only in the current conversation (decisions and why, dead ends, gotchas, uncommitted state, open questions) into a section the next session reads first. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is cut into slices — one concern, one session, one small PR that merges the same day — split by layer so users never see half a change, with wide refactors done expand–contract. Inside each slice the owner looks at user-facing changes before tests are written around them, and the full checks run once, at ship time. Draft or ready follows the project's standing ship policy (asked every time when there is none). Because such work usually changes code and decisions other people made, every epic, issue and PR body is a **decision record**. It gives each decision's why, gains and costs, and the alternatives not taken. It credits the prior work found by a prior-art sweep (blame of the replaced lines, the PRs behind them, open PRs over the same files, decision records), and mentions each person it changes with a reason. It reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and stays short enough to travel with each PR for reviewers who have never seen your notes. |
+| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **Handoff** (`/plan handoff`) gets a plan ready for another agent to take over: it ticks off what is done after checking the code, tidies the file, and writes what exists only in the current conversation (decisions and why, dead ends, gotchas, uncommitted state, open questions) into a section the next session reads first. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is cut into slices — one concern, one session, one small PR that merges the same day — split by layer so users never see half a change, with wide refactors done expand–contract. Inside each slice the owner looks at user-facing changes before tests are written around them, and the full checks run once, at ship time. Draft or ready follows the project's standing ship policy (asked every time when there is none). Because such work usually changes code and decisions other people made, every epic, issue and PR body is a **decision record**. It gives each decision's why, gains and costs, and the alternatives not taken. It credits the prior work found by a prior-art sweep (blame of the replaced lines, the PRs behind them, open PRs over the same files, decision records), and mentions each person it changes with a reason. It reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and stays short enough to travel with each PR for reviewers who have never seen your notes. **Epic mode** (`/plan NNN epic`) publishes that record to the team's tracker before any code: the epic, and — when the project publishes ahead — one sub-issue per slice in dependency order, with native sub-issue and blocking links, so the team sees the planned workstream and who it touches while they can still shape it; a re-run syncs the tracker to the plan. **Issue mode** (`/plan NNN issue <slice>`, `/plan issue <topic>`) brings one slice's issue current as it starts, or files a standalone issue. Nothing is posted without your go. |
 | `/research` | Parallel agents across a six-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Each writes its own report under an anti-fabrication contract with a mandatory "what I could not verify" section; the orchestrator only synthesizes. Reports accumulate as sourced, dated folders. |
 | `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves a report of every decision made in your absence. On a PR-mode plan it runs one **lane** per adopter side by side, ships every invisible slice through your ship command as soon as it is green (ready, when you have pre-approved that), parks user-facing slices for **one batch look** — a single table of URLs and what to test — and never merges into a team's default branch. |
 
@@ -158,9 +158,12 @@ one small PR that merges the same day, split by layer so users never see half a 
 slice's items are steps a cold coding agent can tick off, and the plan travels with each PR.
 Every body opens with the goal, the summary, and every decision with its trade-offs and the
 alternatives not taken. It credits the work it builds on and mentions the people whose code or
-decisions it changes, from a prior-art sweep run before the body is written. A project's
-`kit.json` `rules.plan` names the team's ship command and policy, branch conventions, priority
-tiers, CI path map and sweep agent, so the kit stays generic.
+decisions it changes, from a prior-art sweep run before the body is written. Before building, `/plan NNN epic` puts the
+plan on the team's tracker — the epic and, if the project publishes ahead, a sub-issue per slice
+with its blocking edges — so the team sees the workstream first; `/plan NNN issue <slice>` brings
+each slice's issue current as it starts. A project's `kit.json` `rules.plan` names the team's ship
+command and policy, branch conventions, priority tiers, CI path map and sweep agent, and
+`plan.issues` its tracker settings, so the kit stays generic.
 
 **When the plan should complete itself,** hand it to `/swarm` instead of implementing phase by
 phase:
@@ -288,7 +291,8 @@ fall back to sensible defaults when the file or a key is missing. See
     "scopeToProjectPath": true
   },
   "commit": { "author": "Jane Dev <jane@example.com>" },
-  "plan":     { "roots": ["cowork/plans", "cowork/clients/*/projects/*/plans"] },
+  "plan":     { "roots": ["cowork/plans", "cowork/clients/*/projects/*/plans"],
+                "issues": { "publish": "ahead", "assignee": "jane-dev", "neverLabels": ["agent-queue"] } },
   "research": { "roots": ["cowork/research"] },
   "swarm":    { "maxAgents": 6, "checks": ["npm run check"] },
 

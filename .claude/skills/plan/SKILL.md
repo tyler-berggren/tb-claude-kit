@@ -1,7 +1,7 @@
 ---
 name: plan
-description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. "pr <topic>" or "NNN pr" -> PR mode, a plan for a team repo cut into same-day slices, one small pull request each. "handoff" or "NNN handoff" -> get the plan ready for another agent to take over: current, cleaned up, and holding the critical context that so far exists only in this conversation. Supports scoped plan directories via for:<scope>. Topic/no arg -> generate from brain DB tasks and codebase context.
-argument-hint: "[plan number | scope NNN | for:<scope> topic | NNN brainstorm | pr topic | NNN pr | topic | update | carry | status | review | handoff | NNN handoff]"
+description: Generate a new plan or resume an existing one. Number arg -> resume with fresh-eyes reconciliation. "NNN brainstorm" -> brainstorm through phases before building. "pr <topic>" or "NNN pr" -> PR mode, a plan for a team repo cut into same-day slices, one small pull request each. "NNN epic" -> publish or sync a PR-mode plan's epic and slice issues on the team's tracker, so the team sees the workstream and who it touches before any code. "NNN issue <slice>" or "issue <topic>" -> create or bring current one issue. "handoff" or "NNN handoff" -> get the plan ready for another agent to take over: current, cleaned up, and holding the critical context that so far exists only in this conversation. Supports scoped plan directories via for:<scope>. Topic/no arg -> generate from brain DB tasks and codebase context.
+argument-hint: "[plan number | scope NNN | for:<scope> topic | NNN brainstorm | pr topic | NNN pr | NNN epic | NNN issue <slice> | issue topic | topic | update | carry | status | review | handoff | NNN handoff]"
 ---
 
 ## Available Plans
@@ -23,6 +23,8 @@ Generate a new plan or resume an existing one. Routing is based on the argument:
 - **`review`** -> Review user's `{{bracketed}}` proposed changes to the bound plan
 - **`handoff`** or **`NNN handoff`** -> Prepare the plan for another agent to take over: bring it current, clean it up, and write in the critical context that exists only in this conversation
 - **`pr <topic>`** or **`NNN pr`** -> PR mode (see **PR Mode**): Generate or convert, with the plan cut into same-day slices, one pull request each, for a team repo
+- **`NNN epic`** -> Epic mode (see **Epic Mode**): publish or sync a PR-mode plan's epic, and its slices as sub-issues, on the team's tracker
+- **`NNN issue <slice>`** or **`issue <topic>`** -> Issue mode (see **Issue Mode**): create or bring current one issue — a slice's as it starts, or a standalone one
 - **Topic, description, or no argument** -> Generate flow (research + brainstorm + write plan file)
 
 ## Input
@@ -42,6 +44,8 @@ Optional argument: `$ARGUMENTS`
 - A full path (`cowork/plans/003_2026-05-10_tech-stack-rebuild.md`, `cowork/plans/mvp/001_seed-profile-design.md`) -> **Resume flow**
 - `for:<scope> <topic>` (e.g. `for:data-portal build parcel POC`) -> **Generate flow** scoped to that directory
 - `pr <topic>` -> **Generate flow in PR mode**; `NNN pr` -> **Resume flow**, converting an existing plan to PR mode first (see **PR Mode**)
+- A plan ref + `epic` (`004 epic`, `mvp 001 epic`) -> **Epic Mode** on that plan
+- A plan ref + `issue <slice>` (`004 issue S3`) -> **Issue Mode** for that slice; `issue <topic>` -> **Issue Mode**, a standalone issue (linked to the bound plan, if any)
 - A topic, description, task IDs, pillar name, or empty -> **Generate flow**
 
 ---
@@ -517,7 +521,8 @@ Same top-level sections as the default (`Source`, `Context`, `Build Order`, `Out
 6. **Build Order, by slice.** Each slice has: a `**Status:** open · **Waits on:** …` line; an
    **In plain terms** paragraph (what it does and why, for a non-engineer); for the NEXT slice,
    its checkable items, and for later slices one line (what it delivers, what the owner will see,
-   rough size) until they are next; and an **Exit** line. A rollout is **one slice per adopter**,
+   rough size) until they are next; and an **Exit** line. Once the slices are published (see
+   **Epic Mode**), each row also carries its issue number. A rollout is **one slice per adopter**,
    under a shared recipe so each stays short. The `RESUME WORK HERE` banner sits on the first
    open item, as always.
 7. **Verification per PR** and **Risks**, as tables or short lists.
@@ -526,6 +531,9 @@ Same top-level sections as the default (`Source`, `Context`, `Build Order`, `Out
 
 Brain: one task per PR (`Plan <id> PR-k: …`), `plan_id` and `plan_path` in `meta`; one decision
 entry per row of **Decisions taken**; the open decisions as one question entry.
+
+Then the tracker: `NNN epic` publishes the epic and, when the project publishes ahead (see
+**Issue policy**), one sub-issue per slice, so the team sees the plan before any code.
 
 ### Step P5 — PR bodies, previews, and shipping
 
@@ -558,7 +566,8 @@ entry per row of **Decisions taken**; the open decisions as one question entry.
   - **Leave out:** bots, and a code owner whose only stake is ownership where the host
     already requests their review.
   - **Once per concern.** Tag people on the epic and on the PR that changes their work, not
-    on every issue in between.
+    on every issue in between. A slice's sub-issue names them by profile link, without the @.
+    A standalone issue (no epic, no PR yet) tags like an epic.
   - **Timing.** Mention people when the text is created. A mention edited into a body is not
     reliably notified, so people found later go in a new comment.
   - **Package names.** Keep scoped package names (`@scope/pkg`) in code spans: hosts read a
@@ -597,7 +606,156 @@ entry per row of **Decisions taken**; the open decisions as one question entry.
   say so in the note and do the nearest correct thing without widening or narrowing scope.
 - When a slice grows past the size signal, ship what is there and move the rest to the next
   slice. When a plan proposes one large PR instead, it names why a split by layer cannot work.
+- In a project that works issue-first, a slice starts with `NNN issue <slice>`: the slice's issue
+  is the team's view of its state, so it is current before the first commit.
 - When the team's rules and this skill disagree, the team's rules win, and the plan says so.
+
+---
+
+## Epic Mode
+
+Publish a PR-mode plan's workstream to the team's tracker **before building it**, so the people
+it touches see the plan, its decisions and its order while they can still shape them. The unit
+is the **epic** — the parent issue describing the whole workstream — and, when the project
+publishes ahead (see **Issue policy**), **one sub-issue per slice**, wired together by their
+blocking edges so the tracker shows the same dependency graph as the plan.
+
+Usage: `NNN epic` publishes the first time and syncs every time after. The plan must be in PR
+mode; convert it first (`NNN pr`) if it is not.
+
+A plan may carry more than one epic's work — two workstreams sharing one build order because
+they touch the same files. Each slice then names its epic, and each epic is published on its own:
+its own body, its own sub-issues, its own people. Nothing about one epic appears in the other's
+issues except a real dependency, stated as one.
+
+### Step E1 — Load
+
+Resolve, read and bind the plan as in R1, and read **Issue policy**. For each epic the plan
+names, collect what already exists: the epic's issue (if any), its sub-issues from the host's
+native listing, and each slice's recorded issue (the slice table's issue column, or the brain
+task's `meta.issue`). **Nothing is created twice:** an issue that exists is synced (E5), never
+duplicated.
+
+### Step E2 — Sweep
+
+Run the prior-art sweep (P1's) over the plan's areas: one run per lane or area, not one per
+slice. It supplies each decision's prior record — what it builds on, changes or reverses, linked,
+author named — and, for each person, the stake that earns a mention. Use the project's sweep agent
+when it names one.
+
+### Step E3 — Draft
+
+Write every body to a file before anything is posted.
+
+- **The epic** — P5's decision record at workstream scale: **Goal**; **Summary** in plain
+  language; **Decisions**, each with why, what it gains and costs, the alternatives not taken,
+  its prior record, and whose call it was; **The slices**, as a table — slice, what a user will
+  see, blocked by; **Who this touches**, one `@mention` each with what changes for them; and how
+  to reach the owner.
+  **If the epic already exists,** its body is not where new people are told: a mention edited
+  into a body is not reliably notified. Draft a **new comment** carrying the slice table and the
+  mentions, and refresh the body separately without adding any.
+- **Each slice** — **Goal** in a sentence or two; **What a user will see** ("nothing — plumbing"
+  is an answer); the **Decisions** that bite in this slice, in the same shape; **Prior work**,
+  credited by link and **by name without the @** (the epic and the slice's PR do the tagging —
+  once per concern); **Blocked by**; the epic; and a status line, `Planned — not started`.
+  Describe the area rather than line numbers: a planned issue is read weeks before its slice
+  starts, and line numbers will have moved.
+- Run the project's body check on every file, when it names one, and fix what it reports.
+
+Titles follow the team's convention; the project override names it.
+
+### Step E4 — Preview, then publish on the owner's word
+
+Posting notifies people and cannot be taken back, so show it first: how many issues will be
+created, updated and closed; the epic's body or comment in full; two representative slice
+bodies; every person mentioned, with the reason. **Publish only on the owner's go.**
+
+Then publish in **dependency order**, blockers first, so every blocked-by can name a real issue:
+
+- attach each slice to its parent with the host's **native sub-issue** relationship, and add the
+  host's **native blocking links** where it has them; where it has none, the body's Blocked by
+  line carries the numbers;
+- apply the project's assignee and labels, and **never a label the project lists as one its
+  automation acts on** — a planned issue that lands in an agent queue gets built by somebody
+  else;
+- record each issue number in the plan's slice table and in its brain task (`meta.issue`), and
+  commit the plan.
+
+### Step E5 — Sync on every re-run
+
+`NNN epic` after the plan changed brings the tracker back in line with it:
+
+- a new slice gets a new sub-issue, in its place in the graph;
+- a slice that has **not started**, whose one-liner, decisions or blockers changed, gets its body
+  updated — with no mention added by the edit; anyone newly touched gets a comment;
+- a slice merged into another, or dropped, has its issue **closed with a comment** saying where the
+  work went;
+- a slice that has started belongs to **Issue Mode**, and is left alone here.
+
+Report what was created, updated and closed, with links.
+
+---
+
+## Issue Mode
+
+Create, or bring current, **one** issue.
+
+- **`NNN issue <slice>`** — the slice is about to start, or its scope just changed. Bring its
+  issue current: the slice's checkable items become its acceptance criteria, its decisions and
+  blockers are refreshed, and its status line becomes `In progress`. When it has no issue yet —
+  the project publishes on start, or the slice was added after publishing — create it, attached
+  to its epic with its blocking links, exactly as E4 does for one slice. In a project that works
+  issue-first this runs before the slice's first commit.
+- **`issue <topic>`** — a standalone issue: a defect found mid-work, an idea parked for later, a
+  follow-up a review surfaced. The same decision record at issue scale: what, and why it matters;
+  the evidence (steps to reproduce, the route, what right looks like); the prior work, credited;
+  and — because no epic or PR will tag anyone for it — `@mentions` for the people with a stake.
+  Attach it to an epic when one applies. With a plan bound, add it to the plan (a new slice, or a
+  follow-up under *Out of Scope*) and link it both ways.
+
+Either way: sweep the issue's area, draft to a file, run the body check, and show the body and the
+mentions. **Creating an issue, or posting anything that mentions a person, waits for the owner's
+go**; an agent running a plan unattended gets that go once, up front, for the issues it will
+create. Refreshing the body of an issue that already exists, with no mention added, does not.
+
+---
+
+## Issue policy
+
+Epic and Issue modes read the project's tracker settings from `.claude/kit.json`:
+
+```json
+{
+  "plan": {
+    "issues": {
+      "publish": "ahead",
+      "repo": "your-org/your-repo",
+      "assignee": "your-login",
+      "labels": ["P2"],
+      "neverLabels": ["agent-queue"],
+      "check": "node scripts/check-body.mjs {file} --kind {kind}",
+      "sweep": "prior-art"
+    }
+  }
+}
+```
+
+- **`publish`** — `ahead`: Epic mode publishes every slice as a sub-issue before building starts.
+  `on-start` (the default): Epic mode publishes the epic alone, and each slice's issue is created
+  by Issue mode when that slice starts.
+- **`repo`** — the tracker's repository, when it is not the session's own.
+- **`assignee`**, **`labels`** — applied to every issue created.
+- **`neverLabels`** — labels the team's automation acts on (an agent queue, an auto-close rule);
+  never applied by this skill.
+- **`check`** — a command that lints a body file before it is posted; `{file}` and `{kind}`
+  (`epic`, `issue`, `pr` or `comment`) are filled in.
+- **`sweep`** — the prior-art sweep agent or script, when the project has one.
+
+The tracker is reached through the host's CLI (`gh` for GitHub, including its sub-issue and
+issue-dependency APIs). When a key is absent, the mode asks rather than guesses.
+
+---
 
 ## During the session
 
@@ -915,7 +1073,9 @@ fill each gap it names.
 
 ## Global rules
 
-- **No permission needed** — Execute immediately without asking.
+- **No permission needed** — Execute immediately without asking. The one exception is the team's
+  tracker: creating an issue, or posting anything that mentions a person, waits for the owner's go
+  (see **Epic Mode**), because it notifies people and cannot be taken back.
 - **Fresh eyes are mandatory** — Every `/plan` invocation does the reconciliation pass, even if you were just working on this plan 5 minutes ago.
 - **One plan per session** — A session binds to one plan at a time. If the user wants to switch, they run `/plan <different-ref>` which rebinds.
 - **The plan file is a baton, and a baton is short.** Every edit should serve the handoff to the next session. A future Claude — with zero memory of this conversation — will open this file cold and need to resume within a minute, which a plan of goal, decisions, slices and a status block allows and a long execution log does not. `/plan handoff` is the deliberate version: run it before a session ends or another agent takes over.
@@ -936,7 +1096,9 @@ For **PR mode**, the override is where a project names:
 - its quick and full check commands;
 - its slice-size signal;
 - the map of which paths trigger what in its CI;
-- its prior-art sweep agent or script, and its rules for who gets mentioned where.
+- its prior-art sweep agent or script, and its rules for who gets mentioned where;
+- its tracker conventions beyond **Issue policy**: issue title style, and which parent issue each
+  kind of slice hangs under.
 
 ```bash
 jq -r '.rules."plan" // empty' .claude/kit.json 2>/dev/null
