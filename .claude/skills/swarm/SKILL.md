@@ -69,14 +69,36 @@ CREATE TABLE IF NOT EXISTS swarm_units (
   territory TEXT,
   model TEXT,
   reviewer_model TEXT,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','working','review','merged','failed','skipped')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','working','review','parked','shipped','merged','failed','skipped')),
   branch TEXT,
   updated_at TEXT,
-  result TEXT
+  result TEXT,
+  lane TEXT,
+  kind TEXT,
+  pr TEXT
 );
 ```
 
 `swarm_runs.status` is what makes phase inference work across sessions — keep it accurate at every transition.
+
+`parked`, `shipped`, `lane`, `kind` and `pr` serve PR-mode runs (see **Team repositories**): `parked`
+is built and waiting for the owner's batch look; `shipped` has an open PR on its way through the
+team's CI and review; `merged` then means the team merged it. **A brain created before these
+existed** has a `swarm_units` table whose CHECK rejects the new statuses — `CREATE TABLE IF NOT
+EXISTS` never alters it. When `SELECT sql FROM sqlite_master WHERE name = 'swarm_units'` lacks
+`parked`, upgrade it once, in one transaction:
+
+```sql
+BEGIN;
+ALTER TABLE swarm_units RENAME TO swarm_units_old;
+-- the CREATE TABLE swarm_units statement above, verbatim
+INSERT INTO swarm_units (id, run_id, unit_key, title, plan_phases, depends_on, resources, territory,
+                         model, reviewer_model, status, branch, updated_at, result)
+  SELECT id, run_id, unit_key, title, plan_phases, depends_on, resources, territory,
+         model, reviewer_model, status, branch, updated_at, result FROM swarm_units_old;
+DROP TABLE swarm_units_old;
+COMMIT;
+```
 
 ---
 
@@ -100,6 +122,7 @@ A **unit** is the work one agent completes in one worktree: one phase, several p
 2. **Independent phases are separate units**, even small ones — they're free parallelism.
 3. **A unit should be completable in one agent session.** Split a phase that mixes two independent territories; merge trivial phases into a neighbor.
 4. Every unit gets: `depends_on` (unit keys — derived from real data/code dependencies, not plan numbering), `resources` (see below), `territory` (primary files/dirs it will edit — advisory, used for conflict forecasting), and its plan phases/items.
+5. **A PR-mode plan decomposes by slice and lane instead** — each slice is a unit with a `lane` and a `kind`, its `depends_on` taken from the plan's *waits on* line, and its resource tags from `swarm.resources`. See **Team repositories**.
 
 **Resource tags** name shared mutable state *outside* git that the unit touches: `db:<name>` (a live database it migrates or rewrites), `deploy`, `tiles`, `dev-server`, or anything project-specific. Two units holding the same tag never run concurrently, even with disjoint code. Tag conservatively — a missing tag is a race, an extra tag is just lost parallelism.
 
@@ -123,7 +146,7 @@ This is the heart of setup. Collect and present, via AskUserQuestion (batched, w
 
 1. Every item in the plan's Risks / Open Questions section that requires human judgment
 2. Every ambiguity or drift found in S1/S2
-3. Run policy for THIS swarm: may agents touch the live/prod database? May the swarm deploy, or does the deploy phase get excluded and left for the user? Merge to main at the end, or leave the integration branch for review? (For a PR-mode plan — a team repository — the answer is never "merge to main"; see **Team repositories** below.) Max concurrent agents (default from `.claude/kit.json` `swarm.maxAgents`, else 6)?
+3. Run policy for THIS swarm: may agents touch the live/prod database? May the swarm deploy, or does the deploy phase get excluded and left for the user? Merge to main at the end, or leave the integration branch for review? (For a PR-mode plan — a team repository — the answer is never "merge to main", and the ship and look policies come from `swarm.ship` / `swarm.look` when kit.json records them; ask only what they leave open. See **Team repositories** below.) Max concurrent agents (default from `.claude/kit.json` `swarm.maxAgents`, else 6)?
 4. Show the per-unit model assignments (from the S2 policy table) as part of the setup summary. Only ask about assignments that are genuine judgment calls — a plan that's all-`opus` needs no question, just the table
 5. Lead the summary with the parallelism profile and expected wall-clock shape, so the user knows what kind of run they're approving — a wide fan-out or a supervised serial march
 
@@ -151,20 +174,86 @@ Tell the user: review `SWARM.md` (especially the decision record), commit (`/com
 ### Team repositories (PR-mode plans)
 
 A plan carrying `**Mode:** pr` lands in a repository other people own, through reviewed pull
-requests, so the swarm's usual finish — merge the integration branch into main — does not apply:
+requests. The swarm still completes the plan without stopping, but three things change: the unit
+of shipping is the plan's **slice**, a slice is finished when **the team** merges its PR, and the
+owner's judgment on anything user-facing arrives **in one batch**, not slice by slice.
 
-- **The unit of shipping is the plan's slice, not the swarm.** Give each slice its own integration
-  branch (`swarm/<plan_id>-<slice>`), cut from the remote default branch; that slice's units merge
-  there, and each slice ships as its own PR through the project's ship command (`rules.plan` names
-  it). One integration PR for the whole plan is exactly the long-lived branch that slicing exists
-  to prevent. Slices that touch the same files run one after another, never side by side.
-- **User-facing slices stop at "ready for the owner's look".** The owner confirms every
-  user-facing change on a local run before it ships, and an unattended run cannot get that. The
-  report lists, per slice, the routes to look at and what should be seen there.
-- **Shipping still asks.** The ship command's draft-or-ready question needs the owner present, so
-  an autonomous run never marks a PR ready. At setup the owner may delegate pushing invisible
-  slices (plumbing, shared packages) as drafts; everything else waits on the branch.
-- **Never merge anything into the team's default branch locally.**
+**Units are slices; lanes are the parallelism.** Read each slice's lane and *waits on* line from
+the plan. A **lane** is a chain of slices over the same files — usually one adopter or one
+package — and its slices run in order, while lanes that share no files run side by side. Never
+split a slice's files across two agents. A slice may **stack** on its lane's previous slice
+(branch from that branch) so the lane never stalls behind a review, CI or a look; once the
+earlier slice's squash merge lands, the later one replays only its own commits
+(`git rebase --onto origin/<default> <earlier-branch-head>`).
+
+**Every unit carries a `kind`**, which decides whether it waits for the owner:
+
+| kind | means | ships |
+|---|---|---|
+| `invisible` | nothing a user can see changes: plumbing, a shared package, config | as soon as its checks and review pass |
+| `fix` | restores intended behaviour, with no design choice in it | the same, and it still gets a row in the next look table so the owner can confirm it |
+| `user-facing` | a change a person will see or feel | only after the owner's batch look (below) |
+
+**Resource tags come from the project's map.** A team repository usually shares one local stack
+across every worktree: dev servers bound to fixed ports, one local database, one package
+install. `swarm.resources` in `.claude/kit.json` maps path globs to tags, so setup tags each unit
+by the territory it touches instead of guessing. Two units holding a tag never run at once.
+
+**Where the code lives.** When the plan's code is a checkout other than the session's own repo —
+a sibling clone, a symlinked repository, a submodule — the Agent tool's `isolation: "worktree"`
+isolates the **wrong** repository. Each unit then creates its own worktree in the target
+checkout (the create and bootstrap commands come from `swarm.worktree` in kit.json), works only
+there, and removes it once its slice has merged.
+
+**Standing policies are read, not re-asked.** A project may record two in kit.json; setup reads
+them and asks (S3) only what they leave open:
+
+- `swarm.ship` — how a finished slice's PR goes up. `ready`: the owner has pre-approved ready
+  PRs, and a slice is a draft only on their word. `draft`: every PR opens as a draft. `ask`
+  (the default): the ship command asks, which an unattended run cannot do, so the slice parks
+  with the question.
+- `swarm.look` — when the owner reviews user-facing work. `batch` (the default): one session for
+  everything parked. `per-slice`: each user-facing slice parks and notifies on its own. `none`:
+  the project reviews user-facing work some other way.
+
+**The run, per slice:**
+
+1. **Build** in the unit's worktree with the project's quick checks, and request every changed
+   page on a local run yourself — a passing check is not a running app.
+2. **Invisible and fix slices ship:** write their tests, then run the project's ship command
+   (`rules.plan` names it) under the `swarm.ship` policy.
+3. **User-facing slices park** (`status = 'parked'`): built and looked at by the agent, but no
+   ship-time checks and no UI tests yet — a change of mind in the look would throw both away.
+   Their rows go into the look table.
+4. **The team's own review tool is the reviewer** when `swarm.review` names one — a review bot
+   whose verdict the team's merge honours. It runs against the pushed head and replaces the
+   swarm's reviewer agent for that unit; a second review would be duplicate spend. A blocking
+   finding is fixed and re-reviewed, two cycles at most, then `failed`.
+5. **Watch CI; fix on red at once.** Each open PR (`status = 'shipped'`, `pr` recorded) gets a
+   watcher. When a CI group fails, push the fix as soon as it is ready — that run is already
+   lost, and waiting only lets the default branch move under the PR. A PR the host reports as
+   conflicting is re-synced by merging the default branch in, once reviewers have seen its
+   history.
+6. **`merged` means the team merged it.** When the PR lands on the default branch, the lane's
+   next slice rebases (replaying only its own commits if it stacked) and continues.
+
+**Never merge anything into the team's default branch locally.**
+
+**The batch look.** When user-facing slices are parked and nothing else is in flight, or when
+the owner asks, the orchestrator:
+
+1. starts what the parked slices need — one worktree per lane, the lane's latest branch, which
+   carries every stacked slice in it — and requests every page itself first;
+2. writes `cowork/swarm/<plan_id>/LOOK.md`: **one table** for all of them — the URL, what
+   changed, what to test, what right looks like, and the viewport widths to check;
+3. sends a push notification that the look is ready — the one mid-run interruption worth
+   sending;
+4. takes the owner's feedback as one amendment (D-numbered in SWARM.md), applies it across the
+   slices it touches, shows only what changed again, and then each approved slice writes its
+   tests and ships.
+
+A run whose remaining work is parked slices waiting on the owner is **waiting, not stalled**: the
+status says so, and the stall watchdog leaves it alone.
 
 ---
 
@@ -184,7 +273,7 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
 Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 
 1. **Ready set** = pending units whose `depends_on` are all `merged` and whose `resources` collide with no unit currently `working`/`review`.
-2. Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `run_in_background: true`, `isolation: "worktree"`, `model` = the unit's assigned model from the graph. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, integration branch name, and required branch name `swarm/<plan_id>-<unit_key>`. Mark units `working`.
+2. Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `run_in_background: true`, `isolation: "worktree"`, `model` = the unit's assigned model from the graph. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, integration branch name, and required branch name `swarm/<plan_id>-<unit_key>`. Mark units `working`. When the plan's code lives in a checkout other than the session's repo, dispatch without `isolation` and have the brief create the unit's worktree in the target checkout with `swarm.worktree`'s commands (see **Team repositories**).
 3. On a completion notification: spawn a **reviewer agent** (read-only, background, `model` = the unit's assigned reviewer model) with the unit brief, the worktree path, the unit's verification criteria, and the checks contract from SWARM.md (exact commands — reviewers never guess). It inspects the diff, runs those checks in the worktree, and returns PASS or FAIL with findings. Mark the unit `review`.
 4. **Reviewer PASS** → merge the unit branch into the integration branch. The orchestrator resolves any conflicts itself — it holds every brief and both sides of the conflict; agents never see each other's work. Then: mark plan items `- [x]` with progress notes (per `/plan` conventions), update `swarm_units` (`merged`, `result` = one-line summary), commit plan + brain on the integration branch, remove the worktree, and loop back to 1 — a merge may unblock dependents.
 5. **Reviewer FAIL** → spawn a fix agent in the same worktree with the findings, on the unit's model; the **second** fix cycle always escalates to `opus` regardless of assignment. Max **two** fix cycles; then mark the unit `failed`, record why, and continue — everything not depending on it still runs. Dependents of a failed unit become `skipped`.
@@ -255,7 +344,7 @@ The salvage path. When `/swarm <ref>` hits a `done` or `aborted` run with unmerg
 
 ## Status Flow
 
-Read-only. Load the run and units, print: run status, unit table (key, title, status, branch), live agents (`ListAgents`), and what's blocking what. Do not start or resume work.
+Read-only. Load the run and units, print: run status, unit table (key, title, status, branch — and for a PR-mode run, lane, kind and PR), live agents (`ListAgents`), and what's blocking what. Parked slices waiting on the owner are listed with the path of the current `LOOK.md`. Do not start or resume work.
 
 ## Abort Flow
 
@@ -272,8 +361,16 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 
 ## Project overrides
 
-`.claude/kit.json` — `swarm.maxAgents` (default 6) caps concurrency; `swarm.checks` is the project's verification command list (reviewers run these verbatim; when absent, setup determines and records them in SWARM.md); `rules."swarm"` applies as an additional instruction:
+`.claude/kit.json` — `swarm.maxAgents` (default 6) caps concurrency; `swarm.checks` is the project's verification command list (reviewers run these verbatim; when absent, setup determines and records them in SWARM.md); `rules."swarm"` applies as an additional instruction. For PR-mode plans (see **Team repositories**):
+
+| Key | What it holds |
+|---|---|
+| `swarm.worktree` | `{ "create": "<command>", "remove": "<command>" }` for a target checkout outside the session's repo; `<slug>` and `<branch>` are substituted. Include the repo's own bootstrap in `create` |
+| `swarm.resources` | `{ "<path glob>": "<tag>" }` — shared local state a unit touching that path holds: a fixed-port dev server, the one local database, the package install |
+| `swarm.review` | The team's review tool, run against a pushed PR (`<pr>` is substituted); it replaces the swarm's reviewer agent |
+| `swarm.ship` | `ready` \| `draft` \| `ask` (default `ask`) — the owner's standing ship policy |
+| `swarm.look` | `batch` \| `per-slice` \| `none` (default `batch`) — when the owner reviews user-facing slices |
 
 ```bash
-jq -r '.swarm.maxAgents // 6, ((.swarm.checks // []) | join(" && ")), (.rules."swarm" // empty)' .claude/kit.json 2>/dev/null
+jq -r '.swarm.maxAgents // 6, ((.swarm.checks // []) | join(" && ")), (.swarm.ship // "ask"), (.swarm.look // "batch"), (.rules."swarm" // empty)' .claude/kit.json 2>/dev/null
 ```

@@ -69,7 +69,7 @@ Seventeen skills, grouped by what they do for you.
 |---|---|
 | `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **Handoff** (`/plan handoff`) gets a plan ready for another agent to take over: it ticks off what is done after checking the code, tidies the file, and writes what exists only in the current conversation (decisions and why, dead ends, gotchas, uncommitted state, open questions) into a section the next session reads first. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is cut into slices — one concern, one session, one small PR that merges the same day — split by layer so users never see half a change, with wide refactors done expand–contract. Inside each slice the owner looks at user-facing changes before tests are written around them, and the full checks run once, at ship time; the draft-or-ready question is asked every time. It reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and stays short enough to travel with each PR for reviewers who have never seen your notes. |
 | `/research` | Parallel agents across a six-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Each writes its own report under an anti-fabrication contract with a mandatory "what I could not verify" section; the orchestrator only synthesizes. Reports accumulate as sourced, dated folders. |
-| `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves a report of every decision made in your absence. On a PR-mode plan it works slice by slice and leaves each slice for your ship command — it never merges into a team's default branch. |
+| `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves a report of every decision made in your absence. On a PR-mode plan it runs one **lane** per adopter side by side, ships every invisible slice through your ship command as soon as it is green (ready, when you have pre-approved that), parks user-facing slices for **one batch look** — a single table of URLs and what to test — and never merges into a team's default branch. |
 
 **Seeing — so Claude can check its own work**
 
@@ -985,13 +985,44 @@ new, smaller run over what's left — decision record carried forward, failed un
 root-cause attention rather than retried blind. `/swarm abort` stops a live run but keeps every
 branch and worktree; deleting work is always your call.
 
+### Team repositories (PR-mode plans)
+
+A plan in `/plan`'s PR mode lands in someone else's repository through reviewed pull requests,
+and the swarm adapts to that instead of fighting it:
+
+- **Slices and lanes.** Each slice is a unit; a **lane** is a chain of slices over the same files
+  (usually one adopter), run in order, while lanes that share no files run side by side. A slice
+  may stack on its lane's previous slice, so a lane never waits on a review, CI or a look.
+- **Three kinds of slice.** `invisible` (nothing a user sees) and `fix` (restores intended
+  behaviour, no design choice) ship as soon as they are green; `user-facing` slices **park**.
+- **One batch look.** When parked slices are all that is left in flight, the orchestrator starts
+  what they need, checks every page itself, and writes `LOOK.md`: one table — URL, what changed,
+  what to test, what right looks like, the widths to check — then sends one push notification.
+  Your feedback comes back as a single amendment; the approved slices then write their tests and
+  ship.
+- **The team's rules, not the swarm's.** Slices ship through the project's ship command; the
+  team's own review tool (`swarm.review`) replaces the swarm's reviewer; a slice is `merged` when
+  the team merges it; a red CI group gets its fix pushed at once. Nothing ever merges into the
+  team's default branch locally.
+- **A repository outside the session.** When the code lives in another checkout (a sibling
+  clone, a symlink, a submodule), the Agent tool's worktree isolation would copy the wrong repo, so
+  each unit makes its own worktree in the target with `swarm.worktree`'s commands.
+- **Shared local state is locked by path.** One local database, dev servers on fixed ports, one
+  package install: `swarm.resources` maps path globs to tags, and two units holding a tag never
+  run at once.
+
 ### Configuration
 
 ```json
 {
   "swarm": {
     "maxAgents": 6,
-    "checks": ["npm run check", "npm test"]
+    "checks": ["npm run check", "npm test"],
+    "ship": "ready",
+    "look": "batch",
+    "review": "node scripts/review.mjs --pr <pr>",
+    "worktree": { "create": "git -C ../app worktree add .worktrees/<slug> -b <branch> origin/main", "remove": "git -C ../app worktree remove .worktrees/<slug>" },
+    "resources": { "db/schema/**": "db:local", "apps/web/**": "port:web", "package-lock.json": "install" }
   },
   "rules": { "swarm": "Never touch the production database — use the staging branch." }
 }
@@ -1001,6 +1032,14 @@ branch and worktree; deleting work is always your call.
 - **`checks`** — the project's verification commands; reviewers run these verbatim on every unit.
   When absent, setup determines the commands itself and records them in `SWARM.md`
 - **`rules.swarm`** — free-text instruction applied whenever the skill runs
+- **`ship`** — PR-mode ship policy: `ready` (you have pre-approved ready PRs; a draft only on
+  your word), `draft`, or `ask` (the default, which an unattended run can only park)
+- **`look`** — when you review user-facing slices: `batch` (the default), `per-slice`, or `none`
+- **`review`** — the team's own review tool, run against a pushed PR; it replaces the swarm's
+  reviewer agent
+- **`worktree`** — create and remove commands for unit worktrees when the code lives in a
+  checkout outside the session's repo
+- **`resources`** — path globs to resource tags for shared local state
 
 ### State on disk
 
@@ -1008,6 +1047,7 @@ branch and worktree; deleting work is always your call.
 |---|---|
 | `cowork/swarm/<plan_id>/SWARM.md` | The package: run config, decision record, unit graph, per-unit briefs, agent protocol |
 | `cowork/swarm/<plan_id>/REPORT.md` | What actually happened (suffixed `-2`, `-3` for remainder runs) |
+| `cowork/swarm/<plan_id>/LOOK.md` | PR mode: the batch-look table for the parked user-facing slices |
 | `swarm_runs` / `swarm_units` (brain DB) | Execution state — what phase inference and resume reconstruct the world from |
 | `swarm/<plan_id>` branch | Integration branch; kept after the run for inspection |
 
