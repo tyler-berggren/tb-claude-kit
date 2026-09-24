@@ -112,7 +112,7 @@ This is lighter than an audit. An audit looks back over days/weeks and asks stra
    VALUES ('decision', '<title>', '<rationale>', '<tags>', <importance>);
    ```
 
-4. **Check plan progress.** If a plan was actively worked on, verify the plan file reflects current state — items checked off, status lines updated, RESUME banner in the right place:
+4. **Check plan progress.** If a plan was actively worked on, verify the plan file reflects current state — items checked off, status lines updated, RESUME banner in the right place. Report each gap or fix with the plan's path and line (`/plan`, **Pointing at a line**):
    ```sql
    SELECT id, title, meta FROM logs
    WHERE type = 'task' AND json_extract(meta, '$.plan_id') IS NOT NULL

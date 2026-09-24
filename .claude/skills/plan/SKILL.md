@@ -122,6 +122,33 @@ existing plan to fit the convention.
 
 ---
 
+## Pointing at a line
+
+Plans grow to hundreds of lines, and the owner reads them in an editor. So **every message to the
+owner that refers to part of a plan gives the line it sits on.** That covers a phase or slice, an
+item, an open question, a review item, a decision, a `{{bracketed}}` proposal, the RESUME banner,
+the Handoff section and a reconciliation finding. It also covers companion files (an audit,
+`SWARM.md`, `REPORT.md`) and code a finding cites. "Q3 is still open" sends the owner searching,
+while "Q3 (`cowork/plans/012_2026-06-20_auth-redesign.md:88`) is still open" takes them to it.
+
+- **Path and line, clickable.** Give the repo-relative path with `:line`, or `:start-end` for
+  anything longer than one item (a slice, the review block, the Handoff section). Use whatever
+  form the environment makes clickable: a markdown link where the client renders one, plain
+  `path:line` in a terminal. In the templates in this skill, `<plan>:<line>` stands for this.
+- **Look the number up just before sending.** The plan changes under a session: items get ticked,
+  review items appended, the banner moved. A number from an earlier read, or from memory, is
+  wrong. Run `grep -n` for the heading or item after the last edit to the file, then write the
+  message.
+- **Line numbers go in messages, never in the plan.** A line number is a pointer for the reader
+  of one message. Inside the plan, an issue or a PR body, name a part of the plan by something
+  stable: its heading, the slice id, `Q3`, review item `#4`, decision `D7`. The next edit above it
+  moves every line. Code citations in a plan keep their path and line as before, and every resume
+  re-checks them.
+- **Questions too.** An open question put through the question tool names its plan line in the
+  question text, so the owner can read the context before choosing.
+
+---
+
 ## Generate Flow
 
 Create a new plan from brain DB tasks, codebase context, and conversation.
@@ -286,20 +313,20 @@ Present findings to the user. Do NOT make any file edits yet.
 **Format:**
 
 ```
-**Plan NNN / Phase X — <phase title>**
+**Plan NNN / Phase X — <phase title>** · <plan>:<start>-<end>
 
 **Reconciliation:**
 - completed work verified against codebase
-- drift or issues found
+- drift or issues found — each with the plan line it affects and the code <path>:<line> behind it
 - brain DB sync status
 
-**Waiting on you from last session:** <uncleared review items, by number — or none>
+**Waiting on you from last session:** <uncleared review items, by number and line — or none>
 
 **This batch:**
-- <first open item> — <current state assessment>
-- <second open item> — <any blockers or prerequisites noted>
+- <first open item> (<plan>:<line>) — <current state assessment>
+- <second open item> (<plan>:<line>) — <any blockers or prerequisites noted>
 
-**Open questions this batch needs:** <Q-numbers, asked below — or none>
+**Open questions this batch needs:** <Q-numbers with their lines, asked below — or none>
 
 **Proposed approach:**
 <2-3 sentences on how to tackle the batch, informed by the reconciliation>
@@ -340,8 +367,8 @@ Present a quick summary:
 ```
 **Plan NNN — Brainstorm Mode**
 
-Phase 1 — <title>: 3 concrete, 2 loose, 0 unknown
-Phase 2 — <title>: 1 concrete, 4 loose, 1 unknown
+Phase 1 — <title> (<plan>:<start>-<end>): 3 concrete, 2 loose, 0 unknown
+Phase 2 — <title> (<plan>:<start>-<end>): 1 concrete, 4 loose, 1 unknown
 ...
 
 Starting with Phase <X> (first phase with loose/unknown items).
@@ -805,7 +832,8 @@ Every question that needs the owner lives in the plan's `## Open questions` sect
 - **The gate.** A batch does not start while a question that bites one of its own items reads
   `_(open)_`. Questions that bite only later items stay listed and do not hold it.
 - **Asking.** Put the open ones to the owner in one round — the question tool when there is
-  one, batched, recommendation first — and write each answer into its **Answer:** line. Then
+  one, batched, recommendation first, each naming its plan line (see **Pointing at a line**) —
+  and write each answer into its **Answer:** line. Then
   move it into the plan's decisions with the next number (the Decisions table in PR mode, the
   Handoff section's **Decisions** otherwise) and log it to the brain as a `decision`. "You
   decide" is an answer: record the default taken. The section keeps only what is still open.
@@ -862,7 +890,8 @@ Everything the owner needs to see or decide goes into **one** numbered section o
 - **At the end of the batch, tidy it:** merge duplicates, request every URL again and fix what no
   longer renders, drop what a later item superseded, and number it 1…N. Then load the open items
   into the session's todo tool when it has one. When it has none, the checkboxes are the list,
-  and after each cleared item report `k of N cleared — next: #m`.
+  and after each cleared item report `k of N cleared — next: #m (<plan>:<line>)`. Hand the
+  block over with its line range, and walk it item by item, each by number and line.
 - **Clearing an item:**
   - an approval releases whatever was waiting on it;
   - an answer to a call becomes a numbered decision, logged to the brain;
@@ -986,16 +1015,16 @@ Usage: `status`
    ```
    **Plan NNN: <Title>**
 
-   | Phase | Status | Notes |
-   |---|---|---|
-   | 1. <name> | done | <short note> |
-   | 2. <name> | done | <short note> |
-   | 3. <name> | open | next up |
-   | ... | ... | ... |
+   | Phase | Where | Status | Notes |
+   |---|---|---|---|
+   | 1. <name> | <plan>:<start>-<end> | done | <short note> |
+   | 2. <name> | <plan>:<start>-<end> | done | <short note> |
+   | 3. <name> | <plan>:<start>-<end> | open | next up |
+   | ... | ... | ... | ... |
 
-   **Deferred items**: <list any deferred/skipped items>
+   **Deferred items**: <list any deferred/skipped items, each with its line>
    **Bonus work**: <any work done this session beyond the plan>
-   **Next up**: Phase N — <what's next>
+   **Next up**: Phase N — <what's next> (<plan>:<line> of the RESUME banner)
    ```
 
 4. **Do NOT start any work.** Status is read-only. If the user wants to resume, they run `/plan <NNN>`.
@@ -1022,7 +1051,7 @@ Usage: `review` (uses the currently bound plan, or asks which plan)
 
 4. **Present the review.** For each bracketed change:
    ```
-   **{{change summary}}**
+   **{{change summary}}** · <plan>:<line>
    ✓ Looks good / ⚠ Suggestion / ✗ Issue
 
    <1-3 sentences of feedback>
@@ -1181,10 +1210,10 @@ fill each gap it names.
    ```
    **Plan NNN — ready for handoff**
 
-   Resume with: `/plan NNN` -> <phase or PR> — <item>
-   Captured: <count per part of the Handoff section>
-   Corrected: <stale claims fixed, or none>
-   Open for you: <open questions and uncleared review items, or none>
+   Resume with: `/plan NNN` -> <phase or PR> — <item> (<plan>:<line>)
+   Captured: <count per part of the Handoff section> (<plan>:<start>-<end>)
+   Corrected: <stale claims fixed, each with its line, or none>
+   Open for you: <open questions and uncleared review items, each with its line, or none>
    Left uncommitted: <paths, or none>
    ```
 
@@ -1203,6 +1232,7 @@ fill each gap it names.
   tracker: creating an issue, or posting anything that mentions a person, waits for the owner's go
   (see **Epic Mode**), because it notifies people and cannot be taken back.
 - **Fresh eyes are mandatory** — Every `/plan` invocation does the reconciliation pass, even if you were just working on this plan 5 minutes ago.
+- **Point at the line** — every message to the owner that mentions part of a plan cites its path and line, looked up just before sending (see **Pointing at a line**).
 - **One plan per session** — A session binds to one plan at a time. If the user wants to switch, they run `/plan <different-ref>` which rebinds.
 - **The plan file is a baton, and a baton is short.** Every edit should serve the handoff to the next session. A future Claude — with zero memory of this conversation — will open this file cold and need to resume within a minute, which a plan of goal, decisions, slices and a status block allows and a long execution log does not. `/plan handoff` is the deliberate version: run it before a session ends or another agent takes over.
 

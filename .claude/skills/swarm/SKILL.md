@@ -145,7 +145,7 @@ When in doubt, go up a tier — a swarm's cost center is redone work, not tokens
 
 ### Step S3 — Resolve every open question with the user
 
-This is the heart of setup. Collect and present, via AskUserQuestion (batched, with recommendations):
+This is the heart of setup. Collect and present, via AskUserQuestion (batched, with recommendations, each question naming the plan line it comes from, per `/plan`'s **Pointing at a line**):
 
 1. Every open question in the plan's `## Open questions` (see `/plan`, **Batches**), and every item in its Risks section that requires human judgment. Setup is the batch's gate: a question that bites any unit is answered here
 2. Every ambiguity or drift found in S1/S2
@@ -176,7 +176,7 @@ Then:
 
 ### Step S5 — Hand off
 
-Tell the user: review `SWARM.md` (especially the decision record), commit (`/commit`), then start a **fresh session** and invoke `/swarm <ref>` — and that starting that session with `/rc` gives remote monitoring of the run. **Never start the run in the setup session** — the run deserves a full context window.
+Tell the user: review `SWARM.md` (especially the decision record), giving the line range of the decision record, the unit graph and each brief, then commit (`/commit`), then start a **fresh session** and invoke `/swarm <ref>` — and that starting that session with `/rc` gives remote monitoring of the run. **Never start the run in the setup session** — the run deserves a full context window.
 
 ### Team repositories (PR-mode plans)
 
@@ -263,7 +263,8 @@ the owner asks, the orchestrator:
    and each call with its options and switching cost;
 3. sends a push notification that the review is ready — the one mid-run interruption worth
    sending;
-4. clears the items with the owner, who opens each URL in the shared browser themselves. Their
+4. clears the items with the owner, one by one, each by its number and plan line; the owner opens
+   each URL in the shared browser themselves. Their
    feedback is one amendment (D-numbered in SWARM.md; a product or design answer also becomes a
    plan decision), applied across the slices it touches. Only what changed is shown again, then
    each approved slice writes its tests and ships.
@@ -325,7 +326,7 @@ When all units are terminal:
 5. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, whether sub-`opus` assignments survived review, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
 6. Set run status `done` (`completed_at`), commit, remove remaining worktrees, delete merged unit branches, keep the integration branch.
 7. **Notify.** Send a push notification (`PushNotification`) with the one-line outcome — "Swarm 021: 5/6 units merged, U4 failed, 7 items waiting on you (see the plan's Review)". The user designed this to run while they're away; completion and failure are the two interruptions worth sending. Also notify on a hard mid-run stop (baseline drift, aborted run).
-8. Final message: outcome first, then how many review items wait on the owner and where the report is. If anything failed, say so plainly — never bury a failed unit in a success narrative.
+8. Final message: outcome first, then how many review items wait on the owner, with the line range of the plan's `## Review` block, and where the report is. If anything failed, say so plainly — never bury a failed unit in a success narrative.
 
 ### Resume (status = 'running')
 
@@ -375,7 +376,7 @@ The salvage path. When `/swarm <ref>` hits a `done` or `aborted` run with unmerg
 
 ## Status Flow
 
-Read-only. Load the run and units, print: run status, unit table (key, title, status, branch — and for a PR-mode run, lane, kind and PR), live agents (`ListAgents`), and what's blocking what. Parked slices waiting on the owner are listed with the count of open items in the plan's `## Review` block. Do not start or resume work.
+Read-only. Load the run and units, print: run status, unit table (key, title, status, branch — and for a PR-mode run, lane, kind and PR), live agents (`ListAgents`), and what's blocking what. Parked slices waiting on the owner are listed with the count of open items in the plan's `## Review` block and its line range. Do not start or resume work.
 
 ## Abort Flow
 
@@ -389,6 +390,7 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 - **Setup is conversational, run is autonomous.** All human judgment is front-loaded into S3.
 - **The plan file remains the source of truth for what** (and its `## Review` block for what waits on the owner); SWARM.md for who/when; REPORT.md for what actually happened.
 - **One swarm per plan at a time.** A `ready` or `running` row blocks a second setup for the same plan.
+- **Point at the line.** Every message to the owner that mentions part of the plan, `SWARM.md` or `REPORT.md` cites its path and line, looked up just before sending (`/plan`, **Pointing at a line**). The files themselves name parts by stable ids (unit keys, D-numbers, review item numbers), never by line.
 
 ## Project overrides
 
