@@ -50,6 +50,14 @@ set -euo pipefail
 #               non-technical user's repo that should not carry dev skills.
 #               Excluding does not delete what is already on disk; the script
 #               reports leftovers so you can remove them deliberately.
+#
+# Memory:
+#   Claude Code's auto-memory for the project is kept in the repo, at
+#   .claude/memory, committed with it: .claude/settings.local.json gets
+#   autoMemoryDirectory, and the config folder's memory path (under
+#   $CLAUDE_CONFIG_DIR, default ~/.claude) becomes a link to it, after its
+#   memories are copied across. Off with "memory": {"inRepo": false} in kit.json.
+#   A PUBLIC GitHub repo is left alone unless "inRepo" is true.
 
 # ============================================================
 # FLAGS
@@ -61,7 +69,7 @@ DRIFT_MODE="prompt"
 REPLACE="no"
 DRY_RUN="no"
 
-usage() { sed -n '3,45p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '3,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -685,6 +693,19 @@ echo ""
 echo "Config:"
 write_kit_json
 report_gitignore_procedure
+
+# ============================================================
+# MEMORY (Claude's auto-memory kept in the repo)
+# ============================================================
+
+# One implementation, shared with the session-start hook, which adopts it for
+# outside-mode projects on their next session. The kit's own copy runs here, in
+# both modes: a vendored or forked hook may predate it.
+echo ""
+echo "Memory:"
+mem_args=(memory --install)
+[ "$DRY_RUN" = "yes" ] && mem_args+=(--dry-run)
+bash "$KIT_DIR/.claude/hooks/session-start.sh" "${mem_args[@]}" || true
 
 # ============================================================
 # DATABASES

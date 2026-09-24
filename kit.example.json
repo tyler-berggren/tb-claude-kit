@@ -15,6 +15,11 @@
   "_note_exclude": "Paths that should NOT exist in this project at all — never installed, in either mode. Use to install a subset of the kit, e.g. a repo for a non-technical user that should not carry developer skills. Different from fork: fork means 'the project owns this', exclude means 'this does not belong here'. Excluding does not delete what is already on disk; install.sh reports leftovers so you can remove them deliberately.",
   "exclude": [],
 
+  "_note_memory": "Where Claude Code keeps this project's auto-memory. By default the kit keeps it in the repo, at .claude/memory, committed with it, rather than in the machine's config folder where it is lost with the machine. install.sh (both modes) and the session-start hook (outside mode, on the next session) set autoMemoryDirectory in .claude/settings.local.json, which is per machine and gitignored (never the checked-in settings.json, where Claude Code ignores it). Memories already in the config folder are copied across without overwriting, and the old folder is kept beside a link to the new one. inRepo: false turns this off. It stops enforcing and never undoes a setup; install.sh says what to remove by hand. null (the default) means on, except that a repo whose origin is a PUBLIC GitHub repo is left alone, because memories hold personal notes. true means on even then.",
+  "memory": {
+    "inRepo": null
+  },
+
   "_note_kill": "Ports and patterns for /kill. portRanges are inclusive pairs. patterns are extra pgrep -f arguments. scopeToProjectPath additionally kills node/tsx processes whose command line contains this project's path.",
   "kill": {
     "ports": [3000, 3001, 4000, 4444, 5173, 5174, 8080, 8787, 8788, 8789],

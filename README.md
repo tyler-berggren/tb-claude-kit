@@ -280,6 +280,35 @@ self-disables), and a missing or unparseable `kit.json` makes it bail rather tha
 Re-running `install.sh` is still what you want for converting modes, updating project-owned
 scaffolding, drift detection, and removing things.
 
+### Claude's memories live in the repo
+
+Claude Code's auto-memory normally sits in the machine's config folder
+(`~/.claude/projects/<path>/memory/`), in no repo, so it is lost with the machine and never
+reaches your other machines. The kit keeps it in the project instead, at **`.claude/memory/`**,
+committed and pushed with everything else:
+
+- **The setting.** `.claude/settings.local.json` gets `autoMemoryDirectory`, pointing at that
+  folder. That file is per machine and ignored by git. Claude Code honours the key there for a
+  trusted project, and ignores it in the checked-in `settings.json`.
+- **The migration.** Memories already in the config folder are copied across without overwriting
+  anything. The old folder is kept, renamed `memory.moved-<time>`, beside a link to the new one.
+  The config folder is `$CLAUDE_CONFIG_DIR` when you route accounts per folder, and `~/.claude`
+  otherwise.
+- **When it runs.** `install.sh` sets it up in both modes. The session-start hook adopts it for an
+  outside-mode project on its next session and tells you in one line:
+  `🧠 Memory: moved 12 memories into .claude/memory — commit them.` When everything is already
+  in place it costs a few milliseconds and says nothing.
+- **Public repos are left alone.** Memories hold personal notes, so when the repo's origin is a
+  **public** GitHub repo, the kit sets nothing up and says why. It checks once, with a 5-second
+  limit. Opt in with `"memory": { "inRepo": true }`.
+- **Turning it off.** Set `"memory": { "inRepo": false }`. That stops enforcing it and never undoes
+  a setup; `install.sh` says what to remove by hand.
+- **Cases it skips:**
+  - a linked worktree, which shares its main checkout's memory;
+  - a tracked `settings.local.json`, since it would carry this machine's path;
+  - an inside-mode repo at session start (a collaborator's session should not move their memories
+    into a shared repo — `install.sh` is the explicit way).
+
 ---
 
 ## Configuration — `.claude/kit.json`
@@ -306,6 +335,7 @@ fall back to sensible defaults when the file or a key is missing. See
                 "issues": { "publish": "ahead", "assignee": "jane-dev", "neverLabels": ["agent-queue"] } },
   "research": { "roots": ["cowork/research"] },
   "swarm":    { "maxAgents": 6, "checks": ["npm run check"] },
+  "memory":   { "inRepo": null },
 
   "rules": {
     "push": "If the post-commit hook reports undeployed changes, ask before pushing."
