@@ -176,9 +176,13 @@ Present the proposed plan to the user. Do NOT write any files yet.
 
 **Verification:**
 - <concrete test for each phase>
+
+**Open questions:**
+- Q1 — <question> · bites: <phases> · recommended: <option>
 ```
 
-Wait for user approval or redirection before writing.
+Wait for user approval or redirection before writing. Ask the open questions in the same round
+(see **Batches**); the ones still unanswered go into the plan's `## Open questions`.
 
 ### Step G3 — Write the plan file
 
@@ -204,6 +208,8 @@ Wait for user approval or redirection before writing.
      - entry #5 — **Task title** (pillar: pillar-name)
      ```
    - `## Context` — background, motivation, current state
+   - `## Open questions` — every question the owner must answer before building, in the
+     **Batches** format (leave it out when there are none)
    - `## Build Order` — phased breakdown with `- [ ]` checkboxes for each item
    - `## Out of Scope`
    - `## Verification` — concrete test per phase
@@ -247,6 +253,7 @@ Resume work on an existing plan. Every invocation begins with a fresh-eyes recon
    - Which phases have a mix of `- [x]` and `- [ ]`?
    - Is there an existing RESUME WORK HERE banner? If so, note its location — that's where the last session stopped.
    - Is there a `## Handoff` section (see **Handoff Flow**)? It is the last agent's account of state, decisions and dead ends. Read it before anything else, and check its **State** against `git status` and the current branch before trusting it.
+   - Does `## Review` hold uncleared items, or `## Open questions` hold open ones (see **Batches**)? Both go to the owner in R3, before any new work.
 
 ### Step R2 — Fresh-eyes reconciliation
 
@@ -286,15 +293,19 @@ Present findings to the user. Do NOT make any file edits yet.
 - drift or issues found
 - brain DB sync status
 
-**Next up:**
+**Waiting on you from last session:** <uncleared review items, by number — or none>
+
+**This batch:**
 - <first open item> — <current state assessment>
 - <second open item> — <any blockers or prerequisites noted>
 
+**Open questions this batch needs:** <Q-numbers, asked below — or none>
+
 **Proposed approach:**
-<2-3 sentences on how to tackle the next phase, informed by the reconciliation>
+<2-3 sentences on how to tackle the batch, informed by the reconciliation>
 ```
 
-Wait for user approval or redirection before proceeding to any implementation.
+Then ask the batch's open questions in the same message (see **Batches**) and write the answers into the plan. Uncleared review items come first: walk them with the owner now, or carry them into this session's block if they would rather look later. Wait for approval or redirection before any implementation. This is the batch's one confirmation: once approved, the work runs without stopping.
 
 ### Step R4 — Announce in replies
 
@@ -443,9 +454,15 @@ The rules:
    related to the changed files (the test runner's related or changed-files mode, or the files by
    name). Seconds, not minutes. Never a whole suite mid-build, never the whole repo.
 2. **The owner looks** at every user-facing change on a local run **before tests are written
-   around it.** Start the app, request every changed page yourself first (a passing check is not a
-   running app), then hand over the route, what changed and what right looks like. Changing their
-   mind here is cheap, because nothing has been pinned yet. New ideas go to the next slice.
+   around it**, in the batch's review block (see **Batches**), never slice by slice. Check every
+   changed page yourself first, in a headless browser of your own (a passing check is not a
+   running app), then park the slice and add its look items: the URL, what changed, what to try
+   and what right looks like. Changing their mind here is cheap, because nothing has been pinned
+   yet. A lane's next slice may stack on a parked one. New ideas go to a later slice.
+   **A stub never ships unconfirmed:** in a team repository a green pull request often merges and
+   deploys on its own, so a slice holding a stub for a call the owner has not confirmed parks like
+   a user-facing one, with dependents stacking on its branch. A call that is cheap to undo and needs
+   no stub ships, and is listed in the review block for confirmation.
 3. **Then the tests,** pinning what was approved. Data-layer logic — queries, predicates,
    permission rules — is the exception: prove it against a real engine as it is written. It does
    not depend on taste, and it is where the serious bugs hide.
@@ -494,7 +511,9 @@ Two tables in the plan, before Build Order:
 
   This is what every body in P5 draws from, so write it once here, tersely. A missing decision
   never blocks a PR. The default ships, and the PR body flags it and tells the people it
-  affects. Record answers in a **Decisions taken** table as they arrive.
+  affects. Record answers in a **Decisions taken** table as they arrive. A decision that is the
+  plan owner's to make, and that bites before building starts, is an **open question** instead
+  (see **Batches**): it is answered before the batch that needs it.
 
 ### Step P3 — Write the plan (PR mode template)
 
@@ -504,6 +523,8 @@ Same top-level sections as the default (`Source`, `Context`, `Build Order`, `Out
 1. **The short version** — what ships, in which slices, for someone who reads nothing else —
    and a small **Status** block: where the work is, what is next. The whole plan stays short:
    goal, decisions, the slice list, status. History belongs in commits and PR bodies.
+   **Review** and **Open questions** (see **Batches**) sit with it, near the top, when they
+   hold anything; both are the owner's and stay out of any copy that travels with a PR.
 2. **The new standard** and **Decisions** (P2).
 3. **Priority tiers**, if the team has them: which adopters get full work and which are
    "wire only" (pointed at the standard, listed with a reason, never optimised). Put the tier
@@ -574,8 +595,8 @@ Then the tracker: `NNN epic` publishes the epic and, when the project publishes 
     bare `@owner/name` as a team mention.
 - **Look first.** Any user-facing change is viewed and confirmed on a local run by the person who
   owns the plan **before its tests are written and before the checks run** — not just before the
-  push, when a change of mind throws both away. The plan lists the route(s) to check and a
-  checkbox for the confirmation.
+  push, when a change of mind throws both away. The routes to check, and the confirmation, are
+  items in the plan's review block (see **Batches**).
 - **Draft or ready is the project's ship policy** (`swarm.ship` in `.claude/kit.json`, or the
   `rules."plan"` override). The options:
   - `ready`: the owner has approved ready PRs in advance, and a PR is a draft only on their
@@ -757,6 +778,105 @@ issue-dependency APIs). When a key is absent, the mode asks rather than guesses.
 
 ---
 
+## Batches: questions first, one review at the end
+
+A **batch** is any stretch of work that runs through more than one item or slice: a resumed
+session working down the build order, or a `/swarm` run. The owner's attention is spent at the
+two ends of a batch and nowhere in between. Their open questions are answered before it starts,
+and everything that needs their eyes or their judgment waits in one review block after it ends.
+
+### Before: open questions, answered in the plan
+
+Every question that needs the owner lives in the plan's `## Open questions` section:
+
+```markdown
+## Open questions
+
+**Q3 — <the question, in product terms>** · bites: <items or slices> · raised: YYYY-MM-DD
+- Options: **A** <option> — <what it gains, what it costs>; **B** <option> — <…>
+- Recommended: **A**, because <reason>
+- **Answer:** _(open)_
+```
+
+- **Top-level only.** A question belongs here when its answer changes what gets built across
+  items, is expensive to reverse, or is product judgment only the owner can supply. A question
+  that a recorded decision or standard already answers is not asked: apply it and record the
+  call. Anything smaller is decided inside the batch (below).
+- **The gate.** A batch does not start while a question that bites one of its own items reads
+  `_(open)_`. Questions that bite only later items stay listed and do not hold it.
+- **Asking.** Put the open ones to the owner in one round — the question tool when there is
+  one, batched, recommendation first — and write each answer into its **Answer:** line. Then
+  move it into the plan's decisions with the next number (the Decisions table in PR mode, the
+  Handoff section's **Decisions** otherwise) and log it to the brain as a `decision`. "You
+  decide" is an answer: record the default taken. The section keeps only what is still open.
+- Questions are numbered once and never renumbered.
+
+### During: decide, stub, flag
+
+Inside a batch nobody stops to ask the owner anything, except in the one case below. Think like
+a senior engineer and product manager: make the call and flag it for the review.
+
+- **Where a call comes from:** the plan, then its decisions, then the brain's decisions, then
+  the codebase's conventions, then the smallest reasonable reading of the item. Commit to it.
+- **When the options cost real work,** pick the best one and build the **seam** in full — the
+  types, exports, schema, routes and contracts that later items or other agents consume — and
+  the behaviour behind it minimally. A change of course after the review then throws little
+  away, and nothing downstream waits. Mark the stub in the code where the project's conventions
+  allow it.
+- **Every call is flagged** in the review block: the call, the options, why this one, what is
+  stubbed (paths), what switching would cost, and what depends on it.
+- **The only interruption** is something the owner has not pre-approved that is irreversible or
+  outward-facing — deleting shared data, notifying people, spending money, touching production —
+  or a security or data-exposure risk. Even then, stop only that item: park it, notify the owner,
+  and carry on with everything that does not depend on it.
+- **Verify UI without the owner.** Check a changed page in a headless browser of your own
+  (`/look`, **Headless**): it loads without errors, the changed control is there, the interaction
+  works, nothing overflows at a phone width, and one screenshot per page per width is looked at
+  for breakage. How it looks — design, layout, wording, a design choice — goes to the review
+  block for the owner.
+
+### After: one review block
+
+Everything the owner needs to see or decide goes into **one** numbered section of the plan,
+`## Review`, directly under the Handoff section (or under the title when there is none):
+
+```markdown
+## Review
+
+**Session YYYY-MM-DD** · 2 of 5 cleared · to open the pages: <how to start the app>
+
+- [ ] **1 · look** — <what changed> · <URL>
+  Do: <what to click or try> · Right: <what right looks like> · Widths: 1440, 390
+  Agent checked: <what the headless check confirmed> · Item: <slice or phase>
+- [ ] **2 · call** — <the call made>
+  Options: <the alternatives> · Why: <reason> · Stubbed: <paths, or nothing>
+  Switching costs: <what> · Depends on it: <items>
+- [x] **3 · look + call** — <…> — cleared: <the owner's answer>
+```
+
+- **Written as it happens.** Each look or call is appended as it arises, so a crashed session
+  loses nothing. There is one writer: when agents run in parallel, they report their looks and
+  calls, and the session that coordinates them writes the block.
+- **One sequence, in click-through order** — by app or area, then by page. A **look** item always
+  carries its own URL, which the owner opens in the shared browser themselves.
+- **At the end of the batch, tidy it:** merge duplicates, request every URL again and fix what no
+  longer renders, drop what a later item superseded, and number it 1…N. Then load the open items
+  into the session's todo tool when it has one. When it has none, the checkboxes are the list,
+  and after each cleared item report `k of N cleared — next: #m`.
+- **Clearing an item:**
+  - an approval releases whatever was waiting on it;
+  - an answer to a call becomes a numbered decision, logged to the brain;
+  - a rejection becomes a fix item in the build order, and a new idea becomes a later item.
+
+  Tick the item with the owner's words.
+- **Once every item is cleared,** delete that session's entries. Their outcomes live in the
+  decisions, the build order and the commits, and the plan stays short. An uncleared item carries
+  into the next session's block.
+- **The block is the owner's.** In PR mode it never travels with a pull request: leave it out of
+  any copy of the plan that goes to the team.
+
+---
+
 ## During the session
 
 While working on a plan, follow these rules:
@@ -772,7 +892,7 @@ While working on a plan, follow these rules:
 
 ### Behavioral rules
 
-- **Brainstorm before editing code.** Before starting each phase or major item, briefly state your approach and wait for user confirmation.
+- **Confirm the approach once, before the batch.** Resume's R3 is that confirmation, together with the batch's open questions. After it, work runs as a batch (see **Batches**): no further stops, calls flagged in the review block.
 - **Update the plan file before every commit.** Before staging and committing, update the plan file to reflect current progress:
   1. Mark completed items `- [x]` with progress notes.
   2. Add `**Status:** done — <short note>` to completed phases.
@@ -965,6 +1085,7 @@ or have to ask about:
   review state, running servers, migrations or data changes applied, deploys, messages sent;
   and what was verified (command and result) versus not yet verified.
 - **Open questions** — who answers each one, and the default assumed until they do.
+- **Waiting on the owner** — looks and calls made this session that nobody has cleared yet.
 
 Leave out what the plan already says, what the code or `git log` shows in a minute, and the
 story of the session. Never write a secret; say where it lives instead.
@@ -976,6 +1097,8 @@ Put each finding where the next agent will look for it:
   not the plan.
 - A decision -> the Handoff section's **Decisions** (in PR mode, the **Decisions taken** table
   instead), and the brain DB as a `decision` entry with `plan_id` and `plan_path` in `meta`.
+- A question for the owner -> `## Open questions`; a look or call waiting on them -> `## Review`
+  (see **Batches**), tidied and numbered.
 - Everything else -> the Handoff section.
 
 The Handoff section sits directly under the plan's title. Each handoff rewrites it instead of
@@ -1007,8 +1130,11 @@ part except **State** and **Next**.
 - <fact>
 
 **Open questions**
-- <question> — <who answers>; assuming <default> until then
+- <question for someone other than the owner> — <who answers>; assuming <default> until then
 ```
+
+The owner's own questions and review items are not repeated here: they live in `## Open
+questions` and `## Review`, and **Next** says when either holds something.
 
 In PR mode the plan travels with every PR, so the snapshot opens the existing ground-rules
 handoff section (P3, item 5) instead of adding a new one, and meets the same reviewer standard
@@ -1058,7 +1184,7 @@ fill each gap it names.
    Resume with: `/plan NNN` -> <phase or PR> — <item>
    Captured: <count per part of the Handoff section>
    Corrected: <stale claims fixed, or none>
-   Open for you: <questions, or none>
+   Open for you: <open questions and uncleared review items, or none>
    Left uncommitted: <paths, or none>
    ```
 

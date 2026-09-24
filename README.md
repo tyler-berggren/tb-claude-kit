@@ -67,15 +67,15 @@ Seventeen skills, grouped by what they do for you.
 
 | | |
 |---|---|
-| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **Handoff** (`/plan handoff`) gets a plan ready for another agent to take over: it ticks off what is done after checking the code, tidies the file, and writes what exists only in the current conversation (decisions and why, dead ends, gotchas, uncommitted state, open questions) into a section the next session reads first. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is cut into slices — one concern, one session, one small PR that merges the same day — split by layer so users never see half a change, with wide refactors done expand–contract. Inside each slice the owner looks at user-facing changes before tests are written around them, and the full checks run once, at ship time. Draft or ready follows the project's standing ship policy (asked every time when there is none). Because such work usually changes code and decisions other people made, every epic, issue and PR body is a **decision record**. It gives each decision's why, gains and costs, and the alternatives not taken. It credits the prior work found by a prior-art sweep (blame of the replaced lines, the PRs behind them, open PRs over the same files, decision records), and mentions each person it changes with a reason. It reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and stays short enough to travel with each PR for reviewers who have never seen your notes. **Epic mode** (`/plan NNN epic`) publishes that record to the team's tracker before any code: the epic, and — when the project publishes ahead — one sub-issue per slice in dependency order, with native sub-issue and blocking links, so the team sees the planned workstream and who it touches while they can still shape it; a re-run syncs the tracker to the plan. **Issue mode** (`/plan NNN issue <slice>`, `/plan issue <topic>`) brings one slice's issue current as it starts, or files a standalone issue. Nothing is posted without your go. |
+| `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. **Batches** ask the plan's open questions before work starts, then never stop to ask. Calls are made, costly options stubbed, and every call and page to look at goes into one numbered `## Review` block you clear at the end. **Handoff** (`/plan handoff`) gets a plan ready for another agent to take over: it ticks off what is done after checking the code, tidies the file, and writes what exists only in the current conversation (decisions and why, dead ends, gotchas, uncommitted state, open questions) into a section the next session reads first. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is cut into slices — one concern, one session, one small PR that merges the same day — split by layer so users never see half a change, with wide refactors done expand–contract. Inside each slice the owner looks at user-facing changes before tests are written around them, and the full checks run once, at ship time. Draft or ready follows the project's standing ship policy (asked every time when there is none). Because such work usually changes code and decisions other people made, every epic, issue and PR body is a **decision record**. It gives each decision's why, gains and costs, and the alternatives not taken. It credits the prior work found by a prior-art sweep (blame of the replaced lines, the PRs behind them, open PRs over the same files, decision records), and mentions each person it changes with a reason. It reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and stays short enough to travel with each PR for reviewers who have never seen your notes. **Epic mode** (`/plan NNN epic`) publishes that record to the team's tracker before any code: the epic, and — when the project publishes ahead — one sub-issue per slice in dependency order, with native sub-issue and blocking links, so the team sees the planned workstream and who it touches while they can still shape it; a re-run syncs the tracker to the plan. **Issue mode** (`/plan NNN issue <slice>`, `/plan issue <topic>`) brings one slice's issue current as it starts, or files a standalone issue. Nothing is posted without your go. |
 | `/research` | Parallel agents across a six-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Each writes its own report under an anti-fabrication contract with a mandatory "what I could not verify" section; the orchestrator only synthesizes. Reports accumulate as sourced, dated folders. |
-| `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves a report of every decision made in your absence. On a PR-mode plan it runs one **lane** per adopter side by side, ships every invisible slice through your ship command as soon as it is green (ready, when you have pre-approved that), parks user-facing slices for **one batch look** — a single table of URLs and what to test — and never merges into a team's default branch. |
+| `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves every call made in your absence in the plan's `## Review` block. On a PR-mode plan it runs one **lane** per adopter side by side. It ships every invisible slice through your ship command as soon as it is green (ready, when you have pre-approved that). It parks user-facing slices, and slices holding a stub you haven't confirmed, for **one batch look**: a single numbered list, with a URL per page and what to test. It never merges into a team's default branch. |
 
 **Seeing — so Claude can check its own work**
 
 | | |
 |---|---|
-| `/look` | A shared Chrome window Claude inspects DOM-first — computed styles, box models, console logs — instead of guessing from screenshots, then confirms a visual change by actually looking at it. |
+| `/look` | A shared Chrome window Claude inspects DOM-first — computed styles, box models, console logs — instead of guessing from screenshots, then confirms a visual change by actually looking at it. A **headless** mode gives each coding agent a private browser to click through a page and check it works, without ever touching yours. |
 | `/cto` | Architecture observatory. Scans the codebase into a SQLite model and generates an HTML document with Mermaid C4 diagrams. Re-running shows what drifted. |
 | `/vibe-audit` | Health and security audit tuned for vibe-engineered code, with Bayesian pattern tracking that gets more precise each run. |
 | `/web` | SEO/AEO audit for a static site. Checks metadata, structured data, sitemap, robots, and llms.txt are present and correct — then checks they are still *current*, catching sitemaps with stale lastmod, markdown mirrors that drifted from their pages, and FAQ schema answering questions the page no longer asks. |
@@ -151,6 +151,17 @@ Once the shape is clear, `/plan` generates a phased plan grounded in both the co
 brain DB, so it reflects what you've already worked through. Then build. `/plan N` resumes with a
 fresh-eyes reconciliation pass, re-reading the plan against the current code to catch the gap
 between what was planned and what actually got built.
+
+**Your attention goes at the two ends of a batch, not in the middle.** A batch is any session that
+works down more than one item: a resumed plan or a swarm run. Before it starts, the plan's
+`## Open questions` that bite it are put to you in one round, and your answers are written into
+the plan. During it, nothing stops to ask you anything. Claude makes the call like a senior
+engineer and product manager would, and where the options cost real work it builds the connecting
+seam in full and a minimal stub behind it. Nothing downstream waits, and little is lost if you
+change course. UI is checked in a headless browser of Claude's own, for "does it work". Everything
+for you — pages to look at (each with its URL), and calls to confirm (each with the alternatives
+and what switching would cost) — lands in one numbered `## Review` block in the plan. At the end
+you clear it together, opening each URL in the shared `/look` browser yourself.
 
 **When the code lands in someone else's repo** — a client's, an employer's, an open-source
 project's — use `/plan pr <topic>`. The build order becomes slices: one concern, one session,
@@ -556,6 +567,34 @@ All commands are POST requests with a JSON body. There's also a GET `/status` en
 | `console` | Browser console log buffer (filter, limit, clear) | `{"command":"console","filter":"error","limit":20}` or GET `/console` |
 | `status` | Current URL, viewport size, scroll position, profile, port | GET `/status` |
 
+### Headless — an agent's own browser
+
+`node scripts/puppeteer-server.cjs --headless` starts a private, invisible Chrome for a coding
+agent that needs to check a UI **works** without touching your window. Each instance gets:
+- a port the OS picks (or exactly `--port <n>`);
+- a throwaway profile, deleted when it stops, even after a `kill -9`;
+- no registry entry, so the shared-window lookup can never pick it up.
+
+It prints one line, `{"headless":true,"port":…,"pid":…}`, and several can run at once. This is
+how agents inside a batch or a swarm check pages: they load the page, collect errors, drive the
+interaction, check for overflow at a phone width, and screenshot for breakage. What the page
+*looks like* is left for you, as an item with its URL in the plan's review block.
+
+Commands the headless browser adds (they also work on the shared window, but the skill never
+moves your browser with them):
+
+| Command | Purpose | Example |
+|---------|---------|---------|
+| `goto` | Navigate; returns the HTTP status and title, and resets the error log | `{"command":"goto","url":"http://localhost:3000/settings"}` |
+| `click` | Click by selector, by visible text or label, or text within a selector | `{"command":"click","selector":"[role=dialog]","text":"Close"}` |
+| `type` | Type into a field, appending or replacing (`clear: true`) | `{"command":"type","selector":"#name","text":"Ada","clear":true}` |
+| `press` | Press a key or combination | `{"command":"press","key":"Escape"}` |
+| `waitFor` | Wait for an element to appear, or disappear with `hidden: true` | `{"command":"waitFor","selector":"[role=dialog]","hidden":true}` |
+| `errors` | Console errors, uncaught page errors and failed requests since the last `goto` | `{"command":"errors"}` |
+
+The new commands answer failures with an `error` key and a non-200 status (400, 404, 408, 409,
+502). A project's `rules.look` names what a fresh profile needs: the base URL and how it signs in.
+
 ### What `inspect` returns
 
 The most-used command. Returns the computed values that matter for layout debugging:
@@ -573,7 +612,7 @@ Default values (`0px`, `auto`, `static`, `visible`, `normal`, `none`, `start`) a
 ### Design principles
 
 - **DOM-first, not screenshot-first.** Claude reads computed values via `inspect` and `dom`. Screenshots are only taken when explicitly requested — they're expensive, slow, and Claude can extract more useful information from structured style data.
-- **User drives the browser.** Claude never navigates or resizes the viewport. You control the page state; Claude observes and edits source files.
+- **User drives the browser.** Claude never navigates or resizes the viewport. You control the page state; Claude observes and edits source files. When Claude needs to drive a page itself, it uses a headless browser of its own.
 - **Inspect-edit-verify loop.** After editing a source file, Claude waits for hot reload (~1-2s) and re-inspects the same element to confirm the computed values changed as expected.
 
 ### Requirements
@@ -928,9 +967,10 @@ code doesn't overlap.
 
 Setup then batches every open question to you in one pass: the plan's own open questions,
 anything reconciliation surfaced, and run policy — may agents touch the live DB? may the swarm
-deploy? merge to main at the end, or leave the integration branch for review? Your answers become
-a numbered decision record in `SWARM.md` that agent briefs cite. Anything you delegate back gets
-a committed default, written down. A question that survives setup unanswered is a setup failure.
+deploy? merge to main at the end, or leave the integration branch for review? Answers about what
+gets built go into the plan, as its own numbered decisions. Run-policy answers become a numbered
+decision record in `SWARM.md`. Agent briefs cite both. Anything you delegate back gets a committed
+default, written down. A question that survives setup unanswered is a setup failure.
 
 Setup also verifies the project's checks pass on the current baseline (a swarm can't tell its own
 failures from inherited ones), reads retro insights from previous runs, assigns a model per unit,
@@ -943,8 +983,12 @@ manufactured parallelism is not.
 The run session reads the registered graph and becomes an orchestrator. Each unit agent works in
 its own **git worktree** on its own branch, from a brief that is fully self-contained. Agents are
 bound by a no-questions protocol with a decision ladder: the plan → the decision record → brain
-decisions → smallest reasonable interpretation, committed to and recorded. Their only channel out
-is a structured final report: done / decisions / questions / unverified.
+decisions → smallest reasonable interpretation, committed to and recorded. Where the options cost
+real work, they build the seam other units consume in full and stub the behaviour behind it. They
+check UI in a headless browser of their own and never touch yours. The one thing that stops a unit
+(never the run) is an irreversible or outward-facing action you haven't pre-approved. Their only
+channel out is a structured final report: done / calls / looks / blocked / unverified. The
+orchestrator copies the calls and looks into the plan's `## Review` block.
 
 Nothing merges unreviewed. Every completed unit gets an independent **reviewer agent** that runs
 the project's checks (from `swarm.checks`, verbatim — reviewers never guess) and the unit's
@@ -979,8 +1023,10 @@ When in doubt, up a tier — a swarm's cost center is redone work, not tokens.
 ### The report
 
 `cowork/swarm/<plan_id>/REPORT.md` is the morning-after read: what merged, what failed and why,
-**every decision made autonomously with its rationale** (the review surface that replaces mid-run
-questions), questions agents flagged for human eyes, and verification output. After each run the
+how many items wait on you, and verification output. The items themselves live in one place, the
+plan's `## Review` block. Every call made autonomously has its alternatives and switching cost,
+and every page to look at has its URL. It is the review surface that replaces mid-run questions,
+and you clear it with the next session. After each run the
 orchestrator also logs retro insights to the brain (tagged `swarm-retro`) — slicings that
 conflicted anyway, model assignments that didn't survive review — which the next setup reads
 before slicing. The heuristics improve from your runs, not from guesses.
@@ -1003,11 +1049,15 @@ and the swarm adapts to that instead of fighting it:
   may stack on its lane's previous slice, so a lane never waits on a review, CI or a look.
 - **Three kinds of slice.** `invisible` (nothing a user sees) and `fix` (restores intended
   behaviour, no design choice) ship as soon as they are green; `user-facing` slices **park**.
+  **A stub never ships unconfirmed:** a team repo often deploys a green PR on its own, so a slice
+  of any kind holding a stub for a call you haven't confirmed parks too. A cheap call with no stub
+  ships, and is listed for you to confirm.
 - **One batch look.** When parked slices are all that is left in flight, the orchestrator starts
-  what they need, checks every page itself, and writes `LOOK.md`: one table — URL, what changed,
-  what to test, what right looks like, the widths to check — then sends one push notification.
-  Your feedback comes back as a single amendment; the approved slices then write their tests and
-  ship.
+  what they need, checks every page itself, headless, and tidies the plan's `## Review` block into
+  one numbered list — each page's URL, what changed, what to test, what right looks like, the
+  widths to check, then each call with its alternatives — and sends one push notification. You
+  open each URL yourself. Your feedback comes back as a single amendment; the approved slices
+  then write their tests and ship.
 - **The team's rules, not the swarm's.** Slices ship through the project's ship command; the
   team's own review tool (`swarm.review`) replaces the swarm's reviewer; a slice is `merged` when
   the team merges it; a red CI group gets its fix pushed at once. Nothing ever merges into the
@@ -1055,7 +1105,7 @@ and the swarm adapts to that instead of fighting it:
 |---|---|
 | `cowork/swarm/<plan_id>/SWARM.md` | The package: run config, decision record, unit graph, per-unit briefs, agent protocol |
 | `cowork/swarm/<plan_id>/REPORT.md` | What actually happened (suffixed `-2`, `-3` for remainder runs) |
-| `cowork/swarm/<plan_id>/LOOK.md` | PR mode: the batch-look table for the parked user-facing slices |
+| The plan's `## Review` block | Every call made in your absence and every page to look at, numbered, for you to clear |
 | `swarm_runs` / `swarm_units` (brain DB) | Execution state — what phase inference and resume reconstruct the world from |
 | `swarm/<plan_id>` branch | Integration branch; kept after the run for inspection |
 

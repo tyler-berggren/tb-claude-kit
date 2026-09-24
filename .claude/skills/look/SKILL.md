@@ -1,6 +1,6 @@
 ---
 name: look
-description: Inspect the shared Chrome viewport — DOM queries, computed styles, box model to diagnose; one screenshot to confirm a visual change landed, otherwise only when asked.
+description: Inspect the shared Chrome viewport — DOM queries, computed styles, box model to diagnose; one screenshot to confirm a visual change landed, otherwise only when asked. Headless mode gives a coding agent its own private browser to check that a UI works — navigate, click, type, collect errors — without touching the user's window.
 user_only: true
 ---
 
@@ -154,6 +154,98 @@ width under 200 is refused.
 **Ask before using it, and always reset afterwards.** It changes what the user sees on their
 own screen — see the viewport rule below.
 
+## Headless — an agent's own browser
+
+The shared window is the user's. When an agent needs to check that a UI **works** — while
+building, inside a batch, or as a swarm unit — it runs its own headless Chrome instead. That
+browser has:
+- its own port;
+- a throwaway profile, deleted on exit;
+- no entry in the registry.
+
+Several can run at once, and none of them can touch the user's window. **Whether the UI looks
+right** — design, layout, wording, a design choice — is not the agent's call. It goes to the
+plan's review block (`/plan`, **Batches**) with the page's URL, for the user to open in the
+shared window themselves.
+
+### Start and stop
+
+From the project root, start it in the background with its one stdout line going to a file:
+
+```bash
+HL_OUT="$(mktemp)"   # or a file in your scratch directory
+node scripts/puppeteer-server.cjs --headless > "$HL_OUT"     # run in the background
+```
+
+```bash
+for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -s "$HL_OUT" ] && break; sleep 0.5; done
+HL_PORT=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).port)" "$HL_OUT")
+HL_PID=$(node -e "console.log(JSON.parse(require('fs').readFileSync(process.argv[1],'utf8')).pid)" "$HL_OUT")
+```
+
+The line reads `{"headless":true,"port":57736,"pid":10072,"userDataDir":"…"}`. The OS picks the
+port; `--port <n>` asks for one exactly and exits if it is busy, rather than driving someone
+else's server. **Always stop it when done:** `kill $HL_PID`. That removes Chrome and its profile.
+
+Commands are the same POST requests as the shared window's, to `http://127.0.0.1:${HL_PORT}`. The
+viewport is a fixed 1440×900 until you change it.
+
+### Commands only headless should use
+
+These work in both modes, but on the shared window they would move the user's browser, which is
+never yours to do.
+
+| Command | Body | Returns |
+|---|---|---|
+| `goto` | `{url, waitUntil?, timeout?}` — waits for `networkidle2`, 30 s by default | `{url, status, title}`; clears the error log |
+| `click` | `{selector}`, `{text}`, or both (the text searched within each selector match) | `{clicked, matches}`, plus `coveredBy` when another element sat on top |
+| `type` | `{selector, text, clear?}` — appends, or replaces with `clear: true` | `{typed, value, into}` |
+| `press` | `{key}` — `"Escape"`, `"Enter"`, `"Shift+Tab"` | `{pressed, focused}` |
+| `waitFor` | `{selector, hidden?, timeout?}` — 10 s by default | `{ok, ms}`, or a 408 on timeout |
+| `errors` | `{clear?}` | `{count, console, pageErrors, network}` since the last `goto` |
+
+- **Failure** is an `error` key in the response. The new commands also answer with a non-200
+  status:
+  - 400 — bad input;
+  - 404 — nothing visible matched;
+  - 408 — timeout;
+  - 409 — the element matched but can't be used, e.g. it can't take focus;
+  - 502 — navigation failed.
+- **Selectors** are plain CSS. `click {text}` matches visible text, `aria-label` or a button's
+  value, prefers an exact match, and clicks the nearest clickable ancestor. To target one overlay,
+  scope it: `{selector: "[role=dialog]", text: "Close"}`.
+- **`errors`** lists each failed request twice: once in `network` with its URL and status, and
+  once as Chrome's own "Failed to load resource" console line. Judge from `network`.
+- **Set the viewport before `goto`.** Changing `isMobile` reloads the page and loses its state,
+  such as an open dialog.
+
+### Checking a changed page
+
+For each changed page, at each width the project checks (desktop, and a phone width such as 390):
+
+1. `viewport`, then `goto` the page. Expect status 200 and the right title.
+2. `errors`: expect nothing new in `pageErrors` or `network`.
+3. Find the changed control the way a person would, by its text or role (`waitFor`, `click {text}`).
+4. Drive the change: open it, fill it, `press Escape`, `waitFor … hidden: true`. If it saves
+   something, `goto` the page again and confirm it stuck.
+5. Check for overflow:
+   `{"command":"eval","expression":"document.documentElement.scrollWidth > innerWidth"}` should be
+   `false`.
+6. Take one `screenshot` and look at it **for breakage only**: a blank page, overlapping or
+   clipped controls, an error screen. A measurement only answers the question you asked.
+7. Record a **look** item for the review block:
+   - the URL;
+   - what changed;
+   - what to try;
+   - what right looks like;
+   - the widths;
+   - what this check confirmed.
+
+   Then `kill $HL_PID`.
+
+How to reach the app — its base URL, and how a fresh profile gets signed in — is project-specific;
+read it from `rules."look"` (below).
+
 ## Procedure
 
 When the user says "look at X":
@@ -202,7 +294,9 @@ curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"dom","selector":".
 - **Re-inspect after edits** — always verify your fix by re-inspecting the element after the dev server reloads
 - **Report concisely** — don't dump raw JSON at the user. Summarize the relevant values and what they mean for the issue
 - **Viewport is the user's** — do not navigate the browser, and do not resize it on your own
-  initiative. The user controls Chrome directly. The one exception is checking a responsive
+  initiative. The user controls Chrome directly. `goto`, `click`, `type` and `press` are for your
+  own headless instance only. In an end-of-session review the user opens each item's URL in this
+  window themselves, and tells you which item they are on. The one exception is checking a responsive
   layout, which cannot be done any other way: ask first, use the `viewport` command, and hand
   the width back with `{"width": null}` as soon as you have the answer. Never leave a session
   pinned to a width the user did not choose.
@@ -213,6 +307,8 @@ curl -s -X POST http://127.0.0.1:${LOOK_PORT} -d '{"command":"dom","selector":".
 
 If `.claude/kit.json` has a `rules."look"` entry, read it and apply it as an additional
 instruction for this skill. Absent file or key means no overrides — that is the normal case.
+It is where a project names what a headless agent needs: the base URL pages are reached through,
+how a fresh profile gets signed in, the widths to check, and any page quirks.
 
 ```bash
 jq -r '.rules."look" // empty' .claude/kit.json 2>/dev/null

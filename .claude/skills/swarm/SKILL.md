@@ -28,7 +28,10 @@ Take a `/plan`-style plan file and complete it end-to-end without stopping — o
 
 The intended workflow: `/plan` generates the plan → `/swarm <ref>` (setup) → user reviews + `/commit` → **fresh session** → `/swarm <ref>` (run) → user reads `REPORT.md`.
 
-**The core contract:** every question a human must answer is answered during Setup. During Run, no agent — including the orchestrator — stops to ask the user anything. Agents commit to decisions and record them for after-the-fact review.
+**The core contract** is `/plan`'s **Batches** standard, applied to a whole run:
+- Every question a human must answer is answered during Setup, and written into the plan.
+- During Run, no agent stops to ask the user anything, and that includes the orchestrator. Agents make the call, stub what would be expensive to throw away, and flag it.
+- Everything the owner must see or decide lands in one numbered review block in the plan, cleared together after the run.
 
 ## Input
 
@@ -144,20 +147,24 @@ When in doubt, go up a tier — a swarm's cost center is redone work, not tokens
 
 This is the heart of setup. Collect and present, via AskUserQuestion (batched, with recommendations):
 
-1. Every item in the plan's Risks / Open Questions section that requires human judgment
+1. Every open question in the plan's `## Open questions` (see `/plan`, **Batches**), and every item in its Risks section that requires human judgment. Setup is the batch's gate: a question that bites any unit is answered here
 2. Every ambiguity or drift found in S1/S2
 3. Run policy for THIS swarm: may agents touch the live/prod database? May the swarm deploy, or does the deploy phase get excluded and left for the user? Merge to main at the end, or leave the integration branch for review? (For a PR-mode plan — a team repository — the answer is never "merge to main", and the ship and look policies come from `swarm.ship` / `swarm.look` when kit.json records them; ask only what they leave open. See **Team repositories** below.) Max concurrent agents (default from `.claude/kit.json` `swarm.maxAgents`, else 6)?
 4. Show the per-unit model assignments (from the S2 policy table) as part of the setup summary. Only ask about assignments that are genuine judgment calls — a plan that's all-`opus` needs no question, just the table
 5. Lead the summary with the parallelism profile and expected wall-clock shape, so the user knows what kind of run they're approving — a wide fan-out or a supervised serial march
 
-Anything the user delegates back ("you decide") gets a committed default written down. Log the material answers as brain `decision` entries (normal `/brainstorm` conventions, tagged `swarm`). **A question that survives setup unanswered is a setup failure** — either get it answered or write the decision rule an agent will apply.
+Anything the user delegates back ("you decide") gets a committed default written down. **Where answers go:**
+- A question about **what gets built** is answered in the plan itself, per `/plan`'s **Batches**. The answer goes into its **Answer:** line, then becomes one of the plan's numbered decisions.
+- A **run-policy** answer (database, deploy, merge target, concurrency) goes into SWARM.md.
+
+Log the material answers as brain `decision` entries (normal `/brainstorm` conventions, tagged `swarm`). **A question that survives setup unanswered is a setup failure** — either get it answered or write the decision rule an agent will apply.
 
 ### Step S4 — Write the swarm package
 
 Create `cowork/swarm/<plan_id>/SWARM.md` (own directory — never inside a plan root, where it would pollute `/plan` numbering):
 
 - **Run config** — plan path, merge target, policy answers from S3, max agents, the checks contract (exact commands reviewers run), and the parallelism profile
-- **Decision record** — every S3 answer and delegated default, numbered (`D1`, `D2`…) so briefs can cite them
+- **Decision record** — the run-policy answers and delegated defaults, numbered (`D1`, `D2`…) so briefs can cite them. Decisions about what gets built live in the plan, and briefs cite them by the plan's own numbers
 - **Unit graph** — table: unit key, title, plan phases, depends_on, resources, territory, model, reviewer model; plus a short dispatch-order narrative
 - **Per-unit briefs** — one section per unit, fully self-contained (`### Unit U3 — <title>`): objective, the plan items it owns (copied, not referenced by number alone), file territory, what it must NOT touch, its verification criteria from the plan, relevant decisions (`per D4: …`), and known landmines from S1
 - **The agent protocol** (copied verbatim into the file so briefs can reference it — see **Run rules** below)
@@ -165,7 +172,7 @@ Create `cowork/swarm/<plan_id>/SWARM.md` (own directory — never inside a plan 
 Then:
 - Insert the `swarm_runs` row (`status = 'ready'`, `swarm_dir`, `plan_id`, `plan_path`) and one `swarm_units` row per unit
 - Add one line under the plan's title: `> **Swarm:** prepared YYYY-MM-DD — see cowork/swarm/<plan_id>/SWARM.md`
-- Do not otherwise rewrite the plan — it stays the source of truth for *what*; SWARM.md owns *who and in what order*
+- Beyond the answers S3 wrote into it, do not rewrite the plan — it stays the source of truth for *what*; SWARM.md owns *who and in what order*
 
 ### Step S5 — Hand off
 
@@ -191,8 +198,13 @@ earlier slice's squash merge lands, the later one replays only its own commits
 | kind | means | ships |
 |---|---|---|
 | `invisible` | nothing a user can see changes: plumbing, a shared package, config | as soon as its checks and review pass |
-| `fix` | restores intended behaviour, with no design choice in it | the same, and it still gets a row in the next look table so the owner can confirm it |
+| `fix` | restores intended behaviour, with no design choice in it | the same, and it still gets a look item in the review block so the owner can confirm it |
 | `user-facing` | a change a person will see or feel | only after the owner's batch look (below) |
+
+**A stub never ships unconfirmed.** A team repository often merges and deploys a green pull
+request on its own. So a unit of any kind whose report carries a **stubbed call** the owner has
+not confirmed parks like a user-facing one, and its dependents stack on its branch. A call that is
+cheap to undo and needs no stub ships, and it goes into the review block for confirmation.
 
 **Resource tags come from the project's map.** A team repository usually shares one local stack
 across every worktree: dev servers bound to fixed ports, one local database, one package
@@ -218,13 +230,15 @@ them and asks (S3) only what they leave open:
 
 **The run, per slice:**
 
-1. **Build** in the unit's worktree with the project's quick checks, and request every changed
-   page on a local run yourself — a passing check is not a running app.
+1. **Build** in the unit's worktree with the project's quick checks, and check every changed page
+   on a local run in a headless browser of the agent's own (`/look`, **Headless**). A passing check
+   is not a running app, and the owner's shared browser is never the agent's to drive.
 2. **Invisible and fix slices ship:** write their tests, then run the project's ship command
    (`rules.plan` names it) under the `swarm.ship` policy.
-3. **User-facing slices park** (`status = 'parked'`): built and looked at by the agent, but no
-   ship-time checks and no UI tests yet — a change of mind in the look would throw both away.
-   Their rows go into the look table.
+3. **User-facing slices park** (`status = 'parked'`), and so do slices holding an unconfirmed
+   stub. They are built and checked headless by the agent, but get no ship-time checks and no UI
+   tests yet, because a change of mind in the look would throw both away. Their looks and calls go
+   into the plan's review block.
 4. **The team's own review tool is the reviewer** when `swarm.review` names one — a review bot
    whose verdict the team's merge honours. It runs against the pushed head and replaces the
    swarm's reviewer agent for that unit; a second review would be duplicate spend. A blocking
@@ -243,14 +257,16 @@ them and asks (S3) only what they leave open:
 the owner asks, the orchestrator:
 
 1. starts what the parked slices need — one worktree per lane, the lane's latest branch, which
-   carries every stacked slice in it — and requests every page itself first;
-2. writes `cowork/swarm/<plan_id>/LOOK.md`: **one table** for all of them — the URL, what
-   changed, what to test, what right looks like, and the viewport widths to check;
-3. sends a push notification that the look is ready — the one mid-run interruption worth
+   carries every stacked slice in it — and requests every page itself first, headless;
+2. tidies the plan's `## Review` block (`/plan`, **Batches**) into one numbered list for all of
+   them: each look with its URL, what changed, what to try, what right looks like and the widths,
+   and each call with its options and switching cost;
+3. sends a push notification that the review is ready — the one mid-run interruption worth
    sending;
-4. takes the owner's feedback as one amendment (D-numbered in SWARM.md), applies it across the
-   slices it touches, shows only what changed again, and then each approved slice writes its
-   tests and ships.
+4. clears the items with the owner, who opens each URL in the shared browser themselves. Their
+   feedback is one amendment (D-numbered in SWARM.md; a product or design answer also becomes a
+   plan decision), applied across the slices it touches. Only what changed is shown again, then
+   each approved slice writes its tests and ships.
 
 A run whose remaining work is parked slices waiting on the owner is **waiting, not stalled**: the
 status says so, and the stall watchdog leaves it alone.
@@ -275,13 +291,18 @@ Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 1. **Ready set** = pending units whose `depends_on` are all `merged` and whose `resources` collide with no unit currently `working`/`review`.
 2. Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `run_in_background: true`, `isolation: "worktree"`, `model` = the unit's assigned model from the graph. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, integration branch name, and required branch name `swarm/<plan_id>-<unit_key>`. Mark units `working`. When the plan's code lives in a checkout other than the session's repo, dispatch without `isolation` and have the brief create the unit's worktree in the target checkout with `swarm.worktree`'s commands (see **Team repositories**).
 3. On a completion notification: spawn a **reviewer agent** (read-only, background, `model` = the unit's assigned reviewer model) with the unit brief, the worktree path, the unit's verification criteria, and the checks contract from SWARM.md (exact commands — reviewers never guess). It inspects the diff, runs those checks in the worktree, and returns PASS or FAIL with findings. Mark the unit `review`.
-4. **Reviewer PASS** → merge the unit branch into the integration branch. The orchestrator resolves any conflicts itself — it holds every brief and both sides of the conflict; agents never see each other's work. Then: mark plan items `- [x]` with progress notes (per `/plan` conventions), update `swarm_units` (`merged`, `result` = one-line summary), commit plan + brain on the integration branch, remove the worktree, and loop back to 1 — a merge may unblock dependents.
+4. **Reviewer PASS** → merge the unit branch into the integration branch. The orchestrator resolves any conflicts itself — it holds every brief and both sides of the conflict; agents never see each other's work. Then:
+   - mark plan items `- [x]` with progress notes (per `/plan` conventions);
+   - append the unit's **Looks** and **Calls** to the plan's `## Review` block (`/plan`, **Batches**) — the orchestrator is its only writer;
+   - update `swarm_units` (`merged`, `result` = one-line summary);
+   - commit plan + brain on the integration branch and remove the worktree;
+   - loop back to 1, because a merge may unblock dependents.
 5. **Reviewer FAIL** → spawn a fix agent in the same worktree with the findings, on the unit's model; the **second** fix cycle always escalates to `opus` regardless of assignment. Max **two** fix cycles; then mark the unit `failed`, record why, and continue — everything not depending on it still runs. Dependents of a failed unit become `skipped`.
 6. Post a one-line progress note as each unit changes state. Between events there is nothing to poll — background agents re-invoke the session when they finish.
 
 **Stall watchdog.** A hung agent never sends a completion notification, and a remote-monitored run that silently stalls defeats the system. Keep a background timer alive whenever units are in flight (a background `sleep 1800` re-invokes the session when it exits; restart it each cycle). On each wake: any unit in `working`/`review` with no state change for ~30 minutes gets investigated — `ListAgents` to see if its agent is alive. Dead agent, no commits → reset the unit to `pending` and re-dispatch. Dead agent, commits present → send to review. Alive and progressing → leave it, reset the timer. Two watchdog re-dispatches on the same unit → mark it `failed` and move on.
 
-**Mid-run steering.** The no-questions rule binds agents, not the user. A user message arriving mid-run (typically via `/rc`) is an **amendment**: append it to the SWARM.md decision record, timestamped, continuing the D-numbering. Amendments apply to not-yet-dispatched units immediately; in-flight units are unaffected unless the user explicitly says to stop one (then `TaskStop` it and re-dispatch under the amended brief, or skip it, per their instruction). Every amendment and its effect is listed in REPORT.md. Never pause the swarm to wait for possible steering — amendments are applied when they arrive, not solicited.
+**Mid-run steering.** The no-questions rule binds agents, not the user. A user message arriving mid-run (typically via `/rc`) is an **amendment**: append it to the SWARM.md decision record, timestamped, continuing the D-numbering; one that decides what gets built also becomes a plan decision, and clears any review item it answers. Amendments apply to not-yet-dispatched units immediately; in-flight units are unaffected unless the user explicitly says to stop one (then `TaskStop` it and re-dispatch under the amended brief, or skip it, per their instruction). Every amendment and its effect is listed in REPORT.md. Never pause the swarm to wait for possible steering — amendments are applied when they arrive, not solicited.
 
 ### Step R3 — Integration gate
 
@@ -295,16 +316,16 @@ When all units are terminal:
 
 1. Merge the integration branch into the merge target per the setup decision (default: merge to main locally, no push; or leave the branch if that was the decision — then say so prominently). A PR-mode plan merges nothing into the default branch: each slice's branch is left for the ship command, per **Team repositories**.
 2. Update the plan: `**Status:** done` on completed phases, RESUME WORK HERE banner on the first failed/skipped item if any. Mark linked brain tasks done (per `/plan` update conventions).
-3. Write `cowork/swarm/<plan_id>/REPORT.md` — **the user's morning-after read**:
+3. **Tidy the plan's `## Review` block** (`/plan`, **Batches**): every look and call the run produced, deduplicated, each URL requested again, numbered 1…N in click-through order. It is the review surface that replaces mid-run questions, and the owner clears it with the next session, item by item.
+4. Write `cowork/swarm/<plan_id>/REPORT.md` — **the user's morning-after read**:
    - Outcome summary: units merged / failed / skipped, wall-clock, phases done
-   - **Decisions made autonomously** — aggregated from every agent's report, each with its rationale. This is the review surface replacing mid-run questions
-   - **Questions for you** — things agents flagged as worth human eyes, none of which blocked work
+   - **Waiting on you** — the count of review items and a pointer to the plan's `## Review` block. The block is the one list; the report never keeps a second one
    - Verification results (actual output, including anything that failed)
    - Follow-ups and loose ends, routed like `/plan carry` would
-4. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, whether sub-`opus` assignments survived review, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
-5. Set run status `done` (`completed_at`), commit, remove remaining worktrees, delete merged unit branches, keep the integration branch.
-6. **Notify.** Send a push notification (`PushNotification`) with the one-line outcome — "Swarm 021: 5/6 units merged, U4 failed (see REPORT.md)". The user designed this to run while they're away; completion and failure are the two interruptions worth sending. Also notify on a hard mid-run stop (baseline drift, aborted run).
-7. Final message: outcome first, then where the report is. If anything failed, say so plainly — never bury a failed unit in a success narrative.
+5. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, whether sub-`opus` assignments survived review, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
+6. Set run status `done` (`completed_at`), commit, remove remaining worktrees, delete merged unit branches, keep the integration branch.
+7. **Notify.** Send a push notification (`PushNotification`) with the one-line outcome — "Swarm 021: 5/6 units merged, U4 failed, 7 items waiting on you (see the plan's Review)". The user designed this to run while they're away; completion and failure are the two interruptions worth sending. Also notify on a hard mid-run stop (baseline drift, aborted run).
+8. Final message: outcome first, then how many review items wait on the owner and where the report is. If anything failed, say so plainly — never bury a failed unit in a success narrative.
 
 ### Resume (status = 'running')
 
@@ -316,10 +337,20 @@ An interrupted run. Reconcile before touching anything: `ListAgents` for still-l
 
 Copied into SWARM.md at setup; binding for every spawned agent.
 
-- **Never ask the user anything.** Blocked on a judgment call? Apply the decision protocol: (1) the plan is authoritative → (2) the SWARM.md decision record → (3) brain DB decisions → (4) choose the smallest reasonable interpretation consistent with codebase conventions. Commit to it and record it in your final report under `Decisions`. A decision you can reverse later beats a stalled swarm.
+- **Never ask the user anything.** Blocked on a judgment call? Think like a senior engineer and product manager, and apply the decision protocol: (1) the plan and its decisions are authoritative → (2) the SWARM.md decision record → (3) brain DB decisions → (4) choose the smallest reasonable interpretation consistent with codebase conventions. Commit to it and record it in your final report under `Calls`. A decision you can reverse later beats a stalled swarm.
+- **Stub what would be expensive to throw away.** When the options each cost real work, pick the best one and build the seam in full, then the behaviour behind it minimally. The seam is the types, exports, schema, routes and contracts other units consume, and no unit waiting on yours should be blocked by the stub. The owner may change course in the review, so keep the discarded work small.
+- **The one exception to "never ask"** is an action not pre-approved in SWARM.md that is irreversible or outward-facing (deleting shared data, notifying people, spending money, touching production), or a security or data-exposure risk. Do not take it and do not wait: finish what does not depend on it, and report it under `Blocked`. The orchestrator parks the unit and notifies the owner.
+- **Check UI in your own headless browser** (`/look`, **Headless**): the page loads without errors, the changed control is there, the interaction works, nothing overflows at a phone width, and one screenshot per page per width shows nothing broken. Never drive the owner's shared browser. How it looks (design, layout, wording, a design choice) is the owner's: report it under `Looks`.
 - **Stay in your territory.** Read anything; edit only your unit's files. Never edit the plan file, `cowork/**` (brain, plans, swarm files), or `.claude/**` — your worktree's copies would conflict on merge. The orchestrator owns all bookkeeping.
 - **Commit your work** on your assigned branch, in coherent chunks with real messages. Never stage `cowork/` paths.
-- **Verify before reporting done.** Run your brief's verification criteria and the project's checks yourself. Report honestly: what passed, what you couldn't verify, what you decided, what a human should look at. The structured final report (`Done / Decisions / Questions / Unverified`) is your only channel out.
+- **Verify before reporting done.** Run your brief's verification criteria and the project's checks yourself. Report honestly: what passed, what you couldn't verify, what you decided, what a human should look at. The structured final report is your only channel out, and it has five sections:
+  - `Done`
+  - `Calls`: each with the options, why this one, what is stubbed (paths), what switching would cost, and what depends on it
+  - `Looks`: each with the URL, what changed, what to try, what right looks like, the widths, and what your headless check confirmed
+  - `Blocked`
+  - `Unverified`
+
+  The orchestrator copies `Calls` and `Looks` into the plan's review block. Anything else worth a human's eyes is a `Call` or a `Look`.
 - **Respect resource tags.** If your brief carries none, do not touch shared external state (live DBs, deploys) at all.
 
 Orchestrator-side:
@@ -336,7 +367,7 @@ Orchestrator-side:
 The salvage path. When `/swarm <ref>` hits a `done` or `aborted` run with unmerged units, report the outcome, then offer to set up a remainder run. On yes:
 
 1. **Diff reality against the plan.** What actually merged (integration branch history, plan checkboxes, REPORT.md) vs. what the failed/skipped units owned. Salvageable commits on surviving unit branches are noted — a failed unit's partial work can seed a fresh brief rather than being redone blind.
-2. **Re-run Setup over only the remainder** — same S1–S5, but smaller: the decision record carries forward from the prior SWARM.md (copied, then extended — prior answers are not re-asked), and REPORT.md's "Questions for you" become S3 items now that a human is present. New failures get fresh root-cause attention in the briefs: a unit that failed review twice needs a better brief or a different slicing, not a third identical attempt.
+2. **Re-run Setup over only the remainder** — same S1–S5, but smaller: the decision record carries forward from the prior SWARM.md (copied, then extended — prior answers are not re-asked), and the plan's uncleared review items are cleared with the owner first, as S3 items, now that a human is present. New failures get fresh root-cause attention in the briefs: a unit that failed review twice needs a better brief or a different slicing, not a third identical attempt.
 3. Register as a **new** `swarm_runs` row (the old one is history, never reopened), with `notes` linking back to the prior run id. The new SWARM.md lives in the same `cowork/swarm/<plan_id>/` directory as `SWARM-2.md` / `REPORT-2.md`, suffix incrementing.
 4. Hand off as usual: review, commit, fresh session, `/swarm <ref>`.
 
@@ -344,7 +375,7 @@ The salvage path. When `/swarm <ref>` hits a `done` or `aborted` run with unmerg
 
 ## Status Flow
 
-Read-only. Load the run and units, print: run status, unit table (key, title, status, branch — and for a PR-mode run, lane, kind and PR), live agents (`ListAgents`), and what's blocking what. Parked slices waiting on the owner are listed with the path of the current `LOOK.md`. Do not start or resume work.
+Read-only. Load the run and units, print: run status, unit table (key, title, status, branch — and for a PR-mode run, lane, kind and PR), live agents (`ListAgents`), and what's blocking what. Parked slices waiting on the owner are listed with the count of open items in the plan's `## Review` block. Do not start or resume work.
 
 ## Abort Flow
 
@@ -356,7 +387,7 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 
 - **Phase inference is silent.** Never ask "setup or run?" — the brain state answers it.
 - **Setup is conversational, run is autonomous.** All human judgment is front-loaded into S3.
-- **The plan file remains the source of truth for what**; SWARM.md for who/when; REPORT.md for what actually happened.
+- **The plan file remains the source of truth for what** (and its `## Review` block for what waits on the owner); SWARM.md for who/when; REPORT.md for what actually happened.
 - **One swarm per plan at a time.** A `ready` or `running` row blocks a second setup for the same plan.
 
 ## Project overrides
