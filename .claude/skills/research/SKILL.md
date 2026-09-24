@@ -61,7 +61,7 @@ Assess the topic and propose a research depth before executing:
 - **Standard research** (technology evaluation, how-to, comparison): 4-6 sources, 3-5 page report. 3 parallel agents.
 - **Deep dive** (strategic analysis, competitive landscape, architecture decision): 6-12 sources, 5-15 page report. Scout + 4-5 parallel agents + iterative deepening.
 
-Briefly present: the proposed depth, 3-5 search angles you plan to cover, and any relevant prior research found in Step 2. Wait for user confirmation before proceeding. This is the ONE exception to "execute immediately."
+Briefly present: the proposed depth, 3-5 search angles you plan to cover, and any relevant prior research found in Step 2, each pointing at the lines of the prior report that bear on it (see **Pointing at a line**). Wait for user confirmation before proceeding. This is the ONE exception to "execute immediately."
 
 ### Step 4 — Scout pass (deep dive only)
 
@@ -247,7 +247,7 @@ UPDATE logs SET superseded_by = last_insert_rowid(), status = 'superseded' WHERE
 
 ### Step 11 — Report back
 
-Report back with the file path and a 2-3 sentence summary of what was found.
+Report back with the file path and a 2-3 sentence summary of what was found. Point each finding the summary mentions at its line in SUMMARY.md, and give the line ranges of **Key Findings**, **Open Questions** and **Recommended Actions** so the user can go straight to them.
 
 If findings are significant enough to inform future project decisions, also add a brain entry via:
 ```sql
@@ -366,9 +366,30 @@ installs the kit. Research output belongs to the repo that produced it. If a
 learning is genuinely universal and worth promoting into the baseline, say so in
 the run's wrap-up and let the user move it deliberately.
 
+## Pointing at a line
+
+A run leaves a long SUMMARY.md and one report per agent, and the user reads them in an editor.
+So **every message to the user that refers to part of a research file gives the line it sits
+on.** That covers a finding, a contradiction between agents, an open question, a recommended
+action, a source, a passage of prior research and an entry in `SOURCE-NOTES.md`. It holds during
+a run and in any later conversation about its reports. "Agent B disagrees on pricing" sends the
+user searching, while "agent B disagrees on pricing
+(`cowork/research/004_2026-06-22_oauth-providers/agent-pricing.md:41`)" takes them to it.
+
+- **Path and line, clickable.** Give the repo-relative path with `:line`, or `:start-end` for a
+  section, in whatever form the environment makes clickable: a markdown link where the client
+  renders one, plain `path:line` in a terminal.
+- **Look the number up just before sending.** SUMMARY.md is rewritten while a run synthesizes
+  and deepens, so a number from an earlier read, or from memory, is wrong. Run `grep -n` for the
+  heading or finding after the last write to the file.
+- **Line numbers go in messages, never in the reports.** Inside a report, point at another by its
+  file and finding number (`agent-pricing.md`, finding 3), because a later edit would move any
+  line written there.
+
 ## Rules
 
 - **Confirm depth first** — Propose depth + angles, wait for user confirmation, then execute
+- **Point at the line** — every message to the user about a research file cites its path and line, looked up just before sending (see **Pointing at a line**)
 - **Agents write their own reports** — Each subagent writes its report directly. The orchestrator writes ONLY the SUMMARY.md synthesis.
 - **Use today's actual date** for the filename, not a hardcoded date
 - **Topic slug** in the folder name should be short kebab-case (e.g., `css-cascade-layers`, `static-site-generators`)
