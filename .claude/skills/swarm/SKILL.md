@@ -1,7 +1,7 @@
 ---
 name: swarm
-description: Prep a plan for autonomous parallel execution, then run it with an orchestrated agent swarm. Phase is inferred from brain state — unregistered plan -> Setup, registered ready -> Run, running -> Resume. Also status / abort / report.
-argument-hint: "[plan ref | scope NNN | status | abort | report]"
+description: Prep a plan for autonomous parallel execution, then run it with an orchestrated agent swarm. Phase is inferred from brain state — unregistered plan -> Setup, registered ready -> Run, running -> Resume. Also status / abort / report, and review — the owner's batch look from a parallel session while the run keeps going.
+argument-hint: "[plan ref | scope NNN | status | abort | report | review [plan ref]]"
 ---
 
 ## Swarm State
@@ -40,6 +40,7 @@ Optional argument: `$ARGUMENTS`
 - `status` → **Status flow** (read-only)
 - `abort` → **Abort flow**
 - `report` → print the most recent run's `REPORT.md` path and summarize it
+- `review [plan ref]` → **Review flow**: the owner's batch look, run from a **parallel session** while the run keeps going. Never the orchestrator's own session
 - A plan ref (`021`, `mvp 001`, filename fragment, or full path) → resolve using the same rules as `/plan` (check `meta.plan_path` on brain tasks first, then scan roots; ask if ambiguous), then route by the table above
 - Empty → if exactly one run is `ready` or `running`, use it; otherwise list and ask
 
@@ -59,7 +60,8 @@ CREATE TABLE IF NOT EXISTS swarm_runs (
   base_commit TEXT,
   started_at TEXT,
   completed_at TEXT,
-  notes TEXT
+  notes TEXT,
+  orchestrator TEXT
 );
 CREATE TABLE IF NOT EXISTS swarm_units (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,9 +82,25 @@ CREATE TABLE IF NOT EXISTS swarm_units (
   kind TEXT,
   pr TEXT
 );
+CREATE TABLE IF NOT EXISTS swarm_holds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id INTEGER NOT NULL REFERENCES swarm_runs(id),
+  tag TEXT NOT NULL,
+  holder TEXT NOT NULL,
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  released_at TEXT
+);
 ```
 
 `swarm_runs.status` is what makes phase inference work across sessions — keep it accurate at every transition.
+
+`swarm_runs.orchestrator` is the name other sessions use to message the run's orchestrator session (the
+name `ListAgents` reports as "This session is …"). `swarm_holds` records shared state a review session
+has borrowed from a live run (see **Review flow**): one row per resource tag, open while `released_at`
+is empty. **A brain created before these existed** gets them without a rebuild: `CREATE TABLE IF NOT
+EXISTS` adds `swarm_holds`, and when `PRAGMA table_info(swarm_runs)` lacks `orchestrator`, run
+`ALTER TABLE swarm_runs ADD COLUMN orchestrator TEXT;` once.
 
 `parked`, `shipped`, `lane`, `kind` and `pr` serve PR-mode runs (see **Team repositories**): `parked`
 is built and waiting for the owner's batch look; `shipped` has an open PR on its way through the
@@ -253,24 +271,30 @@ them and asks (S3) only what they leave open:
 
 **Never merge anything into the team's default branch locally.**
 
-**The batch look.** When user-facing slices are parked and nothing else is in flight, or when
-the owner asks, the orchestrator:
+**The batch look happens beside the run, not inside it.** When user-facing slices are parked and
+nothing else is in flight, or when the owner asks, the orchestrator:
 
-1. starts what the parked slices need — one worktree per lane, the lane's latest branch, which
-   carries every stacked slice in it — and requests every page itself first, headless;
-2. tidies the plan's `## Review` block (`/plan`, **Batches**) into one numbered list for all of
-   them: each look with its URL, what changed, what to try, what right looks like and the widths,
-   and each call with its options and switching cost;
-3. sends a push notification that the review is ready — the one mid-run interruption worth
-   sending;
-4. clears the items with the owner, one by one, each by its number and plan line; the owner opens
-   each URL in the shared browser themselves. Their
-   feedback is one amendment (D-numbered in SWARM.md; a product or design answer also becomes a
-   plan decision), applied across the slices it touches. Only what changed is shown again, then
-   each approved slice writes its tests and ships.
+1. tidies the plan's `## Review` block (`/plan`, **Batches**) into one numbered list for all of
+   them: each look with its URL, what changed, what to try, what right looks like, the widths and
+   what it **runs on** (the app, and the checkout that serves it — normally the lane's latest
+   branch, which carries every slice stacked in it; a look that needs another branch, such as a fix
+   that shipped from its own, names that one), and each call with its options and switching cost;
+2. sends a push notification that the review is ready — the one mid-run interruption worth
+   sending — telling the owner to open a **parallel session** and run `/swarm review`;
+3. keeps dispatching. The review session serves the pages, borrows only the shared state they
+   need (recorded in `swarm_holds`, and announced to this session by message), gives each piece
+   back as soon as its looks are done, and ends with one handoff (**Review flow**).
 
-A run whose remaining work is parked slices waiting on the owner is **waiting, not stalled**: the
-status says so, and the stall watchdog leaves it alone.
+When the handoff arrives:
+- **Re-read the plan from disk before writing it.** The owner marks items in the plan directly, and
+  those marks are uncommitted edits.
+- Apply the handoff as **one amendment** across the slices it touches: D-numbered in SWARM.md, and
+  a product or design answer also becomes a plan decision. A consequence the review session applied
+  without asking is flagged as that in the review block.
+- Only what changed is shown again at the next look. Each approved slice writes its tests and ships.
+
+A run whose remaining work is parked slices waiting on the owner is **waiting, not stalled**, and so
+is a unit waiting on a review hold: the status says so, and the stall watchdog leaves both alone.
 
 ---
 
@@ -282,7 +306,7 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
 
 1. Load the `swarm_runs` row, `SWARM.md`, and the plan. Ensure `status = 'ready'`.
 2. Preflight: working tree clean; on the merge-target branch; `git worktree list` shows no leftover `swarm/` worktrees. If commits landed since setup, do a fast delta check — if they invalidate unit briefs, stop and tell the user to re-run setup; don't guess.
-3. Create the integration branch `swarm/<plan_id>` from HEAD and check it out. Record `base_commit`, `integration_branch`, `started_at`; set status `running`.
+3. Create the integration branch `swarm/<plan_id>` from HEAD and check it out. Record `base_commit`, `integration_branch`, `started_at`, and `orchestrator` (this session's name, from `ListAgents`); set status `running`.
 4. Announce the dispatch order in one short message (this is what `/rc` monitoring sees first).
 
 ### Step R2 — Dispatch loop
@@ -290,7 +314,7 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
 Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 
 1. **Ready set** = pending units whose `depends_on` are all `merged` and whose `resources` collide with no unit currently `working`/`review`.
-2. Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `run_in_background: true`, `isolation: "worktree"`, `model` = the unit's assigned model from the graph. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, integration branch name, and required branch name `swarm/<plan_id>-<unit_key>`. Mark units `working`. When the plan's code lives in a checkout other than the session's repo, dispatch without `isolation` and have the brief create the unit's worktree in the target checkout with `swarm.worktree`'s commands (see **Team repositories**).
+2. Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `run_in_background: true`, `isolation: "worktree"`, `model` = the unit's assigned model from the graph. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, run id, the brain's absolute path (for the review-hold check), integration branch name, and required branch name `swarm/<plan_id>-<unit_key>`. An open review hold never blocks dispatch: units honour it themselves, only at the step that uses the held state. Mark units `working`. When the plan's code lives in a checkout other than the session's repo, dispatch without `isolation` and have the brief create the unit's worktree in the target checkout with `swarm.worktree`'s commands (see **Team repositories**).
 3. On a completion notification: spawn a **reviewer agent** (read-only, background, `model` = the unit's assigned reviewer model) with the unit brief, the worktree path, the unit's verification criteria, and the checks contract from SWARM.md (exact commands — reviewers never guess). It inspects the diff, runs those checks in the worktree, and returns PASS or FAIL with findings. Mark the unit `review`.
 4. **Reviewer PASS** → merge the unit branch into the integration branch. The orchestrator resolves any conflicts itself — it holds every brief and both sides of the conflict; agents never see each other's work. Then:
    - mark plan items `- [x]` with progress notes (per `/plan` conventions);
@@ -301,7 +325,7 @@ Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 5. **Reviewer FAIL** → spawn a fix agent in the same worktree with the findings, on the unit's model; the **second** fix cycle always escalates to `opus` regardless of assignment. Max **two** fix cycles; then mark the unit `failed`, record why, and continue — everything not depending on it still runs. Dependents of a failed unit become `skipped`.
 6. Post a one-line progress note as each unit changes state. Between events there is nothing to poll — background agents re-invoke the session when they finish.
 
-**Stall watchdog.** A hung agent never sends a completion notification, and a remote-monitored run that silently stalls defeats the system. Keep a background timer alive whenever units are in flight (a background `sleep 1800` re-invokes the session when it exits; restart it each cycle). On each wake: any unit in `working`/`review` with no state change for ~30 minutes gets investigated — `ListAgents` to see if its agent is alive. Dead agent, no commits → reset the unit to `pending` and re-dispatch. Dead agent, commits present → send to review. Alive and progressing → leave it, reset the timer. Two watchdog re-dispatches on the same unit → mark it `failed` and move on.
+**Stall watchdog.** A hung agent never sends a completion notification, and a remote-monitored run that silently stalls defeats the system. Keep a background timer alive whenever units are in flight (a background `sleep 1800` re-invokes the session when it exits; restart it each cycle). On each wake: any unit in `working`/`review` with no state change for ~30 minutes gets investigated — `ListAgents` to see if its agent is alive. Dead agent, no commits → reset the unit to `pending` and re-dispatch. Dead agent, commits present → send to review. Alive and progressing → leave it, reset the timer. Two watchdog re-dispatches on the same unit → mark it `failed` and move on. A unit waiting on an open review hold is not stalled. A hold whose holder session has left `ListAgents` is released: set `released_at` and note it.
 
 **Mid-run steering.** The no-questions rule binds agents, not the user. A user message arriving mid-run (typically via `/rc`) is an **amendment**: append it to the SWARM.md decision record, timestamped, continuing the D-numbering; one that decides what gets built also becomes a plan decision, and clears any review item it answers. Amendments apply to not-yet-dispatched units immediately; in-flight units are unaffected unless the user explicitly says to stop one (then `TaskStop` it and re-dispatch under the amended brief, or skip it, per their instruction). Every amendment and its effect is listed in REPORT.md. Never pause the swarm to wait for possible steering — amendments are applied when they arrive, not solicited.
 
@@ -330,7 +354,7 @@ When all units are terminal:
 
 ### Resume (status = 'running')
 
-An interrupted run. Reconcile before touching anything: `ListAgents` for still-live agents, `git worktree list` + branch state vs `swarm_units` rows. A unit `working` with no live agent and no commits → back to `pending`; with commits → send it to review. Then re-enter the dispatch loop.
+An interrupted run. Record this session's name as `swarm_runs.orchestrator` (a review session messages it there). Reconcile before touching anything: `ListAgents` for still-live agents, `git worktree list` + branch state vs `swarm_units` rows. A unit `working` with no live agent and no commits → back to `pending`; with commits → send it to review. Then re-enter the dispatch loop.
 
 ---
 
@@ -347,18 +371,28 @@ Copied into SWARM.md at setup; binding for every spawned agent.
 - **Verify before reporting done.** Run your brief's verification criteria and the project's checks yourself. Report honestly: what passed, what you couldn't verify, what you decided, what a human should look at. The structured final report is your only channel out, and it has five sections:
   - `Done`
   - `Calls`: each with the options, why this one, what is stubbed (paths), what switching would cost, and what depends on it
-  - `Looks`: each with the URL, what changed, what to try, what right looks like, the widths, and what your headless check confirmed
+  - `Looks`: each with the URL, what changed, what to try, what right looks like, the widths, what it runs on (the app, and the checkout or branch that must serve it), and what your headless check confirmed
   - `Blocked`
   - `Unverified`
 
   The orchestrator copies `Calls` and `Looks` into the plan's review block. Anything else worth a human's eyes is a `Call` or a `Look`.
 - **Respect resource tags.** If your brief carries none, do not touch shared external state (live DBs, deploys) at all.
+- **Honour review holds.** The owner may be reviewing in a parallel session that has borrowed some of
+  the shared state (**Review flow**). Right before any step that uses a tagged resource's shared
+  state, check for an open hold on that tag:
+  `sqlite3 <brain> "SELECT holder, detail FROM swarm_holds WHERE run_id = <run> AND tag = '<tag>' AND released_at IS NULL"`.
+  - **Steps that count:** starting a dev server on a fixed port, resetting or migrating a database.
+  - **While held:** carry on with everything that does not need it, and do the held step last.
+  - **If that step is all that is left:** re-check every minute until the hold is released.
+  - **Never stop, restart or reuse a process you did not start**, even when it holds the port you need.
 
 Orchestrator-side:
 
 - **Only the orchestrator merges, and only after review.** No unit branch reaches the integration branch unreviewed.
 - **Resource locks are absolute** — never dispatch into a held tag, even if the code territories are disjoint.
 - **Keep `swarm_runs` / `swarm_units` current at every transition** — it's what a resume session reconstructs the world from.
+- **Re-read the plan from disk before every write.** The owner can edit it at any time, most often by marking review items, and a write from a stale copy erases their marks.
+- **Honour review holds yourself.** A database reset, a check that starts a server, a batch step: check `swarm_holds` first, exactly as units do.
 - **Failures degrade, never halt.** One failed unit skips its dependents and the rest of the swarm continues. The report tells the user what's left.
 
 ---
@@ -374,9 +408,135 @@ The salvage path. When `/swarm <ref>` hits a `done` or `aborted` run with unmerg
 
 ---
 
+## Review Flow
+
+`/swarm review [plan ref]` is the owner's batch look, run from a **parallel session** while the run keeps
+going. The orchestrator keeps dispatching. This session:
+- borrows only the shared state the looks need;
+- gives each piece back as soon as its looks are done;
+- ends with one handoff.
+
+It never writes the plan's bookkeeping, SWARM.md, REPORT.md or unit rows; the orchestrator stays
+their only writer. The owner marks items in the plan directly. Serving is configured by
+`swarm.reviewStack` (**Project overrides**); without it, ask the owner once how an app is started from
+a checkout, and use the answer for the whole session.
+
+### V1 — Find the run and its orchestrator
+
+- **The run** is the plan's `running` row, or the only `running` row when no plan ref is given.
+- **The orchestrator** is `swarm_runs.orchestrator`, confirmed live in `ListAgents`. When the column is
+  empty or that session is gone, find the peer session running `/swarm` for this plan. Ask the owner
+  only if more than one could be it. Record the answer in `orchestrator`.
+- **Never run in the orchestrator's own session:** the review would stall its dispatch loop. Say so
+  and tell the owner to open a parallel session.
+
+### V2 — Plan what to serve
+
+- **Sort the open items** in the plan's `## Review` block. Looks need serving; calls need only the owner.
+- **Name each look's app and checkout** from its **runs on** detail. For an older item without one,
+  use its unit's branch, or its lane's latest parked branch, which carries every slice stacked in it. A
+  look needing a branch the lane's latest does not carry (a fix that shipped from its own branch) gets
+  its own checkout.
+- **Group the click-through by server set.**
+  - Lanes an in-flight unit is waiting on come first, so their servers are released first.
+  - Within a group, each app is served from one checkout; a later group swaps a server's checkout at
+    most once.
+  - A look that spans two checkouts is split, and each half says where it was checked.
+
+### V3 — Check what is in use
+
+- **Find what's running:** the units `working` or in `review` and their tags, and any listener on the
+  ports the looks need. For each listener, note the checkout it serves from (its working directory).
+- **Don't take over a port a unit is using right now** for its own page check. Order those looks last,
+  or wait for the check to finish. Never stop a process this session did not start.
+- **Reuse the shared stack as it is** (`reviewStack.shared`). Start it (`reviewStack.sharedStart`) only
+  when it is down.
+
+### V4 — Take the hold, then tell the orchestrator
+
+- **Hold before serving.** Insert one `swarm_holds` row per tag:
+  - one for each app served (`reviewStack.tag`);
+  - one for each tag in `reviewStack.holdAlso`, such as a local database, so that nothing resets the
+    fixtures mid-review.
+
+  Each row's `holder` is this session's name; its `detail` is the app and the checkout.
+- **Message the orchestrator** with:
+  - what is held, and from which checkouts;
+  - that in-flight units keep building and defer the held steps;
+  - a request to relay the hold to any unit touching those tags, because a unit dispatched before the
+    hold rule existed learns of it only that way;
+  - that the verdicts will arrive as one handoff.
+
+### V5 — Serve
+
+- **Start each app from its checkout** with `reviewStack.serve`, in the background, with its full log
+  kept (`reviewStack.logs`).
+- **One start at a time per checkout.** A start may install packages into its checkout first, and two
+  installs into one checkout corrupt each other. Wait for the first app to listen before starting the
+  next from the same checkout. Different checkouts start in parallel.
+- **Confirm each server.** Its port listens from the intended checkout, and its looks' first URL
+  answers through the shared stack. A cookie-less request redirected to sign-in is normal.
+- **Confirm the fixtures** each look's setup note names are present. Re-apply any that are missing
+  with the note's own commands.
+- **Don't walk the pages yourself.** The units already checked them headless, and the owner is here to
+  look.
+
+### V6 — Hand over the browser
+
+- **Launch the shared browser** (`/look`) on the first group's first URL, and a status display
+  (`/pbar`). For each served app, the display shows whether it is up, which checkout serves it, and
+  whether its page answers.
+- **Give the owner:**
+  - the click-through order by group, each with its plan line range;
+  - the checkout each group runs on;
+  - how to give a verdict: in the plan, `[x]` to approve, `[fix]` with a note, or a note under a
+    call's option to change it; or by telling this session.
+- **The owner opens every URL.** Never navigate or resize their window.
+
+### V7 — Swap and release as the owner goes
+
+- **Never let a look run on the wrong checkout.** Before the owner reaches a look whose app needs
+  another checkout, swap that server and say so. A look checked on the wrong checkout is void: say so
+  the moment it is noticed, and have it retested.
+- **Release a group's servers as soon as its looks are done**, since a unit may be waiting:
+  1. stop the servers this session started;
+  2. restore the `reviewStack.restore` paths in those checkouts (files the dev server rewrites), so
+     each checkout ends as it was found. In a checkout a unit is still working in, undo only the dev
+     server's own change;
+  3. set `released_at` on those holds;
+  4. message the orchestrator `released: <tags>`.
+- **Triage errors the owner reports.** If an error is not from the slices under review, check whether
+  the default branch has it too, say so, and move on. It is not a verdict on the slice.
+
+### V8 — Collect the verdicts
+
+- **Read the owner's marks** from the plan's working-tree diff, plus anything they said to this session.
+- **An unmarked call is not accepted.** Ask once about all of them: all clear, or which to change?
+- **Apply what a changed call implies** for its sibling options. Flag each such change as applied
+  without asking.
+
+### V9 — Hand off and let go
+
+1. **Write the handoff** to `cowork/swarm/<plan_id>/review-YYYY-MM-DD-<n>.md`:
+   - what was served from which checkout;
+   - each item's verdict: approved, a fix in the owner's words, a changed call, or a consequence
+     applied;
+   - anything to check before an open PR merges;
+   - errors seen that belong to the default branch.
+2. **Release every remaining hold**, with the four steps above.
+3. **Message the orchestrator** the handoff's path and a one-line summary. It applies the handoff as
+   one amendment (**The batch look**, under **Team repositories**).
+4. **Tell the owner what happens next,** in one short list.
+
+A review session that ends abruptly leaves its holds open. The orchestrator's watchdog and the next
+`/swarm review` treat a hold whose holder has left `ListAgents` as released: they stop nothing, set
+`released_at`, and note it.
+
+---
+
 ## Status Flow
 
-Read-only. Load the run and units, print: run status, unit table (key, title, status, branch — and for a PR-mode run, lane, kind and PR), live agents (`ListAgents`), and what's blocking what. Parked slices waiting on the owner are listed with the count of open items in the plan's `## Review` block and its line range. Do not start or resume work.
+Read-only. Load the run and units, print: run status, unit table (key, title, status, branch — and for a PR-mode run, lane, kind and PR), live agents (`ListAgents`), open review holds (`swarm_holds`, with their holder), and what's blocking what. Parked slices waiting on the owner are listed with the count of open items in the plan's `## Review` block and its line range. Do not start or resume work.
 
 ## Abort Flow
 
@@ -403,7 +563,22 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 | `swarm.review` | The team's review tool, run against a pushed PR (`<pr>` is substituted); it replaces the swarm's reviewer agent |
 | `swarm.ship` | `ready` \| `draft` \| `ask` (default `ask`) — the owner's standing ship policy |
 | `swarm.look` | `batch` \| `per-slice` \| `none` (default `batch`) — when the owner reviews user-facing slices |
+| `swarm.reviewStack` | How `/swarm review` serves a look (below) |
+
+`swarm.reviewStack` keys (`<app>` and `<checkout>` are substituted; every key is optional):
+
+| Key | What it holds |
+|---|---|
+| `shared` | A command that exits 0 when the shared stack every app sits behind (a proxy, an auth service) is up |
+| `sharedStart` | How to start that stack when it is down: a command, or a skill to invoke |
+| `serve` | The long-running command that serves one app from one checkout |
+| `port` | A command printing the port that app listens on |
+| `tag` | The resource tag serving that app holds, matching the tags units carry (e.g. `port:<app>`) |
+| `holdAlso` | Tags the whole review holds, such as the local database its fixtures live in |
+| `restore` | Path globs the dev server rewrites in a checkout; their uncommitted changes are restored when a server stops |
+| `logs` | The directory server logs go to |
 
 ```bash
 jq -r '.swarm.maxAgents // 6, ((.swarm.checks // []) | join(" && ")), (.swarm.ship // "ask"), (.swarm.look // "batch"), (.rules."swarm" // empty)' .claude/kit.json 2>/dev/null
+jq '.swarm.reviewStack // empty' .claude/kit.json 2>/dev/null
 ```

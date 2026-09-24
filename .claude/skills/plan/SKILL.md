@@ -874,6 +874,7 @@ Everything the owner needs to see or decide goes into **one** numbered section o
 **Session YYYY-MM-DD** · 2 of 5 cleared · to open the pages: <how to start the app>
 
 - [ ] **1 · look** — <what changed> · <URL>
+  Runs on: <app> from <checkout or branch>
   Do: <what to click or try> · Right: <what right looks like> · Widths: 1440, 390
   Agent checked: <what the headless check confirmed> · Item: <slice or phase>
 - [ ] **2 · call** — <the call made>
@@ -886,7 +887,14 @@ Everything the owner needs to see or decide goes into **one** numbered section o
   loses nothing. There is one writer: when agents run in parallel, they report their looks and
   calls, and the session that coordinates them writes the block.
 - **One sequence, in click-through order** — by app or area, then by page. A **look** item always
-  carries its own URL, which the owner opens in the shared browser themselves.
+  carries its own URL, which the owner opens in the shared browser themselves. It also says what it
+  **runs on**: the app, and the checkout or branch that must serve it. That way whoever serves the
+  review never has to guess, and a look is never checked against code that lacks the change. A look
+  checked on the wrong checkout is void and gets checked again.
+- **The owner may mark items in the plan directly:** `[x]` approves, `[fix]` plus an indented
+  `fix:` note asks for a change, and a note under one of a call's options changes that option. Anyone
+  who writes the block re-reads it from disk first, so those marks survive. A call with no mark is
+  still open, never accepted by default.
 - **At the end of the batch, tidy it:** merge duplicates, request every URL again and fix what no
   longer renders, drop what a later item superseded, and number it 1…N. Then load the open items
   into the session's todo tool when it has one. When it has none, the checkboxes are the list,

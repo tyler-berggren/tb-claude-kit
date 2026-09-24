@@ -986,11 +986,15 @@ down for your review afterwards.
   → dispatches worktree-isolated agents wave by wave
   → reviews every unit before merging it
   → writes cowork/swarm/021/REPORT.md, notifies you when done
+
+# any time parked work is waiting on you, in ANOTHER session beside the run
+/swarm review                      # REVIEW — your batch look, while the run keeps going
 ```
 
 You never say "setup" or "run" — the skill infers the phase from the brain: no registered run
 means setup, a `ready` run means run, a `running` run means resume after an interruption. The
 same inference gives you `/swarm status` (read-only), `/swarm abort`, and `/swarm report`.
+`/swarm review` is the one you name, and you always run it in a second session, never the run's own.
 
 ### Setup — front-loading every human decision
 
@@ -1090,12 +1094,18 @@ and the swarm adapts to that instead of fighting it:
   **A stub never ships unconfirmed:** a team repo often deploys a green PR on its own, so a slice
   of any kind holding a stub for a call you haven't confirmed parks too. A cheap call with no stub
   ships, and is listed for you to confirm.
-- **One batch look.** When parked slices are all that is left in flight, the orchestrator starts
-  what they need, checks every page itself, headless, and tidies the plan's `## Review` block into
-  one numbered list — each page's URL, what changed, what to test, what right looks like, the
-  widths to check, then each call with its alternatives — and sends one push notification. You
-  open each URL yourself. Your feedback comes back as a single amendment; the approved slices
-  then write their tests and ship.
+- **One batch look, beside the run.** When parked slices are all that is left in flight (or you
+  ask), the orchestrator tidies the plan's `## Review` block into one numbered list. Each look
+  gives:
+  - the page's URL;
+  - what changed, what to test and what right looks like;
+  - the widths to check;
+  - what it runs on.
+
+  Each call follows, with its alternatives. The orchestrator then sends one push notification and
+  **keeps dispatching**. You run the look in a parallel session with `/swarm review` (below). Your
+  feedback comes back as a single amendment, and the approved slices then write their tests and
+  ship.
 - **The team's rules, not the swarm's.** Slices ship through the project's ship command; the
   team's own review tool (`swarm.review`) replaces the swarm's reviewer; a slice is `merged` when
   the team merges it; a red CI group gets its fix pushed at once. Nothing ever merges into the
@@ -1106,6 +1116,36 @@ and the swarm adapts to that instead of fighting it:
 - **Shared local state is locked by path.** One local database, dev servers on fixed ports, one
   package install: `swarm.resources` maps path globs to tags, and two units holding a tag never
   run at once.
+
+### Reviewing mid-run (`/swarm review`)
+
+A long run parks user-facing work for you several times, and the run shouldn't stop each time you
+look. `/swarm review` is the batch look run from a **second session** beside the orchestrator. It
+borrows only what your looks need, gives it back as you finish, and hands your verdicts over in
+one message.
+
+1. **It finds the run and its orchestrator.** The orchestrator records its session name on the run,
+   so the review session can message it.
+2. **It plans what to serve.** Every look names what it runs on: the app, and the checkout or branch
+   that serves it. The session groups your click-through so each app changes checkout at most once,
+   and lanes a working unit is waiting on go first.
+3. **It takes a hold, then serves.** It records the resource tags it borrows in `swarm_holds`, such as
+   an app's fixed port or the local database your fixtures live in, and tells the orchestrator.
+   Running units keep building, and defer only the step that would use held state, such as a page
+   check or a database reset. Apps are served from their checkouts one start per checkout at a time,
+   because two package installs into one checkout corrupt each other. Every server keeps its full
+   log.
+4. **You look.** It opens your shared browser and a status display showing which checkout each app
+   is serving from. You mark items right in the plan (`[x]`, `[fix]` with a note, or a note under a
+   call's option) or just say them. A look checked against the wrong checkout is void and gets
+   rechecked.
+5. **It releases as you go.** When a group's looks are done, it stops those servers, restores the
+   files the dev server rewrote, releases the holds, and tells the orchestrator, so a waiting unit
+   can go on.
+6. **It hands off.** It reads your marks and asks about any call you left unmarked, since silence
+   never counts as approval. It writes one handoff file, releases everything, and messages the
+   orchestrator, which applies it as one amendment. Only the orchestrator writes the plan's
+   bookkeeping, `SWARM.md` and the unit table.
 
 ### Configuration
 
@@ -1118,7 +1158,17 @@ and the swarm adapts to that instead of fighting it:
     "look": "batch",
     "review": "node scripts/review.mjs --pr <pr>",
     "worktree": { "create": "git -C ../app worktree add .worktrees/<slug> -b <branch> origin/main", "remove": "git -C ../app worktree remove .worktrees/<slug>" },
-    "resources": { "db/schema/**": "db:local", "apps/web/**": "port:web", "package-lock.json": "install" }
+    "resources": { "db/schema/**": "db:local", "apps/web/**": "port:web", "package-lock.json": "install" },
+    "reviewStack": {
+      "shared": "curl -sf http://localhost:8080/health",
+      "sharedStart": "npm run proxy",
+      "serve": "cd <checkout> && npm run dev -w apps/<app>",
+      "port": "jq -r .port <checkout>/apps/<app>/dev.json",
+      "tag": "port:<app>",
+      "holdAlso": ["db:local"],
+      "restore": ["apps/*/next-env.d.ts"],
+      "logs": ".claude/state/logs"
+    }
   },
   "rules": { "swarm": "Never touch the production database — use the staging branch." }
 }
@@ -1136,6 +1186,14 @@ and the swarm adapts to that instead of fighting it:
 - **`worktree`** — create and remove commands for unit worktrees when the code lives in a
   checkout outside the session's repo
 - **`resources`** — path globs to resource tags for shared local state
+- **`reviewStack`** — how `/swarm review` serves a look. It gives:
+  - the shared stack's health check and start command;
+  - the command that serves one app from one checkout, and the one that prints its port;
+  - the tag a served app holds, plus tags the whole review holds;
+  - files the dev server rewrites (restored when it stops);
+  - where logs go.
+
+  Every key is optional; without them, the review asks once how to start an app.
 
 ### State on disk
 
@@ -1144,7 +1202,9 @@ and the swarm adapts to that instead of fighting it:
 | `cowork/swarm/<plan_id>/SWARM.md` | The package: run config, decision record, unit graph, per-unit briefs, agent protocol |
 | `cowork/swarm/<plan_id>/REPORT.md` | What actually happened (suffixed `-2`, `-3` for remainder runs) |
 | The plan's `## Review` block | Every call made in your absence and every page to look at, numbered, for you to clear |
-| `swarm_runs` / `swarm_units` (brain DB) | Execution state — what phase inference and resume reconstruct the world from |
+| `swarm_runs` / `swarm_units` (brain DB) | Execution state — what phase inference and resume reconstruct the world from; `swarm_runs.orchestrator` is the session a review messages |
+| `swarm_holds` (brain DB) | Shared state a `/swarm review` session has borrowed from the live run, open until released |
+| `cowork/swarm/<plan_id>/review-YYYY-MM-DD-<n>.md` | A review session's handoff: what was served from where, and every verdict |
 | `swarm/<plan_id>` branch | Integration branch; kept after the run for inspection |
 
 The plan file stays the source of truth for *what*; `SWARM.md` owns *who and in what order*;
