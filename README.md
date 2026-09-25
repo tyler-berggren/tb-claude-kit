@@ -85,7 +85,7 @@ Seventeen skills, grouped by what they do for you.
 
 | | |
 |---|---|
-| `/wiki` | Organic project wiki that grows with the codebase. Every invocation does targeted updates (what just changed) and a holistic scan (what's stale or missing). Shape emerges from the project, not a template. Configurable style guide per project. |
+| `/wiki` | Organic project wiki that grows with the codebase. Every invocation does targeted updates (what just changed) and a holistic scan (what's stale or missing). Shape emerges from the project, not a template. Configurable style guide per project. **`/wiki deploy`** publishes it to Cloudflare Pages as a searchable static site, with a sidebar that starts with every group expanded and collapses from a bottom-left button. It's built by one shared builder the kit links into every project, so builder improvements reach every wiki. |
 
 **Doing — the small stuff, done consistently**
 
@@ -483,6 +483,9 @@ cowork/
 wiki/                 # organic project documentation (yours, maintained by /wiki)
   README.md           # table of contents
   STYLE.md            # writing guide (yours — controls voice, audience, conventions)
+scripts/
+  wiki-build/         # static-site builder used by /wiki deploy (linked from the kit)
+  puppeteer-server.cjs, artifact-bridge.cjs   # /look co-browser, /bridge server
 CLAUDE.md             # project documentation + mantra block (yours)
 .mcp.json             # research MCP servers (yours — holds API keys)
 ```
@@ -790,18 +793,33 @@ The style guide itself is organic — it travels with the project and evolves as
 {
   "wiki": {
     "root": "wiki",
-    "styleScaffold": "templates/STYLE.md"
+    "styleScaffold": "templates/STYLE.md",
+    "pagesProject": "my-project-wiki",
+    "title": "My Project Wiki"
   }
 }
 ```
 
 - **`root`** — wiki directory (default: `wiki/`)
 - **`styleScaffold`** — path to a `STYLE.md` template that `/wiki init` copies when creating a new wiki
+- **`pagesProject`** — the Cloudflare Pages project `/wiki deploy` publishes to (default: `<repo-name>-wiki`)
+- **`title`** — the text at the top of the site's sidebar (default: the index's first heading)
+
+A folder containing `RESTRICTED.txt` (one `allow: person@example.com` line per reader) is left out of the
+shared sidebar, search and Home page, and served only to the people it lists. The site needs its Cloudflare
+Access settings for that, in `.claude/wiki-access.json`:
+
+```json
+{ "team": "https://<team>.cloudflareaccess.com", "auds": ["<Access application AUD tag>"] }
+```
+
+Put Cloudflare Access in front of a new Pages project (its production hostname and `*.<project>.pages.dev`
+previews) **before** its first deploy, unless the wiki is meant to be public.
 
 Per-project behavior adjustments go in `rules.wiki`:
 
 ```json
-{ "rules": { "wiki": "Write for a non-technical ops team. Use the client's terminology." } }
+{ "rules": { "wiki": "Write for a non-technical ops team. Use the team's own terminology." } }
 ```
 
 ## Architecture Observatory (`/cto`)
