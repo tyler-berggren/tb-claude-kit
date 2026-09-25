@@ -170,7 +170,8 @@ or a file passed with `--access`.
    ```bash
    (cd scripts/wiki-build && npm install --silent)
    SRC=$(mktemp -d) && git archive HEAD "$WIKI_ROOT" | tar -x -C "$SRC"
-   node scripts/wiki-build/build.mjs "$SRC/$WIKI_ROOT" _wiki-site ${TITLE:+--title "$TITLE"}
+   TITLE_ARGS=(); [ -n "$TITLE" ] && TITLE_ARGS=(--title "$TITLE")   # an array: works in bash and zsh
+   node scripts/wiki-build/build.mjs "$SRC/$WIKI_ROOT" _wiki-site "${TITLE_ARGS[@]}"
    rm -rf "$SRC"
    ```
    If the user explicitly asks to publish uncommitted changes, build from `"$WIKI_ROOT"` directly.
