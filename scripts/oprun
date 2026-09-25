@@ -25,7 +25,7 @@
 # The repo says which vault (and account) it belongs to in .claude/kit.json:
 #   "secrets": { "vault": "<vault name>", "account": "my.1password.com" }
 #
-# Why this exists: every client has its own vault, a service account's vault list cannot be
+# Why this exists: each project has its own vault, a service account's vault list cannot be
 # changed after creation, and a token exported from ~/.zshenv silently overrides Touch ID for
 # every op call (the 2026-09-18 outage). So nothing is global: the token reaches one child process.
 #

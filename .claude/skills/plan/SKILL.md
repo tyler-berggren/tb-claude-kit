@@ -56,7 +56,7 @@ Plans may live in more than one directory. The roots are configured per project 
 `.claude/kit.json`; when the file or key is absent the single root is `cowork/plans`.
 
 ```json
-{ "plan": { "roots": ["cowork/plans", "cowork/clients/*/projects/*/plans"] } }
+{ "plan": { "roots": ["cowork/plans", "cowork/projects/*/plans"] } }
 ```
 
 Roots may contain `*` wildcards. Plans nested in subdirectories of a root (e.g.
@@ -104,7 +104,7 @@ number or a scope: directory `cowork/plans/NNN_…/NNNa_<topic>/`, plan file `NN
 | `cowork/plans/mvp/001_seed-profile.md` | `mvp` | `mvp-001` |
 | `cowork/plans/mvp/001_seed/001_seed.md` | `mvp` | `mvp-001` |
 | `cowork/plans/mvp/testing/001_proof.md` | `mvp-testing` | `mvp-testing-001` |
-| `cowork/clients/acme/projects/data-portal/plans/000_poc.md` | `data-portal` | `data-portal-000` |
+| `cowork/projects/data-portal/plans/000_poc.md` | `data-portal` | `data-portal-000` |
 
 Derivation: for a plan sitting directly in a configured root, there is no scope. For a plan in a
 subdirectory of a root, scope is the relative path from that root with `/` replaced by `-` —

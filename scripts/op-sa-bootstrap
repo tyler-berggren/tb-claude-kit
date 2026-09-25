@@ -1,18 +1,18 @@
 #!/bin/bash
-# op-sa-bootstrap — create a read-only 1Password service account for ONE client vault and store
+# op-sa-bootstrap — create a read-only 1Password service account for ONE vault and store
 # its token in the macOS Keychain, where `oprun` finds it.
 #
 #   op-sa-bootstrap <vault> [--write] [--account my.1password.com] [--expires-in 90d] [--rotate]
 #
-# Tokens do not expire unless --expires-in is given: these are per-client tokens on one developer's
+# Tokens do not expire unless --expires-in is given: these are per-vault tokens on one developer's
 # Mac, and a token that silently expires mid-pipeline costs more than one that is revoked on purpose.
 #
-# Runs on the desktop-app path (Touch ID), so it needs you at the keyboard once per client.
+# Runs on the desktop-app path (Touch ID), so it needs you at the keyboard once per vault.
 # The service account is named "<vault>-ro-<date>", or "<vault>-rw-<date>" with --write, which adds
 # write_items so an agent can create and edit items (move a secret into the vault, rename a field).
 # Either way it can reach that one vault and nothing else.
 # Vault access on a service account is immutable, which is the whole reason there is one per
-# vault: adding a client is one more run of this script, never a rebuild of a shared token.
+# vault: adding a vault is one more run of this script, never a rebuild of a shared token.
 #
 # Rotation: --rotate creates a fresh service account and replaces the Keychain item. Revoking the
 # old one is a web-console action (Developer > Service accounts) — the CLI cannot revoke.

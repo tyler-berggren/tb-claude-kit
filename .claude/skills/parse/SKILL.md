@@ -8,7 +8,7 @@ argument-hint: "<file|dir|glob> [--formats markdown,summary] [--out <dir>] [--st
 
 Firecrawl's `/v2/parse` endpoint turns a local binary document into clean
 markdown. It is the counterpart to `/scrape`: scrape is for public URLs, parse
-is for files on this machine that no URL points at — signed contracts, client
+is for files on this machine that no URL points at — signed contracts, private
 decks, exported spreadsheets, scanned PDFs.
 
 Docs: https://docs.firecrawl.dev/features/parse
@@ -97,7 +97,7 @@ Do not claim the parse is clean without having looked at the output.
 - Default timeout 30s, max 300s. Long PDFs: bound with `--pages`.
 - Parse consumes Firecrawl credits per file.
 - **Parsing uploads the file to Firecrawl's API.** For anything confidential —
-  contracts, client data, anything under NDA — say so plainly before the first
+  contracts, private or personal data, anything under NDA — say so plainly before the first
   request. If the user already named the files, that is authorization; note it
   and proceed rather than blocking. Offer `--redact` when the documents contain
   personal information.

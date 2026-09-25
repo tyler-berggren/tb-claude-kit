@@ -170,7 +170,7 @@ goes out, because the file keeps changing during a session. Inside the files the
 are named by stable ids (`Q3`, review item `#4`, a slice id, a report's finding number), since
 the next edit would move any line number written there.
 
-**When the code lands in someone else's repo** — a client's, an employer's, an open-source
+**When the code lands in someone else's repo** — a team's, an employer's, an open-source
 project's — use `/plan pr <topic>`. The build order becomes slices: one concern, one session,
 one small PR that merges the same day, split by layer so users never see half a change. The next
 slice's items are steps a cold coding agent can tick off, and the plan travels with each PR.
@@ -338,7 +338,7 @@ fall back to sensible defaults when the file or a key is missing. See
     "scopeToProjectPath": true
   },
   "commit": { "author": "Jane Dev <jane@example.com>" },
-  "plan":     { "roots": ["cowork/plans", "cowork/clients/*/projects/*/plans"],
+  "plan":     { "roots": ["cowork/plans", "cowork/projects/*/plans"],
                 "issues": { "publish": "ahead", "assignee": "jane-dev", "neverLabels": ["agent-queue"] } },
   "research": { "roots": ["cowork/research"] },
   "swarm":    { "maxAgents": 6, "checks": ["npm run check"] },
@@ -417,20 +417,20 @@ comfortably in a string is usually a sign it belongs in its own skill — or ups
 
 ---
 
-### `secrets` — one 1Password service account per client vault
+### `secrets` — one 1Password service account per vault
 
-Every client gets its own 1Password vault, and a 1Password service account's vault list **cannot be
-changed after it is created**. So instead of one machine-wide token that has to be rebuilt every time
-a client is added, the kit keeps **one read-only service account per vault** and lets the repo say
+Each project (or group of related projects) gets its own 1Password vault, and a 1Password service account's
+vault list **cannot be changed after it is created**. So instead of one machine-wide token that has to be
+rebuilt every time a vault is added, the kit keeps **one read-only service account per vault** and lets the repo say
 which vault it belongs to:
 
 ```json
-"secrets": { "vault": "acme-corp", "account": "my.1password.com" }
+"secrets": { "vault": "my-project", "account": "my.1password.com" }
 ```
 
 Two scripts in `scripts/`:
 
-- **`op-sa-bootstrap <vault> [--write]`** — once per client, at the keyboard (Touch ID). Creates a
+- **`op-sa-bootstrap <vault> [--write]`** — once per vault, at the keyboard (Touch ID). Creates a
   service account named `<vault>-ro-<date>` with `read_items` on that one vault (`--write` adds
   `write_items` and names it `-rw-`), verifies it sees exactly
   that vault, and stores the token in the macOS Keychain as `op-sa-<vault>`. Tokens do not expire
@@ -1247,7 +1247,7 @@ plan look the same afterwards.
 ## Document Parsing (`/parse`)
 
 Research reaches the public web. `/parse` handles the other half — the documents
-already on your disk that no URL points at. Signed contracts, client decks,
+already on your disk that no URL points at. Signed contracts, slide decks,
 exported spreadsheets, scanned PDFs: the files that carry the actual terms of
 your work and that Claude otherwise cannot open.
 
