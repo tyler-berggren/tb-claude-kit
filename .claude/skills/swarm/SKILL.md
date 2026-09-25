@@ -33,6 +33,25 @@ The intended workflow: `/plan` generates the plan → `/swarm <ref>` (setup) →
 - During Run, no agent stops to ask the user anything, and that includes the orchestrator. Agents make the call, stub what would be expensive to throw away, and flag it.
 - Everything the owner must see or decide lands in one numbered review block in the plan, cleared together after the run.
 
+## Branches live in worktrees
+
+**The primary checkout belongs to the owner.** That is the repository root the owner's IDE has open. No swarm session or agent ever runs `git checkout`, `git switch`, `git reset`, `git stash` or a rebase there, and none writes the owner's branch. A run can take hours, and the owner keeps working in that checkout the whole time.
+
+- **Every swarm branch is checked out in its own worktree under `.claude/worktrees/`:**
+  - the integration branch `swarm/<plan_id>` at `.claude/worktrees/swarm-<plan_id>`;
+  - each unit's branch in the worktree the Agent tool's `isolation: "worktree"` creates there;
+  - a branch the review serves that has no worktree yet at `.claude/worktrees/review-<slug>`.
+
+  A PR-mode plan whose code lives in another repository follows the same layout inside that repository (**Where the code lives**).
+- **Address a worktree by its path.** Git work goes through `git -C <worktree>`, and files are read and written at the worktree's absolute path. The orchestrator's own working directory stays at the primary checkout. Switching branches is allowed only inside a worktree the session or agent created itself.
+- **Branch without checking out.** Use `git worktree add -b <branch> <path> <base>` or `git branch <branch> <base>`. Git refuses to check out one branch in two worktrees, so when a branch is needed, use the worktree that already has it (`git worktree list`). Never move that branch out of its worktree.
+- **Keep worktrees out of `git status`.** Unless `git check-ignore -q .claude/worktrees/` already succeeds, append `/.claude/worktrees/` to `.git/info/exclude`. That file is local to this clone, so the project's `.gitignore` stays the project's decision.
+- **The brain has one copy.** `cowork/brain/BRAIN.db` is git-ignored and lives only in the primary checkout. Every session and agent uses it by that absolute path, never a worktree's copy.
+- **The bookkeeping stays in the primary checkout, shared with the owner.** The plan, `SWARM.md`, `REPORT.md` and the review handoffs are read and written only there. The orchestrator edits them in the same files the owner has open and marks, so every `path:line` it gives points into the owner's IDE.
+  - **Worktrees hold code only.** Their copies of the plan and `SWARM.md` are stale snapshots from the base commit. No session reads its state from them or writes them.
+  - **No mid-run commits.** The orchestrator's edits sit uncommitted in the primary checkout beside the owner's own, and the owner may commit them whenever they like. At the end, the orchestrator commits just its bookkeeping paths, once (R4).
+  - **Git never merges these files.** The integration branch never changes them, so the final fast-forward cannot conflict with them.
+
 ## Input
 
 Optional argument: `$ARGUMENTS`
@@ -207,9 +226,9 @@ owner's judgment on anything user-facing arrives **in one batch**, not slice by 
 the plan. A **lane** is a chain of slices over the same files — usually one adopter or one
 package — and its slices run in order, while lanes that share no files run side by side. Never
 split a slice's files across two agents. A slice may **stack** on its lane's previous slice
-(branch from that branch) so the lane never stalls behind a review, CI or a look; once the
+(branch from that branch, in its own worktree) so the lane never stalls behind a review, CI or a look; once the
 earlier slice's squash merge lands, the later one replays only its own commits
-(`git rebase --onto origin/<default> <earlier-branch-head>`).
+(`git rebase --onto origin/<default> <earlier-branch-head>`, run in that slice's worktree).
 
 **Every unit carries a `kind`**, which decides whether it waits for the owner:
 
@@ -232,8 +251,9 @@ by the territory it touches instead of guessing. Two units holding a tag never r
 **Where the code lives.** When the plan's code is a checkout other than the session's own repo —
 a sibling clone, a symlinked repository, a submodule — the Agent tool's `isolation: "worktree"`
 isolates the **wrong** repository. Each unit then creates its own worktree in the target
-checkout (the create and bootstrap commands come from `swarm.worktree` in kit.json), works only
-there, and removes it once its slice has merged.
+checkout at `.claude/worktrees/<slug>`, using the create and bootstrap commands from
+`swarm.worktree` in kit.json. It works only there, and removes the worktree once its slice has merged. The target's
+primary checkout is someone's IDE too, so its branch is never switched (**Branches live in worktrees**).
 
 **Standing policies are read, not re-asked.** A project may record two in kit.json; setup reads
 them and asks (S3) only what they leave open:
@@ -305,8 +325,13 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
 ### Step R1 — Load and preflight
 
 1. Load the `swarm_runs` row, `SWARM.md`, and the plan. Ensure `status = 'ready'`.
-2. Preflight: working tree clean; on the merge-target branch; `git worktree list` shows no leftover `swarm/` worktrees. If commits landed since setup, do a fast delta check — if they invalidate unit briefs, stop and tell the user to re-run setup; don't guess.
-3. Create the integration branch `swarm/<plan_id>` from HEAD and check it out. Record `base_commit`, `integration_branch`, `started_at`, and `orchestrator` (this session's name, from `ListAgents`); set status `running`.
+2. Preflight. The primary checkout's branch and working tree are the owner's and are not checked; it can be on any branch, with edits in progress.
+   - The merge target's tip contains the committed swarm package (`SWARM.md` and the plan with its answers).
+   - `git worktree list` shows no leftover `swarm/` worktrees.
+   - `.claude/worktrees/` is ignored (**Branches live in worktrees**).
+
+   If commits landed since setup, do a fast delta check. If they invalidate unit briefs, stop and tell the user to re-run setup; don't guess.
+3. Create the integration branch in its own worktree, from the merge target's tip, never from the primary checkout's HEAD: `git worktree add -b swarm/<plan_id> .claude/worktrees/swarm-<plan_id> <merge-target>`. Never check it out in the primary checkout. Record `base_commit`, `integration_branch`, `started_at` and `orchestrator` (this session's name, from `ListAgents`), and note the worktree path in SWARM.md's run config. Set status `running`.
 4. Announce the dispatch order in one short message (this is what `/rc` monitoring sees first).
 
 ### Step R2 — Dispatch loop
@@ -314,13 +339,13 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
 Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 
 1. **Ready set** = pending units whose `depends_on` are all `merged` and whose `resources` collide with no unit currently `working`/`review`.
-2. Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `run_in_background: true`, `isolation: "worktree"`, `model` = the unit's assigned model from the graph. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, run id, the brain's absolute path (for the review-hold check), integration branch name, and required branch name `swarm/<plan_id>-<unit_key>`. An open review hold never blocks dispatch: units honour it themselves, only at the step that uses the held state. Mark units `working`. When the plan's code lives in a checkout other than the session's repo, dispatch without `isolation` and have the brief create the unit's worktree in the target checkout with `swarm.worktree`'s commands (see **Team repositories**).
+2. Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `run_in_background: true`, `isolation: "worktree"`, `model` = the unit's assigned model from the graph. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, run id, the brain's absolute path (for the review-hold check), integration branch name, the integration tip's sha at dispatch, and required branch name `swarm/<plan_id>-<unit_key>`. The Agent tool's worktree does not start on the integration branch, so the agent's first step creates its branch from that sha inside its own worktree. The sha carries every dependency merged so far. An open review hold never blocks dispatch: units honour it themselves, only at the step that uses the held state. Mark units `working`. When the plan's code lives in a checkout other than the session's repo, dispatch without `isolation` and have the brief create the unit's worktree in the target checkout with `swarm.worktree`'s commands (see **Team repositories**).
 3. On a completion notification: spawn a **reviewer agent** (read-only, background, `model` = the unit's assigned reviewer model) with the unit brief, the worktree path, the unit's verification criteria, and the checks contract from SWARM.md (exact commands — reviewers never guess). It inspects the diff, runs those checks in the worktree, and returns PASS or FAIL with findings. Mark the unit `review`.
-4. **Reviewer PASS** → merge the unit branch into the integration branch. The orchestrator resolves any conflicts itself — it holds every brief and both sides of the conflict; agents never see each other's work. Then:
+4. **Reviewer PASS** → merge the unit branch into the integration branch, in the integration worktree (`git -C .claude/worktrees/swarm-<plan_id> merge …`). The orchestrator resolves any conflicts itself — it holds every brief and both sides of the conflict; agents never see each other's work. Then:
    - mark plan items `- [x]` with progress notes (per `/plan` conventions);
    - append the unit's **Looks** and **Calls** to the plan's `## Review` block (`/plan`, **Batches**) — the orchestrator is its only writer;
    - update `swarm_units` (`merged`, `result` = one-line summary);
-   - commit plan + brain on the integration branch and remove the worktree;
+   - remove the unit's worktree. The plan edits stay uncommitted in the primary checkout;
    - loop back to 1, because a merge may unblock dependents.
 5. **Reviewer FAIL** → spawn a fix agent in the same worktree with the findings, on the unit's model; the **second** fix cycle always escalates to `opus` regardless of assignment. Max **two** fix cycles; then mark the unit `failed`, record why, and continue — everything not depending on it still runs. Dependents of a failed unit become `skipped`.
 6. Post a one-line progress note as each unit changes state. Between events there is nothing to poll — background agents re-invoke the session when they finish.
@@ -333,13 +358,16 @@ Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 
 When all units are terminal:
 
-1. Run the plan's Verification table end-to-end on the integration branch, plus the project's standard checks.
+1. Run the plan's Verification table end-to-end in the integration worktree, plus the project's standard checks.
 2. Spawn a final reviewer over the integration branch's full diff against `base_commit`: cross-unit coherence, plan coverage, nothing half-merged. Always `opus` — this is the last line of defense, never economized.
 3. Fix findings directly (orchestrator or a fix agent). This is the last line of defense before the merge target.
 
 ### Step R4 — Finalize
 
-1. Merge the integration branch into the merge target per the setup decision (default: merge to main locally, no push; or leave the branch if that was the decision — then say so prominently). A PR-mode plan merges nothing into the default branch: each slice's branch is left for the ship command, per **Team repositories**.
+1. Merge the integration branch into the merge target per the setup decision. The default is to merge to main locally with no push; if the decision was to leave the branch, say so prominently. A PR-mode plan merges nothing into the default branch: each slice's branch is left for the ship command, per **Team repositories**. To merge without switching any checkout's branch:
+   - **Bring the target in first.** In the integration worktree, merge the merge target into `swarm/<plan_id>`. That picks up anything the owner committed during the run. Resolve conflicts there, and re-run the checks if anything came in.
+   - **Then fast-forward the target.** If the primary checkout has the target checked out, run `git -C <primary> merge --ff-only swarm/<plan_id>`. This advances the owner's branch in place; git refuses if it would overwrite their uncommitted edits. If no worktree has the target checked out, run `git fetch . swarm/<plan_id>:<merge-target>`.
+   - **If git refuses,** leave the branch, and say plainly why and what the owner runs to finish. Never stash, reset or check out anything to force it.
 2. Update the plan: `**Status:** done` on completed phases, RESUME WORK HERE banner on the first failed/skipped item if any. Mark linked brain tasks done (per `/plan` update conventions).
 3. **Tidy the plan's `## Review` block** (`/plan`, **Batches**): every look and call the run produced, deduplicated, each URL requested again, numbered 1…N in click-through order. It is the review surface that replaces mid-run questions, and the owner clears it with the next session, item by item.
 4. Write `cowork/swarm/<plan_id>/REPORT.md` — **the user's morning-after read**:
@@ -348,13 +376,16 @@ When all units are terminal:
    - Verification results (actual output, including anything that failed)
    - Follow-ups and loose ends, routed like `/plan carry` would
 5. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, whether sub-`opus` assignments survived review, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
-6. Set run status `done` (`completed_at`), commit, remove remaining worktrees, delete merged unit branches, keep the integration branch.
+6. Set run status `done` (`completed_at`), remove the remaining unit worktrees, delete merged unit branches, and keep the integration branch.
+   - **Commit the bookkeeping** in the primary checkout, limited to its paths: `git -C <primary> commit --only -- <plan> cowork/swarm/<plan_id>/`. The owner's other staged and unstaged work stays as it was. The review marks in the plan go in with it. Skip the commit, and say so, when the primary checkout is not on the merge target or is mid-merge, mid-rebase or mid-cherry-pick.
+   - **Merged:** also remove the integration worktree, never with `--force`. A dirty one means something was written there by mistake: report it and leave it.
+   - **Left for review:** keep the integration worktree, so the owner can open it without switching their IDE's branch.
 7. **Notify.** Send a push notification (`PushNotification`) with the one-line outcome — "Swarm 021: 5/6 units merged, U4 failed, 7 items waiting on you (see the plan's Review)". The user designed this to run while they're away; completion and failure are the two interruptions worth sending. Also notify on a hard mid-run stop (baseline drift, aborted run).
 8. Final message: outcome first, then how many review items wait on the owner, with the line range of the plan's `## Review` block, and where the report is. If anything failed, say so plainly — never bury a failed unit in a success narrative.
 
 ### Resume (status = 'running')
 
-An interrupted run. Record this session's name as `swarm_runs.orchestrator` (a review session messages it there). Reconcile before touching anything: `ListAgents` for still-live agents, `git worktree list` + branch state vs `swarm_units` rows. A unit `working` with no live agent and no commits → back to `pending`; with commits → send it to review. Then re-enter the dispatch loop.
+An interrupted run. Record this session's name as `swarm_runs.orchestrator` (a review session messages it there). Reconcile before touching anything: `ListAgents` for still-live agents, `git worktree list` + branch state vs `swarm_units` rows. If the integration worktree is gone, re-add it from the existing branch (`git worktree add .claude/worktrees/swarm-<plan_id> swarm/<plan_id>`); never check the branch out in the primary checkout. A unit `working` with no live agent and no commits → back to `pending`; with commits → send it to review. Then re-enter the dispatch loop.
 
 ---
 
@@ -367,6 +398,7 @@ Copied into SWARM.md at setup; binding for every spawned agent.
 - **The one exception to "never ask"** is an action not pre-approved in SWARM.md that is irreversible or outward-facing (deleting shared data, notifying people, spending money, touching production), or a security or data-exposure risk. Do not take it and do not wait: finish what does not depend on it, and report it under `Blocked`. The orchestrator parks the unit and notifies the owner.
 - **Check UI in your own headless browser** (`/look`, **Headless**): the page loads without errors, the changed control is there, the interaction works, nothing overflows at a phone width, and one screenshot per page per width shows nothing broken. Never drive the owner's shared browser. How it looks (design, layout, wording, a design choice) is the owner's: report it under `Looks`.
 - **Stay in your territory.** Read anything; edit only your unit's files. Never edit the plan file, `cowork/**` (brain, plans, swarm files), or `.claude/**` — your worktree's copies would conflict on merge. The orchestrator owns all bookkeeping.
+- **Work only in your own worktree.** Your first step is creating your assigned branch there from the integration sha in your prompt (`git switch -c <branch> <sha>`). Never `cd` into, check out in, or write to the primary checkout (the owner's IDE) or another unit's worktree. The brain's absolute path is for reading `swarm_holds`, nothing else.
 - **Commit your work** on your assigned branch, in coherent chunks with real messages. Never stage `cowork/` paths.
 - **Verify before reporting done.** Run your brief's verification criteria and the project's checks yourself. Report honestly: what passed, what you couldn't verify, what you decided, what a human should look at. The structured final report is your only channel out, and it has five sections:
   - `Done`
@@ -437,6 +469,10 @@ a checkout, and use the answer for the whole session.
   use its unit's branch, or its lane's latest parked branch, which carries every slice stacked in it. A
   look needing a branch the lane's latest does not carry (a fix that shipped from its own branch) gets
   its own checkout.
+- **A checkout is always a worktree.** Serve a branch from the worktree that already has it
+  (`git worktree list`). Only when none does, add one at `.claude/worktrees/review-<slug>`, and remove
+  it at V9. Never check a branch out in the primary checkout (the owner's IDE) or switch a unit's
+  worktree to another branch.
 - **Group the click-through by server set.**
   - Lanes an in-flight unit is waiting on come first, so their servers are released first.
   - Within a group, each app is served from one checkout; a later group swaps a server's checkout at
@@ -496,7 +532,8 @@ a checkout, and use the answer for the whole session.
 ### V7 — Swap and release as the owner goes
 
 - **Never let a look run on the wrong checkout.** Before the owner reaches a look whose app needs
-  another checkout, swap that server and say so. A look checked on the wrong checkout is void: say so
+  another checkout, swap that server and say so. A swap restarts the server from another worktree. It
+  never switches the branch of the worktree it was serving from. A look checked on the wrong checkout is void: say so
   the moment it is noticed, and have it retested.
 - **Release a group's servers as soon as its looks are done**, since a unit may be waiting:
   1. stop the servers this session started;
@@ -510,7 +547,7 @@ a checkout, and use the answer for the whole session.
 
 ### V8 — Collect the verdicts
 
-- **Read the owner's marks** from the plan's working-tree diff, plus anything they said to this session.
+- **Read the owner's marks** in the plan's `## Review` block in the primary checkout, plus anything they said to this session. The working-tree diff there also carries the orchestrator's uncommitted edits, so read marks from the block, not the diff.
 - **An unmarked call is not accepted.** Ask once about all of them: all clear, or which to change?
 - **Apply what a changed call implies** for its sibling options. Flag each such change as applied
   without asking.
@@ -523,7 +560,8 @@ a checkout, and use the answer for the whole session.
      applied;
    - anything to check before an open PR merges;
    - errors seen that belong to the default branch.
-2. **Release every remaining hold**, with the four steps above.
+2. **Release every remaining hold**, with the four steps above, and remove the `review-<slug>`
+   worktrees this session added.
 3. **Message the orchestrator** the handoff's path and a one-line summary. It applies the handoff as
    one amendment (**The batch look**, under **Team repositories**).
 4. **Tell the owner what happens next,** in one short list.
@@ -536,7 +574,7 @@ A review session that ends abruptly leaves its holds open. The orchestrator's wa
 
 ## Status Flow
 
-Read-only. Load the run and units, print: run status, unit table (key, title, status, branch — and for a PR-mode run, lane, kind and PR), live agents (`ListAgents`), open review holds (`swarm_holds`, with their holder), and what's blocking what. Parked slices waiting on the owner are listed with the count of open items in the plan's `## Review` block and its line range. Do not start or resume work.
+Read-only. Load the run and units, print: run status, the integration worktree's path, unit table (key, title, status, branch — and for a PR-mode run, lane, kind and PR), live agents (`ListAgents`), open review holds (`swarm_holds`, with their holder), and what's blocking what. Parked slices waiting on the owner are listed with the count of open items in the plan's `## Review` block and its line range. Do not start or resume work.
 
 ## Abort Flow
 
@@ -558,7 +596,7 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 
 | Key | What it holds |
 |---|---|
-| `swarm.worktree` | `{ "create": "<command>", "remove": "<command>" }` for a target checkout outside the session's repo; `<slug>` and `<branch>` are substituted. Include the repo's own bootstrap in `create` |
+| `swarm.worktree` | `{ "create": "<command>", "remove": "<command>" }` for a target checkout outside the session's repo; `<slug>` and `<branch>` are substituted. Put the worktree at `.claude/worktrees/<slug>` in the target, and include the repo's own bootstrap in `create` |
 | `swarm.resources` | `{ "<path glob>": "<tag>" }` — shared local state a unit touching that path holds: a fixed-port dev server, the one local database, the package install |
 | `swarm.review` | The team's review tool, run against a pushed PR (`<pr>` is substituted); it replaces the swarm's reviewer agent |
 | `swarm.ship` | `ready` \| `draft` \| `ask` (default `ask`) — the owner's standing ship policy |

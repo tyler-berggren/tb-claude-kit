@@ -279,7 +279,7 @@ Resume work on an existing plan. Every invocation begins with a fresh-eyes recon
    - Which phases are marked `**Status:** done`?
    - Which phases have a mix of `- [x]` and `- [ ]`?
    - Is there an existing RESUME WORK HERE banner? If so, note its location — that's where the last session stopped.
-   - Is there a `## Handoff` section (see **Handoff Flow**)? It is the last agent's account of state, decisions and dead ends. Read it before anything else, and check its **State** against `git status` and the current branch before trusting it.
+   - Is there a `## Handoff` section (see **Handoff Flow**)? It is the last agent's account of state, decisions and dead ends. Read it before anything else, and check its **State** against `git worktree list` and the `git status` of the worktree it names before trusting it. Continue work in that worktree, never by checking its branch out in the primary checkout.
    - Does `## Review` hold uncleared items, or `## Open questions` hold open ones (see **Batches**)? Both go to the owner in R3, before any new work.
 
 ### Step R2 — Fresh-eyes reconciliation
@@ -560,11 +560,14 @@ Same top-level sections as the default (`Source`, `Context`, `Build Order`, `Out
    changes, how the plan file travels with the PR, and any preview-before-ship rule the
    project has.
 5. **Handoff: ground rules for whoever codes this** — the reading list in order (the team's
-   agent/contributor rules first), where and how to work (package manager, runtime, worktree,
-   branch naming copied from the team's history, issue-first if the team requires it, one
+   agent/contributor rules first), where and how to work (package manager, runtime, the slice's
+   worktree at `.claude/worktrees/<slug>` in the team repo, never a branch switch in its primary
+   checkout, branch naming copied from the team's history, issue-first if the team requires it, one
    commit per section), the **stay-current steps** (fetch; fast-forward the primary checkout's
-   default branch; read the log of the surface since the last session — and do not rebase a
-   feature branch on a schedule: once, at ship time), the quick check for building and the full
+   default branch in place with `git -C <primary> merge --ff-only origin/<default>`, skipping it
+   when that checkout is on another branch; read the log of the surface since the last session —
+   and do not rebase a feature branch on a schedule: once, at ship time, in its worktree), the
+   quick check for building and the full
    check for shipping, the ship command, and what to do when the plan turns out to be wrong.
 6. **Build Order, by slice.** Each slice has: a `**Status:** open · **Waits on:** …` line; an
    **In plain terms** paragraph (what it does and why, for a non-engineer); for the NEXT slice,
@@ -646,6 +649,9 @@ Then the tracker: `NNN epic` publishes the epic and, when the project publishes 
 
 - Run the stay-current steps before writing code in any session. Rebase a feature branch once,
   at ship time — not every session, and not because the default branch moved.
+- Each slice is built in its own worktree (`.claude/worktrees/<slug>` in the team repo), branched
+  from `origin/<default>`, or from the previous slice's branch when it stacks. The team repo's
+  primary checkout is never switched (**The IDE holds main**, under **Global rules**).
 - Build with quick checks, let the owner look before tests are written, and run the full scoped
   checks once at ship time (see **Inside a slice**).
 - One commit per lettered section; commit the plan file in **your** repo alongside, never into
@@ -935,7 +941,7 @@ While working on a plan, follow these rules:
   2. Add `**Status:** done — <short note>` to completed phases.
   3. Place a RESUME WORK HERE banner on the first open item. Move the banner forward as work progresses — there should be exactly one in the file at all times during an active session.
   4. If stopping mid-phase, note exactly what's done and what's next on the first open item.
-  5. Include the plan file in the commit alongside the code changes.
+  5. Include the plan file in the commit alongside the code changes. When the code is on a worktree's branch, commit the plan separately in the primary checkout (**The IDE holds main**, under **Global rules**).
 - **Commit after each chunk of work.** After completing a phase, a logical group of items, or any meaningful chunk of work, commit the code changes AND the updated plan file together. Don't batch everything into one giant commit at the end.
 - **Sync brain DB.** When completing a plan item that has a linked task in the DB, mark the DB task done:
   ```sql
@@ -1118,7 +1124,7 @@ or have to ask about:
   measurement), so nobody tries them again.
 - **Gotchas** — non-obvious facts learned the hard way: a flaky test, a required env var, a
   command that works where the obvious one fails.
-- **State** — branch and worktree, uncommitted or unpushed work, stashes, open PRs and their
+- **State** — branch and the worktree path it is checked out in, uncommitted or unpushed work, stashes, open PRs and their
   review state, running servers, migrations or data changes applied, deploys, messages sent;
   and what was verified (command and result) versus not yet verified.
 - **Open questions** — who answers each one, and the default assumed until they do.
@@ -1148,7 +1154,7 @@ part except **State** and **Next**.
 **Updated:** YYYY-MM-DD · **Resume at:** <phase or PR> — <the item under the RESUME banner>
 
 **State**
-- Branch `<branch>` at `<sha>`; uncommitted: <paths, or none>; unpushed: <count, or none>
+- Branch `<branch>` at `<sha>` in `<worktree path, or the primary checkout>`; uncommitted: <paths, or none>; unpushed: <count, or none>
 - Running or half-applied: <servers, migrations, deploys, open PRs, or nothing>
 - Verified: <command -> result>; not yet verified: <what>
 
@@ -1242,6 +1248,17 @@ fill each gap it names.
 - **Fresh eyes are mandatory** — Every `/plan` invocation does the reconciliation pass, even if you were just working on this plan 5 minutes ago.
 - **Point at the line** — every message to the owner that mentions part of a plan cites its path and line, looked up just before sending (see **Pointing at a line**).
 - **One plan per session** — A session binds to one plan at a time. If the user wants to switch, they run `/plan <different-ref>` which rebinds.
+- **The IDE holds main; other branches live in worktrees.** The primary checkout is the repository root the owner's IDE has open, and it stays on the branch it is on. No `/plan` flow runs `git checkout`, `git switch`, `git stash` or `git reset` there.
+  - **Default flows** commit on whatever branch the primary checkout already has.
+  - **Work that needs its own branch** gets a worktree at `.claude/worktrees/<slug>`: a PR-mode slice, a stacked slice, or a branch the owner asked for. Create it with `git worktree add -b <branch> .claude/worktrees/<slug> <base>`, or reuse the worktree that already has the branch (`git worktree list`). Build, check and commit there; switching branches is allowed only inside a worktree this session created.
+  - **The plan file stays in the primary checkout.** It is read, edited and cited there, even while the code is built in a worktree. That is the copy the owner has open, so every `path:line` they click opens it, and the owner and Claude work in one copy.
+    - A worktree's copy of the plan is a stale snapshot: never read state from it or write it.
+    - Code commits go on the worktree's branch.
+    - Plan edits are committed in the primary checkout, limited to that path (`git -C <primary> commit --only -- <plan>`), so the owner's other staged work stays as it was. When that checkout is mid-merge, mid-rebase or mid-cherry-pick, leave the plan edits uncommitted and say so.
+    - Other files on the branch are read and cited at the worktree's path.
+  - **Ignore and clean up worktrees.** Unless `git check-ignore -q .claude/worktrees/` succeeds, append `/.claude/worktrees/` to `.git/info/exclude`. That file is local to the clone, so the project's `.gitignore` stays the project's call. Remove a worktree once its branch has merged, never with `--force`.
+  - **A team repository gets the same layout**: worktrees at `.claude/worktrees/<slug>` inside it, and its primary checkout left alone.
+  - **`/swarm` builds on this rule** (its **Branches live in worktrees**).
 - **The plan file is a baton, and a baton is short.** Every edit should serve the handoff to the next session. A future Claude — with zero memory of this conversation — will open this file cold and need to resume within a minute, which a plan of goal, decisions, slices and a status block allows and a long execution log does not. `/plan handoff` is the deliberate version: run it before a session ends or another agent takes over.
 
 ---

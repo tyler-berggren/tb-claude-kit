@@ -1073,6 +1073,23 @@ into an integration branch (`swarm/<plan_id>`), resolving conflicts itself: it's
 that has seen every brief. A final integration gate — the plan's full verification table plus a
 whole-diff review — stands between the integration branch and your main branch.
 
+**Your IDE's checkout is never touched.** The run never switches the branch your IDE has open, so
+you can keep working on main throughout. Every swarm branch lives in its own worktree under
+`.claude/worktrees/`:
+
+- the integration branch at `.claude/worktrees/swarm-<plan_id>`;
+- each unit in the worktree the Agent tool creates there, branched from the integration tip;
+- any branch a review needs to serve.
+
+The plan, `SWARM.md` and `REPORT.md` stay in your main checkout. The orchestrator edits them there,
+next to your own edits, so the plan it updates is the one you mark, and every `path:line` it gives
+you opens in your IDE. It doesn't commit mid-run. At the end it commits only those files, leaving
+anything else you have staged untouched. At the end, the run merges your main into the
+integration branch and then fast-forwards main, so your commits from during the run are kept. If
+that would overwrite uncommitted work, the run leaves the branch unmerged and tells you why.
+`/plan` follows the same rule: your IDE holds main, and a PR-mode slice or any other branch gets a
+worktree.
+
 Three things keep an unattended run honest:
 
 - **A stall watchdog** — a hung agent never sends a completion signal, so a background timer
@@ -1189,7 +1206,7 @@ one message.
     "ship": "ready",
     "look": "batch",
     "review": "node scripts/review.mjs --pr <pr>",
-    "worktree": { "create": "git -C ../app worktree add .worktrees/<slug> -b <branch> origin/main", "remove": "git -C ../app worktree remove .worktrees/<slug>" },
+    "worktree": { "create": "git -C ../app worktree add .claude/worktrees/<slug> -b <branch> origin/main", "remove": "git -C ../app worktree remove .claude/worktrees/<slug>" },
     "resources": { "db/schema/**": "db:local", "apps/web/**": "port:web", "package-lock.json": "install" },
     "reviewStack": {
       "shared": "curl -sf http://localhost:8080/health",
@@ -1216,7 +1233,7 @@ one message.
 - **`review`** — the team's own review tool, run against a pushed PR; it replaces the swarm's
   reviewer agent
 - **`worktree`** — create and remove commands for unit worktrees when the code lives in a
-  checkout outside the session's repo
+  checkout outside the session's repo; put them at `.claude/worktrees/<slug>` in that repo
 - **`resources`** — path globs to resource tags for shared local state
 - **`reviewStack`** — how `/swarm review` serves a look. It gives:
   - the shared stack's health check and start command;
@@ -1238,6 +1255,7 @@ one message.
 | `swarm_holds` (brain DB) | Shared state a `/swarm review` session has borrowed from the live run, open until released |
 | `cowork/swarm/<plan_id>/review-YYYY-MM-DD-<n>.md` | A review session's handoff: what was served from where, and every verdict |
 | `swarm/<plan_id>` branch | Integration branch; kept after the run for inspection |
+| `.claude/worktrees/swarm-<plan_id>` | The integration branch's worktree; removed once merged, kept when the branch is left for review |
 
 The plan file stays the source of truth for *what*; `SWARM.md` owns *who and in what order*;
 `REPORT.md` records *what actually happened*. The plan is updated with checkboxes and phase
