@@ -236,6 +236,7 @@ KIT_PATHS+=(
   "cowork/architecture/schema.sql"
   "scripts/puppeteer-server.cjs"
   "scripts/artifact-bridge.cjs"
+  "scripts/wiki-build"
 )
 
 # Publish KIT_PATHS into the kit checkout so the session-start hook can adopt new

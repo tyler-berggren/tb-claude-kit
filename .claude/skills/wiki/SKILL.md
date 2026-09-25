@@ -106,10 +106,23 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
 ### Prerequisites
 
 - `wiki/` must exist and contain at least one `.md` file
-- `scripts/wiki-build/` must exist (scaffolded by `/repo`)
+- `scripts/wiki-build/` must exist. The builder ships with the kit and `install.sh` links it into the project
+  (in `inside` mode it is a copy). Changes to the builder reach every project's wiki on its next deploy.
 - Cloudflare credentials must be in `.env` — the script checks for either prefix:
   - `CLOUDFLARE_ACCOUNT_ID` or `CF_ACCOUNT_ID`
   - `CLOUDFLARE_API_TOKEN` or `CF_API_TOKEN`
+
+### What the builder produces
+
+A static site: one HTML page per markdown file, a sidebar built from the index (`README.md`), in-browser
+search, per-page heading contents and "last updated" stamps. In the sidebar, each `## Heading` in the index
+becomes a group, and **groups start expanded**. A button in the bottom-left corner collapses the sidebar on
+desktop (Lucide `panel-left`) and expands it again (`panel-right`); the choice is remembered per browser.
+
+A folder containing `RESTRICTED.txt` (lines of `allow: person@example.com`) is kept out of the shared sidebar,
+search and Home page, and is served only to the people it lists. That needs the site's Cloudflare Access
+settings in `.claude/wiki-access.json` (`{ "team": "https://<team>.cloudflareaccess.com", "auds": [...] }`),
+or a file passed with `--access`.
 
 ### Procedure
 
@@ -146,23 +159,25 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
    fi
    ```
 
-5. Resolve the client name for the sidebar title. Check `kit.json`, then fall back to the
-   repo directory name (title-cased):
+5. Resolve the sidebar title from `kit.json` (`wiki.title`). If it's not set, the builder uses the
+   index's first heading:
    ```bash
-   CLIENT_NAME=$(jq -r '.wiki.clientName // empty' .claude/kit.json 2>/dev/null)
+   TITLE=$(jq -r '.wiki.title // empty' .claude/kit.json 2>/dev/null)
    ```
-   If not set, derive from the repo directory name — convert kebab-case to title case
-   (e.g. `acme-corp` → `Acme Corp`).
 
-6. Run the build:
+6. Build **from the committed pages**, so uncommitted drafts are never published, running from the
+   project root so `.claude/wiki-access.json` resolves:
    ```bash
-   cd scripts/wiki-build && npm install --silent && node build.mjs "../../$WIKI_ROOT" ../../_wiki-site --name "$CLIENT_NAME"
+   (cd scripts/wiki-build && npm install --silent)
+   SRC=$(mktemp -d) && git archive HEAD "$WIKI_ROOT" | tar -x -C "$SRC"
+   node scripts/wiki-build/build.mjs "$SRC/$WIKI_ROOT" _wiki-site ${TITLE:+--title "$TITLE"}
+   rm -rf "$SRC"
    ```
+   If the user explicitly asks to publish uncommitted changes, build from `"$WIKI_ROOT"` directly.
 
 7. Deploy to Cloudflare Pages. Most wikis already have an existing Pages project —
    **skip project creation** and deploy directly:
    ```bash
-   cd ../..
    CLOUDFLARE_ACCOUNT_ID="$CF_ACCT" CLOUDFLARE_API_TOKEN="$CF_TOKEN" \
      npx wrangler pages deploy _wiki-site --project-name="$PROJECT" --branch=main --commit-dirty=true
    ```
@@ -171,7 +186,9 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
    CLOUDFLARE_ACCOUNT_ID="$CF_ACCT" CLOUDFLARE_API_TOKEN="$CF_TOKEN" \
      npx wrangler pages project create "$PROJECT" --production-branch=main
    ```
-   Then retry the deploy command above.
+   Then retry the deploy command above. A new project is public until it's gated: put Cloudflare
+   Access in front of it (the production hostname and `*.<project>.pages.dev` previews) **before**
+   the first deploy when the wiki shouldn't be public.
 
 8. Clean up the build output:
    ```bash

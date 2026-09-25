@@ -28,3 +28,4 @@ cowork/architecture/PROCEDURE.md
 cowork/architecture/schema.sql
 scripts/puppeteer-server.cjs
 scripts/artifact-bridge.cjs
+scripts/wiki-build

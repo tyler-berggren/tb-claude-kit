@@ -757,6 +757,20 @@ Every `/wiki` invocation runs a hybrid procedure:
 | `/wiki audit` | Deep audit — exhaustive wiki-vs-codebase reconciliation |
 | `/wiki init` | Create `wiki/` with `README.md` and an optional `STYLE.md` scaffold |
 | `/wiki <page>` | Create or update a single page by name |
+| `/wiki deploy` | Build the wiki into a static site and publish it to Cloudflare Pages |
+
+### Publishing
+
+`/wiki deploy` builds the committed pages with the kit's `scripts/wiki-build/` (linked into every project by
+`install.sh`, so a builder change reaches every wiki on its next deploy) and publishes them to Cloudflare Pages.
+The site has in-browser search, per-page contents, a sidebar grouped by the index's `## Headings` (groups start
+expanded), and a bottom-left button that collapses the sidebar on desktop. A folder holding `RESTRICTED.txt` is
+served only to the people it lists, using the Access settings in `.claude/wiki-access.json`. Set the Pages
+project and sidebar title in `kit.json`:
+
+```json
+{ "wiki": { "pagesProject": "my-project-wiki", "title": "My Project Wiki" } }
+```
 
 ### Style guide
 
