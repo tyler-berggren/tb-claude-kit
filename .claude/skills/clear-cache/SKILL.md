@@ -113,9 +113,46 @@ If it says there is no shared Chrome yet, delete nothing. Tell the user to run
 Puppeteer's downloads in `~/.zshenv`, and removes the other copies.
 
 Playwright keeps its browsers in `~/Library/Caches/ms-playwright`, one folder per build
-(`chromium-1228`, `chromium-1234`). Playwright MCP servers also keep profiles there
-(`mcp-chrome-*`); **never** touch those. For each browser type, delete every build but the highest
-number. When a project still pins an older build, `npx playwright install` puts it back.
+(`chromium-1228`, `chromium-1234`). Unlike Puppeteer, **each Playwright version needs its exact
+build** and never downloads a missing one on its own, so a test run fails outright until someone
+runs `npx playwright install`. Keep every build any project's Playwright pins, plus the newest of
+each type, and delete only the rest. Playwright MCP servers also keep profiles there
+(`mcp-chrome-*`); **never** touch those.
+
+```bash
+bash <<'SH'
+shopt -s nullglob
+roots=$(jq -r '(.clearCache.projectRoots // ["~/dev"])[]' .claude/kit.json 2>/dev/null); [ -z "$roots" ] && roots="~/dev"
+# Every build a project pins, from each installed playwright-core (npm and pnpm layouts).
+# -L follows links, so a project linked into ~/dev from another drive (ha-platform) is seen too.
+pinned=$(echo "$roots" | while IFS= read -r r; do
+  r="${r/#\~/$HOME}"; [ -d "$r" ] || continue
+  find -L "$r" -maxdepth 8 -path '*playwright-core/browsers.json' -not -path '*/.git/*' 2>/dev/null
+done | sort -u | while IFS= read -r f; do
+  jq -r '.browsers[] | "\(.name | gsub("-"; "_"))-\(.revision)"' "$f" 2>/dev/null
+done | sort -u)
+cd ~/Library/Caches/ms-playwright 2>/dev/null || exit 0
+for d in *-[0-9]*; do
+  case "$d" in mcp-*) continue ;; esac
+  type=${d%-*}
+  newest=$(ls -d "$type"-[0-9]* | sort -t- -k2 -n | tail -1)
+  [ "$d" = "$newest" ] && continue
+  echo "$pinned" | grep -qx "$d" && { echo "keep $d (a project pins it)"; continue; }
+  echo "remove $d ($(du -sh "$d" | cut -f1))"
+  rm -rf "$d"            # in `report` mode: print only, skip this line
+done
+SH
+```
+
+A project on an external drive that isn't linked into a project root is invisible to this scan,
+so list it in `clearCache.projectRoots`. If a test later reports a missing browser, run
+`npx playwright install chromium` in that project.
+
+> **Playwright's installer removes browsers too.** After installing, it deletes every build that
+> no *registered* Playwright needs. A Playwright registers only by running `playwright install`
+> itself (the list is in `ms-playwright/.links`). So restoring one project's build can delete
+> another's. After restoring, run `playwright install chromium` in **each** project that uses
+> Playwright, so all of them are registered and the next install keeps every build.
 
 ### 4. Deep tier: list, then ask (only with `deep`)
 
