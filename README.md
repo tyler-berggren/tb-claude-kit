@@ -1192,6 +1192,20 @@ and the swarm adapts to that instead of fighting it:
   package install: `swarm.resources` maps path globs to tags, and two units holding a tag never
   run at once.
 
+### Live progress and time estimates
+
+When a run starts, the orchestrator hands you a progress display (`/pbar`) to paste into any
+terminal. Besides the counts, it shows time estimates from `swarm/eta.py`:
+- **each in-flight unit:** time left in its stage (build or land), flagged OVERDUE when past it;
+- **each lane:** its finish time;
+- **the whole run:** time left, with a clock time and a slow case.
+
+The brain logs every unit's status change through triggers on `swarm_units`
+(`swarm_unit_events`), and the estimator learns each stage's duration from that log. It starts
+from a prior and moves toward the observed median as units finish, weighting the current run's
+samples double, so the numbers get more accurate as the run goes. Time a unit spends parked for
+you is never counted as work.
+
 ### Reviewing mid-run (`/swarm review`)
 
 A run parks work for you only when it is critical, or on every user-facing slice if the project opts

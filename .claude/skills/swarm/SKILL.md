@@ -112,7 +112,32 @@ CREATE TABLE IF NOT EXISTS swarm_holds (
   created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
   released_at TEXT
 );
+-- Every status change, logged by the database itself, so time estimates can learn stage durations.
+CREATE TABLE IF NOT EXISTS swarm_unit_events (
+  id INTEGER PRIMARY KEY,
+  run_id INTEGER NOT NULL,
+  unit_key TEXT NOT NULL,
+  from_status TEXT,
+  to_status TEXT NOT NULL,
+  at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+  source TEXT NOT NULL DEFAULT 'live'
+);
+CREATE INDEX IF NOT EXISTS swarm_unit_events_unit ON swarm_unit_events(run_id, unit_key, at);
+CREATE TRIGGER IF NOT EXISTS swarm_unit_status_event AFTER UPDATE OF status ON swarm_units
+  WHEN OLD.status IS NOT NEW.status
+  BEGIN INSERT INTO swarm_unit_events(run_id, unit_key, from_status, to_status)
+        VALUES (NEW.run_id, NEW.unit_key, OLD.status, NEW.status); END;
+CREATE TRIGGER IF NOT EXISTS swarm_unit_insert_event AFTER INSERT ON swarm_units
+  BEGIN INSERT INTO swarm_unit_events(run_id, unit_key, from_status, to_status)
+        VALUES (NEW.run_id, NEW.unit_key, NULL, NEW.status); END;
 ```
+
+`swarm_unit_events` is written by the triggers, never by hand, so the timing record survives an
+orchestrator that forgets. The upgrade below rebuilds `swarm_units`, which drops its triggers:
+re-run the two `CREATE TRIGGER` statements after it. A run that started before the table existed can
+be **backfilled** from its host's records (a PR's first commit → `working`, opened → `shipped`,
+merged → `merged`) with `source = 'backfill'`. Leave out any stage that included waiting on the owner,
+so the estimates learn work time, not waiting time.
 
 `swarm_runs.status` is what makes phase inference work across sessions — keep it accurate at every transition.
 
@@ -342,6 +367,24 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
    If commits landed since setup, do a fast delta check. If they invalidate unit briefs, stop and tell the user to re-run setup; don't guess.
 3. Create the integration branch in its own worktree, from the merge target's tip, never from the primary checkout's HEAD: `git worktree add -b swarm/<plan_id> .claude/worktrees/swarm-<plan_id> <merge-target>`. Never check it out in the primary checkout. Record `base_commit`, `integration_branch`, `started_at` and `orchestrator` (this session's name, from `ListAgents`), and note the worktree path in SWARM.md's run config. Set status `running`.
 4. Announce the dispatch order in one short message (this is what `/rc` monitoring sees first).
+5. **Hand the owner a progress display with live time estimates** (`/pbar`), unprompted, as the last
+   thing in that message. It shows units merged out of the total, what is in flight, anything parked,
+   and open PRs. It also carries the estimate block from `eta.py` in this skill's folder:
+
+   ```bash
+   python3 <this skill's folder>/eta.py --db cowork/brain/BRAIN.db --run <id> --slots <maxAgents> [--stack-in-lane]
+   ```
+
+   Pass `--stack-in-lane` for a PR-mode run whose lanes stack. The block gives:
+   - **each in-flight action:** the unit's stage (build or land), elapsed, expected, time left, and OVERDUE past it;
+   - **each lane (phase):** units done out of total, and its finish time;
+   - **the whole run:** time left, a finish clock time, and a slow case.
+
+   It learns each stage's duration from `swarm_unit_events`, starting from a prior and pulling toward
+   the observed median as units finish, with this run's own samples weighted double. So **the estimate
+   gets more accurate as the run goes**, and it says how many samples it rests on. Parked units, and
+   everything waiting on them, get no estimate: the display names what they wait on. The script is
+   read-only. Re-print the display's command whenever you give a status update (`/pbar` §4b).
 
 ### Step R2 — Dispatch loop
 
