@@ -845,19 +845,24 @@ Every question that needs the owner lives in the plan's `## Open questions` sect
 ### During: decide, build, record
 
 Inside a batch nobody stops to ask the owner anything, and nothing waits for them, except in the
-one case below. Think like a senior developer: make the call, build it in full, and keep going.
+one case below. Think like a senior developer: make the call, build it, and keep going.
 
 - **Where a call comes from:** the plan, then its decisions, then the brain's decisions, then
   the codebase's conventions, then the smallest reasonable reading of the item. Commit to it.
   Design, layout and wording are calls too.
-- **Build the choice in full.** Do not stub it defensively in case the owner disagrees. An
-  overruled call becomes a fix item later, which costs less than a stalled batch.
+- **Build it so it works.** A call is always functional, never a hollow stub. An overruled call
+  becomes a fix item later, which costs less than a stalled batch.
+- **At a genuine fork, decide and build lean.** When it is truly unclear which way best reaches
+  the goal, still pick one, but keep follow-on work to a minimum: make it functional end to end
+  and stop, with no polish, extensions or dependent work stacked on it until a later pass needs
+  them. Tokens spent building what may be un-built are waste. Mark the call **uncertain** in the
+  review block. Where the choice is clear, build it properly as usual.
 - **Every call is recorded** in the review block: the call, the options, why this one, what
   switching would cost, and what depends on it. It never holds the item: the item ships.
 - **The only thing that parks is a critical issue:** something the owner has not pre-approved that
   is irreversible or outward-facing (deleting shared data, notifying people, spending money,
   touching production data), a security, privacy or permissions exposure, reversing a decision the
-  owner explicitly made, or a product fork where a wrong guess throws away large amounts of work.
+  owner explicitly made. A fork in the road is not critical: decide it and build lean (above).
   Stop only that item: park it, notify the owner, and carry on with everything that does not
   depend on it. **When unsure, it is not critical.**
 - **Verify UI in order, then stop.**
@@ -883,7 +888,7 @@ are the only items that hold work:
 - [ ] **1 · critical** — <what is parked and why it could not ship without the owner>
   Options: <the alternatives> · Recommended: <one> · Holds: <items>
 - [ ] **2 · call** — <the call made> · shipped in <PR or commit>
-  Options: <the alternatives> · Why: <reason> · Switching costs: <what>
+  Options: <the alternatives> · Why: <reason> · Certainty: sure | uncertain (built lean) · Switching costs: <what>
 - [ ] **3 · unverified** — <what could not be checked, and why> · <URL, when there is one>
   Runs on: <app> from <checkout or branch> · Item: <slice or phase>
 - [x] **4 · call** — <…> — cleared: <the owner's answer>

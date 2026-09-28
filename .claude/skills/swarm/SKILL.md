@@ -30,8 +30,8 @@ The intended workflow: `/plan` generates the plan → `/swarm <ref>` (setup) →
 
 **The core contract** is `/plan`'s **Batches** standard, applied to a whole run:
 - Every question a human must answer is answered during Setup, and written into the plan.
-- During Run, no agent stops to ask the user anything, and that includes the orchestrator. Agents make the call a senior developer would, build it in full, keep going, and record it as a call in the plan.
-- **Nothing parks for the owner unless it is critical** (`/plan`, **Batches**: irreversible, outward-facing, security or data exposure, money, reversing an explicit owner decision, or a product fork where a wrong guess throws away large amounts of work). Everything else ships through the normal pipeline.
+- During Run, no agent stops to ask the user anything, and that includes the orchestrator. Agents make the call a senior developer would, build it to work, keep going, and record it as a call in the plan. At a genuine fork they still decide, but build the lean functional version and leave polish for a later pass.
+- **Nothing parks for the owner unless it is critical** (`/plan`, **Batches**: irreversible, outward-facing, security or data exposure, money, or reversing an explicit owner decision). A fork in the road is not critical: decide it and build lean. Everything else ships through the normal pipeline.
 - **UI is verified by code first, a headless browser second** (`/look`, **Headless**). What neither can verify is written down as unverified in the plan and the PR notes, and the unit moves on. Nobody spends time on UI that code or a headless browser cannot easily check.
 - Calls, unverified items and critical parks all land in one numbered block in the plan. Only the critical parks wait on the owner; the rest they read when they choose.
 
@@ -244,11 +244,12 @@ earlier slice's squash merge lands, the later one replays only its own commits
 **Park only for a critical issue.** A team repository often merges and deploys a green pull
 request on its own, so a unit that would ship something critical must not: irreversible or
 outward-facing action not pre-approved in SWARM.md, a security, privacy or permissions exposure,
-money, a production data change, a reversal of a decision the owner explicitly made, or a product
-fork where a wrong guess throws away large amounts of work. That unit parks, its dependents stack
-on its branch, and the owner is notified. When unsure, it is not critical: make the call, ship it,
-record it. Calls are built in full, never as a defensive stub. The owner overrules a call later with
-a fix slice, which is cheaper than a stalled lane.
+money, a production data change, or a reversal of a decision the owner explicitly made. That unit
+parks, its dependents stack on its branch, and the owner is notified. When unsure, it is not
+critical: make the call, ship it, record it. A call is always functional, never a hollow stub. At a
+genuine fork, where it is truly unclear which way is best, the call is built lean: working end to
+end, with follow-on work kept to a minimum and polish left for a later pass, so little is un-built
+if the owner overrules it. An overruled call becomes a fix slice, which is cheaper than a stalled lane.
 
 **Resource tags come from the project's map.** A team repository usually shares one local stack
 across every worktree: dev servers bound to fixed ports, one local database, one package
@@ -401,15 +402,16 @@ An interrupted run. Record this session's name as `swarm_runs.orchestrator` (a r
 
 Copied into SWARM.md at setup; binding for every spawned agent.
 
-- **Never ask the user anything.** Facing a judgment call, including a design, layout or wording one? Decide as a senior developer would, applying the decision protocol: (1) the plan and its decisions are authoritative → (2) the SWARM.md decision record → (3) brain DB decisions → (4) the codebase's conventions and the smallest reasonable reading of the item. Build the choice in full, keep going, and record it under `Calls`. A call the owner overrules later becomes a fix slice, which beats a stalled swarm.
-- **The one exception is a critical issue:** an action not pre-approved in SWARM.md that is irreversible or outward-facing (deleting shared data, notifying people, spending money, touching production), a security, privacy or permissions exposure, reversing a decision the owner explicitly made, or a product fork where a wrong guess throws away large amounts of work. Do not take it and do not wait: finish what does not depend on it, and report it under `Critical`. The orchestrator parks the unit and notifies the owner. When unsure, it is not critical.
+- **Never ask the user anything.** Facing a judgment call, including a design, layout or wording one? Decide as a senior developer would, applying the decision protocol: (1) the plan and its decisions are authoritative → (2) the SWARM.md decision record → (3) brain DB decisions → (4) the codebase's conventions and the smallest reasonable reading of the item. Build it so it works, keep going, and record it under `Calls`. A call the owner overrules later becomes a fix slice, which beats a stalled swarm.
+- **At a genuine fork, decide and build lean.** When it is truly unclear which way best reaches the goal, still pick one, but keep follow-on work to a minimum: make it functional end to end and stop there, with no polish, extensions or dependent work stacked on it until a later pass needs them. Tokens spent building what may be un-built are waste. Mark the call `uncertain`.
+- **The one exception is a critical issue:** an action not pre-approved in SWARM.md that is irreversible or outward-facing (deleting shared data, notifying people, spending money, touching production), a security, privacy or permissions exposure, or reversing a decision the owner explicitly made. Do not take it and do not wait: finish what does not depend on it, and report it under `Critical`. The orchestrator parks the unit and notifies the owner. When unsure, it is not critical.
 - **Verify UI in order, then stop.** (1) Code: types, tests, the logic that renders it. (2) Only if code cannot settle it, your own headless browser (`/look`, **Headless**): the page loads without errors, the changed control is there, the interaction works, and nothing overflows at a phone width. (3) If neither can verify it cheaply, record it under `Unverified` with what you could not check and why, and move on. Do not fight a page that will not render headless. Never drive the owner's shared browser.
 - **Stay in your territory.** Read anything; edit only your unit's files. Never edit the plan file, `cowork/**` (brain, plans, swarm files), or `.claude/**` — your worktree's copies would conflict on merge. The orchestrator owns all bookkeeping.
 - **Work only in your own worktree.** Your first step is creating your assigned branch there from the integration sha in your prompt (`git switch -c <branch> <sha>`). Never `cd` into, check out in, or write to the primary checkout (the owner's IDE) or another unit's worktree. The brain's absolute path is for reading `swarm_holds`, nothing else.
 - **Commit your work** on your assigned branch, in coherent chunks with real messages. Never stage `cowork/` paths.
 - **Verify before reporting done.** Run your brief's verification criteria and the project's checks yourself. Report honestly: what passed, what you couldn't verify, what you decided, what a human should look at. The structured final report is your only channel out, and it has five sections:
   - `Done`
-  - `Calls`: each with the options, why this one, what switching would cost, and what depends on it
+  - `Calls`: each with the options, why this one, whether it is `uncertain` (built lean), what switching would cost, and what depends on it
   - `Unverified`: UI or behaviour that neither code nor a headless browser could check, each with the URL when there is one, what could not be checked, and why
   - `Critical`: what must not ship without the owner, and why (empty for almost every unit)
   - `Blocked`
