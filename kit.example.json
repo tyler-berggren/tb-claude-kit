@@ -34,6 +34,12 @@
     "staleDays": 30
   },
 
+  "_note_prune": "For /prune. staleDays: a worktree with no commit and no file change for this many days is offered for removal. keep: branch-name globs /prune never recommends removing.",
+  "prune": {
+    "staleDays": 14,
+    "keep": []
+  },
+
   "_note_commit": "Pins the commit author for /commit. Sets --author only, so the committer still comes from git config and the two identities will differ. Most projects should omit this.",
   "commit": {
     "author": null

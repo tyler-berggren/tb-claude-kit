@@ -16,6 +16,7 @@ This project uses Claude Code skills for structured workflows:
 - `/kill` — Kill dev processes (servers, watchers, bridge) without touching Claude Code.
 - `/look` — Inspect shared Chrome viewport via Puppeteer (DOM-first to diagnose; a screenshot to confirm a visual change landed).
 - `/plan` — Multi-phased project planning with fresh-eyes reconciliation on every resume.
+- `/prune` — Review a repo's worktrees and recommend which to remove (merged, abandoned, stale); removes only what you pick. `report` changes nothing.
 - `/push` — Commit and push to remote.
 - `/research` — Web and project research with numbered reports in `cowork/research/`.
 - `/swarm` — Autonomous parallel plan execution. Setup phase resolves every human question and registers a unit graph in the brain; run phase dispatches worktree-isolated agents, reviews, merges, and reports.

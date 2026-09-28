@@ -10,6 +10,7 @@
 .claude/skills/parse
 .claude/skills/pbar
 .claude/skills/plan
+.claude/skills/prune
 .claude/skills/push
 .claude/skills/research
 .claude/skills/swarm
