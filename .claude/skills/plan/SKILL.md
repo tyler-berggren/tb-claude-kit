@@ -332,7 +332,7 @@ Present findings to the user. Do NOT make any file edits yet.
 <2-3 sentences on how to tackle the batch, informed by the reconciliation>
 ```
 
-Then ask the batch's open questions in the same message (see **Batches**) and write the answers into the plan. Uncleared review items come first: walk them with the owner now, or carry them into this session's block if they would rather look later. Wait for approval or redirection before any implementation. This is the batch's one confirmation: once approved, the work runs without stopping.
+Then ask the batch's open questions in the same message (see **Batches**) and write the answers into the plan. Critical review items that hold work come first: settle them with the owner now. Uncleared calls and unverified items are only mentioned (a count and the block's line range) and carry into this session's block. Wait for approval or redirection before any implementation. This is the batch's one confirmation: once approved, the work runs without stopping.
 
 ### Step R4 — Announce in replies
 
@@ -475,22 +475,18 @@ The rules:
 - **Work that depends on data collected after merge is not a planned PR.** Put it in the close
   phase as a conditional follow-up and open it only if the data says so.
 
-### Inside a slice: look first, test once
+### Inside a slice: verify, test, ship
 
 1. **Build with quick checks only:** type-check the package being edited and run only the tests
    related to the changed files (the test runner's related or changed-files mode, or the files by
    name). Seconds, not minutes. Never a whole suite mid-build, never the whole repo.
-2. **The owner looks** at every user-facing change on a local run **before tests are written
-   around it**, in the batch's review block (see **Batches**), never slice by slice. Check every
-   changed page yourself first, in a headless browser of your own (a passing check is not a
-   running app), then park the slice and add its look items: the URL, what changed, what to try
-   and what right looks like. Changing their mind here is cheap, because nothing has been pinned
-   yet. A lane's next slice may stack on a parked one. New ideas go to a later slice.
-   **A stub never ships unconfirmed:** in a team repository a green pull request often merges and
-   deploys on its own, so a slice holding a stub for a call the owner has not confirmed parks like
-   a user-facing one, with dependents stacking on its branch. A call that is cheap to undo and needs
-   no stub ships, and is listed in the review block for confirmation.
-3. **Then the tests,** pinning what was approved. Data-layer logic — queries, predicates,
+2. **Verify the UI yourself, in order, then move on.** Code first: types, tests, the logic that
+   renders it. A headless browser of your own second (`/look`, **Headless**), when code cannot
+   settle it. What neither can check cheaply is written down as unverified in the plan's review
+   block and the PR notes, and the slice goes on without it. Design, layout and wording choices
+   are **calls**: make them as a senior developer would and record them (see **Batches**). Nothing
+   parks for the owner unless it is critical. New ideas go to a later slice.
+3. **Then the tests,** pinning what was built. Data-layer logic — queries, predicates,
    permission rules — is the exception: prove it against a real engine as it is written. It does
    not depend on taste, and it is where the serious bugs hide.
 4. **Ship through the project's ship command:** rebase once, run the team's scoped checks once
@@ -623,10 +619,10 @@ Then the tracker: `NNN epic` publishes the epic and, when the project publishes 
     reliably notified, so people found later go in a new comment.
   - **Package names.** Keep scoped package names (`@scope/pkg`) in code spans: hosts read a
     bare `@owner/name` as a team mention.
-- **Look first.** Any user-facing change is viewed and confirmed on a local run by the person who
-  owns the plan **before its tests are written and before the checks run** — not just before the
-  push, when a change of mind throws both away. The routes to check, and the confirmation, are
-  items in the plan's review block (see **Batches**).
+- **Verify, then ship.** A user-facing change is verified by code, then in a headless browser,
+  before its tests are written (see **Inside a slice**). It does not wait for the owner. Its calls
+  go into the plan's review block, and what could not be verified goes there and into the PR notes
+  (see **Batches**).
 - **Draft or ready is the project's ship policy** (`swarm.ship` in `.claude/kit.json`, or the
   `rules."plan"` override). The options:
   - `ready`: the owner has approved ready PRs in advance, and a PR is a draft only on their
@@ -652,8 +648,8 @@ Then the tracker: `NNN epic` publishes the epic and, when the project publishes 
 - Each slice is built in its own worktree (`.claude/worktrees/<slug>` in the team repo), branched
   from `origin/<default>`, or from the previous slice's branch when it stacks. The team repo's
   primary checkout is never switched (**The IDE holds main**, under **Global rules**).
-- Build with quick checks, let the owner look before tests are written, and run the full scoped
-  checks once at ship time (see **Inside a slice**).
+- Build with quick checks, verify UI by code then headless, and run the full scoped checks once
+  at ship time (see **Inside a slice**). Nothing parks for the owner unless it is critical.
 - One commit per lettered section; commit the plan file in **your** repo alongside, never into
   the team repo.
 - Tick items with ` — done: <note>`; never delete an item; if a step is impossible as written,
@@ -811,12 +807,13 @@ issue-dependency APIs). When a key is absent, the mode asks rather than guesses.
 
 ---
 
-## Batches: questions first, one review at the end
+## Batches: questions first, decide and continue, a record at the end
 
 A **batch** is any stretch of work that runs through more than one item or slice: a resumed
-session working down the build order, or a `/swarm` run. The owner's attention is spent at the
-two ends of a batch and nowhere in between. Their open questions are answered before it starts,
-and everything that needs their eyes or their judgment waits in one review block after it ends.
+session working down the build order, or a `/swarm` run. The owner's open questions are answered
+before it starts. Inside it, calls are made and the work keeps going. Nothing waits for the owner
+unless it is **critical**. Every call is recorded in one review block, which the owner reads and
+overrules when they choose.
 
 ### Before: open questions, answered in the plan
 
@@ -845,71 +842,70 @@ Every question that needs the owner lives in the plan's `## Open questions` sect
   decide" is an answer: record the default taken. The section keeps only what is still open.
 - Questions are numbered once and never renumbered.
 
-### During: decide, stub, flag
+### During: decide, build, record
 
-Inside a batch nobody stops to ask the owner anything, except in the one case below. Think like
-a senior engineer and product manager: make the call and flag it for the review.
+Inside a batch nobody stops to ask the owner anything, and nothing waits for them, except in the
+one case below. Think like a senior developer: make the call, build it in full, and keep going.
 
 - **Where a call comes from:** the plan, then its decisions, then the brain's decisions, then
   the codebase's conventions, then the smallest reasonable reading of the item. Commit to it.
-- **When the options cost real work,** pick the best one and build the **seam** in full — the
-  types, exports, schema, routes and contracts that later items or other agents consume — and
-  the behaviour behind it minimally. A change of course after the review then throws little
-  away, and nothing downstream waits. Mark the stub in the code where the project's conventions
-  allow it.
-- **Every call is flagged** in the review block: the call, the options, why this one, what is
-  stubbed (paths), what switching would cost, and what depends on it.
-- **The only interruption** is something the owner has not pre-approved that is irreversible or
-  outward-facing — deleting shared data, notifying people, spending money, touching production —
-  or a security or data-exposure risk. Even then, stop only that item: park it, notify the owner,
-  and carry on with everything that does not depend on it.
-- **Verify UI without the owner.** Check a changed page in a headless browser of your own
-  (`/look`, **Headless**): it loads without errors, the changed control is there, the interaction
-  works, nothing overflows at a phone width, and one screenshot per page per width is looked at
-  for breakage. How it looks — design, layout, wording, a design choice — goes to the review
-  block for the owner.
+  Design, layout and wording are calls too.
+- **Build the choice in full.** Do not stub it defensively in case the owner disagrees. An
+  overruled call becomes a fix item later, which costs less than a stalled batch.
+- **Every call is recorded** in the review block: the call, the options, why this one, what
+  switching would cost, and what depends on it. It never holds the item: the item ships.
+- **The only thing that parks is a critical issue:** something the owner has not pre-approved that
+  is irreversible or outward-facing (deleting shared data, notifying people, spending money,
+  touching production data), a security, privacy or permissions exposure, reversing a decision the
+  owner explicitly made, or a product fork where a wrong guess throws away large amounts of work.
+  Stop only that item: park it, notify the owner, and carry on with everything that does not
+  depend on it. **When unsure, it is not critical.**
+- **Verify UI in order, then stop.**
+  1. **Code:** types, tests, and the logic that renders the change.
+  2. **A headless browser of your own** (`/look`, **Headless**), only when code cannot settle it:
+     the page loads without errors, the changed control is there, the interaction works, and
+     nothing overflows at a phone width.
+  3. **Otherwise, note it and move on:** an **unverified** item in the review block (and in the PR
+     notes in PR mode) saying what could not be checked and why. Do not spend time on UI that code
+     or a headless browser cannot easily check. The owner's shared browser is never part of the loop.
 
 ### After: one review block
 
-Everything the owner needs to see or decide goes into **one** numbered section of the plan,
-`## Review`, directly under the Handoff section (or under the title when there is none):
+The record of the batch goes into **one** numbered section of the plan, `## Review`, directly under
+the Handoff section (or under the title when there is none). Critical parks come first, because they
+are the only items that hold work:
 
 ```markdown
 ## Review
 
-**Session YYYY-MM-DD** · 2 of 5 cleared · to open the pages: <how to start the app>
+**Session YYYY-MM-DD** · 1 critical waiting · 6 calls, 2 unverified
 
-- [ ] **1 · look** — <what changed> · <URL>
-  Runs on: <app> from <checkout or branch>
-  Do: <what to click or try> · Right: <what right looks like> · Widths: 1440, 390
-  Agent checked: <what the headless check confirmed> · Item: <slice or phase>
-- [ ] **2 · call** — <the call made>
-  Options: <the alternatives> · Why: <reason> · Stubbed: <paths, or nothing>
-  Switching costs: <what> · Depends on it: <items>
-- [x] **3 · look + call** — <…> — cleared: <the owner's answer>
+- [ ] **1 · critical** — <what is parked and why it could not ship without the owner>
+  Options: <the alternatives> · Recommended: <one> · Holds: <items>
+- [ ] **2 · call** — <the call made> · shipped in <PR or commit>
+  Options: <the alternatives> · Why: <reason> · Switching costs: <what>
+- [ ] **3 · unverified** — <what could not be checked, and why> · <URL, when there is one>
+  Runs on: <app> from <checkout or branch> · Item: <slice or phase>
+- [x] **4 · call** — <…> — cleared: <the owner's answer>
 ```
 
-- **Written as it happens.** Each look or call is appended as it arises, so a crashed session
-  loses nothing. There is one writer: when agents run in parallel, they report their looks and
-  calls, and the session that coordinates them writes the block.
-- **One sequence, in click-through order** — by app or area, then by page. A **look** item always
-  carries its own URL, which the owner opens in the shared browser themselves. It also says what it
-  **runs on**: the app, and the checkout or branch that must serve it. That way whoever serves the
-  review never has to guess, and a look is never checked against code that lacks the change. A look
-  checked on the wrong checkout is void and gets checked again.
+- **Written as it happens.** Each item is appended as it arises, so a crashed session loses
+  nothing. There is one writer: when agents run in parallel, they report their calls, unverified
+  items and critical parks, and the session that coordinates them writes the block.
+- **An unverified item carries its URL when there is one,** and says what it **runs on** (the app,
+  and the checkout or branch that serves it), so the owner can check it themselves if they want to.
+  The owner may also run a **look** (a page they want to see); those items take the same shape.
 - **The owner may mark items in the plan directly:** `[x]` approves, `[fix]` plus an indented
   `fix:` note asks for a change, and a note under one of a call's options changes that option. Anyone
-  who writes the block re-reads it from disk first, so those marks survive. A call with no mark is
-  still open, never accepted by default.
-- **At the end of the batch, tidy it:** merge duplicates, request every URL again and fix what no
-  longer renders, drop what a later item superseded, and number it 1…N. Then load the open items
-  into the session's todo tool when it has one. When it has none, the checkboxes are the list,
-  and after each cleared item report `k of N cleared — next: #m (<plan>:<line>)`. Hand the
-  block over with its line range, and walk it item by item, each by number and line.
+  who writes the block re-reads it from disk first, so those marks survive. An unmarked call stands
+  as built. An unmarked critical item still holds its work.
+- **At the end of the batch, tidy it:** merge duplicates, drop what a later item superseded, and
+  number it 1…N with critical items first. Hand the block over with its line range and the count of
+  critical items waiting. Walk it item by item only when the owner asks to.
 - **Clearing an item:**
-  - an approval releases whatever was waiting on it;
+  - an approval of a critical item releases whatever was waiting on it;
   - an answer to a call becomes a numbered decision, logged to the brain;
-  - a rejection becomes a fix item in the build order, and a new idea becomes a later item.
+  - an overruled call or a rejection becomes a fix item in the build order, and a new idea becomes a later item.
 
   Tick the item with the owner's words.
 - **Once every item is cleared,** delete that session's entries. Their outcomes live in the
@@ -1128,7 +1124,8 @@ or have to ask about:
   review state, running servers, migrations or data changes applied, deploys, messages sent;
   and what was verified (command and result) versus not yet verified.
 - **Open questions** — who answers each one, and the default assumed until they do.
-- **Waiting on the owner** — looks and calls made this session that nobody has cleared yet.
+- **Waiting on the owner** — critical parks that hold work, then calls made and items left
+  unverified this session that nobody has read yet.
 
 Leave out what the plan already says, what the code or `git log` shows in a minute, and the
 story of the session. Never write a secret; say where it lives instead.
@@ -1140,7 +1137,7 @@ Put each finding where the next agent will look for it:
   not the plan.
 - A decision -> the Handoff section's **Decisions** (in PR mode, the **Decisions taken** table
   instead), and the brain DB as a `decision` entry with `plan_id` and `plan_path` in `meta`.
-- A question for the owner -> `## Open questions`; a look or call waiting on them -> `## Review`
+- A question for the owner -> `## Open questions`; a call, an unverified item or a critical park -> `## Review`
   (see **Batches**), tidied and numbered.
 - Everything else -> the Handoff section.
 
@@ -1273,7 +1270,7 @@ For **PR mode**, the override is where a project names:
 - its branch and title conventions;
 - its issue-first rule;
 - its priority tiers;
-- its look-first rule;
+- whether it opts back into owner looks before shipping (`swarm.look`), and how its pages are served for one;
 - its quick and full check commands;
 - its slice-size signal;
 - the map of which paths trigger what in its CI;

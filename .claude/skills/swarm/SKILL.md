@@ -1,6 +1,6 @@
 ---
 name: swarm
-description: Prep a plan for autonomous parallel execution, then run it with an orchestrated agent swarm. Phase is inferred from brain state — unregistered plan -> Setup, registered ready -> Run, running -> Resume. Also status / abort / report, and review — the owner's batch look from a parallel session while the run keeps going.
+description: Prep a plan for autonomous parallel execution, then run it with an orchestrated agent swarm. Phase is inferred from brain state — unregistered plan -> Setup, registered ready -> Run, running -> Resume. Also status / abort / report, and review — the owner's optional batch look from a parallel session while the run keeps going. Agents decide and continue; only critical issues park.
 argument-hint: "[plan ref | scope NNN | status | abort | report | review [plan ref]]"
 ---
 
@@ -30,8 +30,10 @@ The intended workflow: `/plan` generates the plan → `/swarm <ref>` (setup) →
 
 **The core contract** is `/plan`'s **Batches** standard, applied to a whole run:
 - Every question a human must answer is answered during Setup, and written into the plan.
-- During Run, no agent stops to ask the user anything, and that includes the orchestrator. Agents make the call, stub what would be expensive to throw away, and flag it.
-- Everything the owner must see or decide lands in one numbered review block in the plan, cleared together after the run.
+- During Run, no agent stops to ask the user anything, and that includes the orchestrator. Agents make the call a senior developer would, build it in full, keep going, and record it as a call in the plan.
+- **Nothing parks for the owner unless it is critical** (`/plan`, **Batches**: irreversible, outward-facing, security or data exposure, money, reversing an explicit owner decision, or a product fork where a wrong guess throws away large amounts of work). Everything else ships through the normal pipeline.
+- **UI is verified by code first, a headless browser second** (`/look`, **Headless**). What neither can verify is written down as unverified in the plan and the PR notes, and the unit moves on. Nobody spends time on UI that code or a headless browser cannot easily check.
+- Calls, unverified items and critical parks all land in one numbered block in the plan. Only the critical parks wait on the owner; the rest they read when they choose.
 
 ## Branches live in worktrees
 
@@ -59,7 +61,7 @@ Optional argument: `$ARGUMENTS`
 - `status` → **Status flow** (read-only)
 - `abort` → **Abort flow**
 - `report` → print the most recent run's `REPORT.md` path and summarize it
-- `review [plan ref]` → **Review flow**: the owner's batch look, run from a **parallel session** while the run keeps going. Never the orchestrator's own session
+- `review [plan ref]` → **Review flow**: the owner's optional batch look, run from a **parallel session** while the run keeps going. Never the orchestrator's own session
 - A plan ref (`021`, `mvp 001`, filename fragment, or full path) → resolve using the same rules as `/plan` (check `meta.plan_path` on brain tasks first, then scan roots; ask if ambiguous), then route by the table above
 - Empty → if exactly one run is `ready` or `running`, use it; otherwise list and ask
 
@@ -122,7 +124,7 @@ EXISTS` adds `swarm_holds`, and when `PRAGMA table_info(swarm_runs)` lacks `orch
 `ALTER TABLE swarm_runs ADD COLUMN orchestrator TEXT;` once.
 
 `parked`, `shipped`, `lane`, `kind` and `pr` serve PR-mode runs (see **Team repositories**): `parked`
-is built and waiting for the owner's batch look; `shipped` has an open PR on its way through the
+is built and held for the owner, normally only for a critical issue (see **Team repositories**); `shipped` has an open PR on its way through the
 team's CI and review; `merged` then means the team merged it. **A brain created before these
 existed** has a `swarm_units` table whose CHECK rejects the new statuses — `CREATE TABLE IF NOT
 EXISTS` never alters it. When `SELECT sql FROM sqlite_master WHERE name = 'swarm_units'` lacks
@@ -218,30 +220,35 @@ Tell the user: review `SWARM.md` (especially the decision record), giving the li
 ### Team repositories (PR-mode plans)
 
 A plan carrying `**Mode:** pr` lands in a repository other people own, through reviewed pull
-requests. The swarm still completes the plan without stopping, but three things change: the unit
-of shipping is the plan's **slice**, a slice is finished when **the team** merges its PR, and the
-owner's judgment on anything user-facing arrives **in one batch**, not slice by slice.
+requests. The swarm still completes the plan without stopping, but two things change: the unit
+of shipping is the plan's **slice**, and a slice is finished when **the team** merges its PR.
+User-facing slices ship like any other; the owner reviews the recorded calls when they choose,
+and only a critical issue holds a slice for them.
 
 **Units are slices; lanes are the parallelism.** Read each slice's lane and *waits on* line from
 the plan. A **lane** is a chain of slices over the same files — usually one adopter or one
 package — and its slices run in order, while lanes that share no files run side by side. Never
 split a slice's files across two agents. A slice may **stack** on its lane's previous slice
-(branch from that branch, in its own worktree) so the lane never stalls behind a review, CI or a look; once the
+(branch from that branch, in its own worktree) so the lane never stalls behind a review or CI; once the
 earlier slice's squash merge lands, the later one replays only its own commits
 (`git rebase --onto origin/<default> <earlier-branch-head>`, run in that slice's worktree).
 
-**Every unit carries a `kind`**, which decides whether it waits for the owner:
+**Every unit carries a `kind`**, which says how its UI is verified. None of them waits for the owner:
 
 | kind | means | ships |
 |---|---|---|
 | `invisible` | nothing a user can see changes: plumbing, a shared package, config | as soon as its checks and review pass |
-| `fix` | restores intended behaviour, with no design choice in it | the same, and it still gets a look item in the review block so the owner can confirm it |
-| `user-facing` | a change a person will see or feel | only after the owner's batch look (below) |
+| `fix` | restores intended behaviour, with no design choice in it | the same |
+| `user-facing` | a change a person will see or feel | the same, after the UI is verified by code, then headless, with anything unverifiable recorded |
 
-**A stub never ships unconfirmed.** A team repository often merges and deploys a green pull
-request on its own. So a unit of any kind whose report carries a **stubbed call** the owner has
-not confirmed parks like a user-facing one, and its dependents stack on its branch. A call that is
-cheap to undo and needs no stub ships, and it goes into the review block for confirmation.
+**Park only for a critical issue.** A team repository often merges and deploys a green pull
+request on its own, so a unit that would ship something critical must not: irreversible or
+outward-facing action not pre-approved in SWARM.md, a security, privacy or permissions exposure,
+money, a production data change, a reversal of a decision the owner explicitly made, or a product
+fork where a wrong guess throws away large amounts of work. That unit parks, its dependents stack
+on its branch, and the owner is notified. When unsure, it is not critical: make the call, ship it,
+record it. Calls are built in full, never as a defensive stub. The owner overrules a call later with
+a fix slice, which is cheaper than a stalled lane.
 
 **Resource tags come from the project's map.** A team repository usually shares one local stack
 across every worktree: dev servers bound to fixed ports, one local database, one package
@@ -262,21 +269,22 @@ them and asks (S3) only what they leave open:
   PRs, and a slice is a draft only on their word. `draft`: every PR opens as a draft. `ask`
   (the default): the ship command asks, which an unattended run cannot do, so the slice parks
   with the question.
-- `swarm.look` — when the owner reviews user-facing work. `batch` (the default): one session for
-  everything parked. `per-slice`: each user-facing slice parks and notifies on its own. `none`:
-  the project reviews user-facing work some other way.
+- `swarm.look` — whether user-facing work waits for the owner. `none` (the default): it never
+  does, and only critical issues park. `batch`: an opt-in for projects that want the older flow,
+  in which every user-facing slice parks for one batch look. `per-slice`: each user-facing slice parks
+  and notifies on its own.
 
 **The run, per slice:**
 
-1. **Build** in the unit's worktree with the project's quick checks, and check every changed page
-   on a local run in a headless browser of the agent's own (`/look`, **Headless**). A passing check
-   is not a running app, and the owner's shared browser is never the agent's to drive.
-2. **Invisible and fix slices ship:** write their tests, then run the project's ship command
-   (`rules.plan` names it) under the `swarm.ship` policy.
-3. **User-facing slices park** (`status = 'parked'`), and so do slices holding an unconfirmed
-   stub. They are built and checked headless by the agent, but get no ship-time checks and no UI
-   tests yet, because a change of mind in the look would throw both away. Their looks and calls go
-   into the plan's review block.
+1. **Build** in the unit's worktree with the project's quick checks. **Verify UI by code first**
+   (types, tests, the rendering logic), then **in a headless browser of the agent's own** (`/look`,
+   **Headless**) when code cannot settle it. What neither verifies is recorded as unverified and
+   left; the agent does not keep trying. The owner's shared browser is never the agent's to drive.
+2. **Every slice ships:** write its tests, then run the project's ship command (`rules.plan` names
+   it) under the `swarm.ship` policy. Its calls and unverified items go into the plan's review
+   block, and the unverified ones also go into the PR notes.
+3. **Only a critical slice parks** (`status = 'parked'`, see above), with the reason in the
+   review block, and so does every user-facing slice when `swarm.look` opts into `batch`.
 4. **The team's own review tool is the reviewer** when `swarm.review` names one — a review bot
    whose verdict the team's merge honours. It runs against the pushed head and replaces the
    swarm's reviewer agent for that unit; a second review would be duplicate spend. A blocking
@@ -291,8 +299,8 @@ them and asks (S3) only what they leave open:
 
 **Never merge anything into the team's default branch locally.**
 
-**The batch look happens beside the run, not inside it.** When user-facing slices are parked and
-nothing else is in flight, or when the owner asks, the orchestrator:
+**An optional batch look happens beside the run, not inside it.** When a slice is parked for a
+critical issue, when `swarm.look` opts into looks, or when the owner asks, the orchestrator:
 
 1. tidies the plan's `## Review` block (`/plan`, **Batches**) into one numbered list for all of
    them: each look with its URL, what changed, what to try, what right looks like, the widths and
@@ -313,7 +321,7 @@ When the handoff arrives:
   without asking is flagged as that in the review block.
 - Only what changed is shown again at the next look. Each approved slice writes its tests and ships.
 
-A run whose remaining work is parked slices waiting on the owner is **waiting, not stalled**, and so
+A run whose remaining work is critical parks waiting on the owner is **waiting, not stalled**, and so
 is a unit waiting on a review hold: the status says so, and the stall watchdog leaves both alone.
 
 ---
@@ -343,7 +351,7 @@ Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 3. On a completion notification: spawn a **reviewer agent** (read-only, background, `model` = the unit's assigned reviewer model) with the unit brief, the worktree path, the unit's verification criteria, and the checks contract from SWARM.md (exact commands — reviewers never guess). It inspects the diff, runs those checks in the worktree, and returns PASS or FAIL with findings. Mark the unit `review`.
 4. **Reviewer PASS** → merge the unit branch into the integration branch, in the integration worktree (`git -C .claude/worktrees/swarm-<plan_id> merge …`). The orchestrator resolves any conflicts itself — it holds every brief and both sides of the conflict; agents never see each other's work. Then:
    - mark plan items `- [x]` with progress notes (per `/plan` conventions);
-   - append the unit's **Looks** and **Calls** to the plan's `## Review` block (`/plan`, **Batches**) — the orchestrator is its only writer;
+   - append the unit's **Calls**, **Unverified** items and any **Critical** park to the plan's `## Review` block (`/plan`, **Batches**) — the orchestrator is its only writer;
    - update `swarm_units` (`merged`, `result` = one-line summary);
    - remove the unit's worktree. The plan edits stay uncommitted in the primary checkout;
    - loop back to 1, because a merge may unblock dependents.
@@ -369,10 +377,10 @@ When all units are terminal:
    - **Then fast-forward the target.** If the primary checkout has the target checked out, run `git -C <primary> merge --ff-only swarm/<plan_id>`. This advances the owner's branch in place; git refuses if it would overwrite their uncommitted edits. If no worktree has the target checked out, run `git fetch . swarm/<plan_id>:<merge-target>`.
    - **If git refuses,** leave the branch, and say plainly why and what the owner runs to finish. Never stash, reset or check out anything to force it.
 2. Update the plan: `**Status:** done` on completed phases, RESUME WORK HERE banner on the first failed/skipped item if any. Mark linked brain tasks done (per `/plan` update conventions).
-3. **Tidy the plan's `## Review` block** (`/plan`, **Batches**): every look and call the run produced, deduplicated, each URL requested again, numbered 1…N in click-through order. It is the review surface that replaces mid-run questions, and the owner clears it with the next session, item by item.
+3. **Tidy the plan's `## Review` block** (`/plan`, **Batches**): every call, unverified item and critical park the run produced, deduplicated, numbered 1…N with the critical parks first. Only the critical parks hold anything; the calls are a record the owner reads and overrules when they choose.
 4. Write `cowork/swarm/<plan_id>/REPORT.md` — **the user's morning-after read**:
    - Outcome summary: units merged / failed / skipped, wall-clock, phases done
-   - **Waiting on you** — the count of review items and a pointer to the plan's `## Review` block. The block is the one list; the report never keeps a second one
+   - **Waiting on you** — the count of critical parks (what actually waits), the count of calls and unverified items, and a pointer to the plan's `## Review` block. The block is the one list; the report never keeps a second one
    - Verification results (actual output, including anything that failed)
    - Follow-ups and loose ends, routed like `/plan carry` would
 5. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, whether sub-`opus` assignments survived review, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
@@ -380,8 +388,8 @@ When all units are terminal:
    - **Commit the bookkeeping** in the primary checkout, limited to its paths: `git -C <primary> commit --only -- <plan> cowork/swarm/<plan_id>/`. The owner's other staged and unstaged work stays as it was. The review marks in the plan go in with it. Skip the commit, and say so, when the primary checkout is not on the merge target or is mid-merge, mid-rebase or mid-cherry-pick.
    - **Merged:** also remove the integration worktree, never with `--force`. A dirty one means something was written there by mistake: report it and leave it.
    - **Left for review:** keep the integration worktree, so the owner can open it without switching their IDE's branch.
-7. **Notify.** Send a push notification (`PushNotification`) with the one-line outcome — "Swarm 021: 5/6 units merged, U4 failed, 7 items waiting on you (see the plan's Review)". The user designed this to run while they're away; completion and failure are the two interruptions worth sending. Also notify on a hard mid-run stop (baseline drift, aborted run).
-8. Final message: outcome first, then how many review items wait on the owner, with the line range of the plan's `## Review` block, and where the report is. If anything failed, say so plainly — never bury a failed unit in a success narrative.
+7. **Notify.** Send a push notification (`PushNotification`) with the one-line outcome — "Swarm 021: 5/6 units merged, U4 failed, 1 critical park waiting on you, 12 calls recorded (see the plan's Review)". The user designed this to run while they're away; completion and failure are the two interruptions worth sending. Also notify on a hard mid-run stop (baseline drift, aborted run).
+8. Final message: outcome first, then how many critical parks wait on the owner and how many calls were recorded, with the line range of the plan's `## Review` block, and where the report is. If anything failed, say so plainly — never bury a failed unit in a success narrative.
 
 ### Resume (status = 'running')
 
@@ -393,21 +401,20 @@ An interrupted run. Record this session's name as `swarm_runs.orchestrator` (a r
 
 Copied into SWARM.md at setup; binding for every spawned agent.
 
-- **Never ask the user anything.** Blocked on a judgment call? Think like a senior engineer and product manager, and apply the decision protocol: (1) the plan and its decisions are authoritative → (2) the SWARM.md decision record → (3) brain DB decisions → (4) choose the smallest reasonable interpretation consistent with codebase conventions. Commit to it and record it in your final report under `Calls`. A decision you can reverse later beats a stalled swarm.
-- **Stub what would be expensive to throw away.** When the options each cost real work, pick the best one and build the seam in full, then the behaviour behind it minimally. The seam is the types, exports, schema, routes and contracts other units consume, and no unit waiting on yours should be blocked by the stub. The owner may change course in the review, so keep the discarded work small.
-- **The one exception to "never ask"** is an action not pre-approved in SWARM.md that is irreversible or outward-facing (deleting shared data, notifying people, spending money, touching production), or a security or data-exposure risk. Do not take it and do not wait: finish what does not depend on it, and report it under `Blocked`. The orchestrator parks the unit and notifies the owner.
-- **Check UI in your own headless browser** (`/look`, **Headless**): the page loads without errors, the changed control is there, the interaction works, nothing overflows at a phone width, and one screenshot per page per width shows nothing broken. Never drive the owner's shared browser. How it looks (design, layout, wording, a design choice) is the owner's: report it under `Looks`.
+- **Never ask the user anything.** Facing a judgment call, including a design, layout or wording one? Decide as a senior developer would, applying the decision protocol: (1) the plan and its decisions are authoritative → (2) the SWARM.md decision record → (3) brain DB decisions → (4) the codebase's conventions and the smallest reasonable reading of the item. Build the choice in full, keep going, and record it under `Calls`. A call the owner overrules later becomes a fix slice, which beats a stalled swarm.
+- **The one exception is a critical issue:** an action not pre-approved in SWARM.md that is irreversible or outward-facing (deleting shared data, notifying people, spending money, touching production), a security, privacy or permissions exposure, reversing a decision the owner explicitly made, or a product fork where a wrong guess throws away large amounts of work. Do not take it and do not wait: finish what does not depend on it, and report it under `Critical`. The orchestrator parks the unit and notifies the owner. When unsure, it is not critical.
+- **Verify UI in order, then stop.** (1) Code: types, tests, the logic that renders it. (2) Only if code cannot settle it, your own headless browser (`/look`, **Headless**): the page loads without errors, the changed control is there, the interaction works, and nothing overflows at a phone width. (3) If neither can verify it cheaply, record it under `Unverified` with what you could not check and why, and move on. Do not fight a page that will not render headless. Never drive the owner's shared browser.
 - **Stay in your territory.** Read anything; edit only your unit's files. Never edit the plan file, `cowork/**` (brain, plans, swarm files), or `.claude/**` — your worktree's copies would conflict on merge. The orchestrator owns all bookkeeping.
 - **Work only in your own worktree.** Your first step is creating your assigned branch there from the integration sha in your prompt (`git switch -c <branch> <sha>`). Never `cd` into, check out in, or write to the primary checkout (the owner's IDE) or another unit's worktree. The brain's absolute path is for reading `swarm_holds`, nothing else.
 - **Commit your work** on your assigned branch, in coherent chunks with real messages. Never stage `cowork/` paths.
 - **Verify before reporting done.** Run your brief's verification criteria and the project's checks yourself. Report honestly: what passed, what you couldn't verify, what you decided, what a human should look at. The structured final report is your only channel out, and it has five sections:
   - `Done`
-  - `Calls`: each with the options, why this one, what is stubbed (paths), what switching would cost, and what depends on it
-  - `Looks`: each with the URL, what changed, what to try, what right looks like, the widths, what it runs on (the app, and the checkout or branch that must serve it), and what your headless check confirmed
+  - `Calls`: each with the options, why this one, what switching would cost, and what depends on it
+  - `Unverified`: UI or behaviour that neither code nor a headless browser could check, each with the URL when there is one, what could not be checked, and why
+  - `Critical`: what must not ship without the owner, and why (empty for almost every unit)
   - `Blocked`
-  - `Unverified`
 
-  The orchestrator copies `Calls` and `Looks` into the plan's review block. Anything else worth a human's eyes is a `Call` or a `Look`.
+  The orchestrator copies `Calls`, `Unverified` and `Critical` into the plan's review block, and a ship agent puts `Unverified` into the PR notes.
 - **Respect resource tags.** If your brief carries none, do not touch shared external state (live DBs, deploys) at all.
 - **Honour review holds.** The owner may be reviewing in a parallel session that has borrowed some of
   the shared state (**Review flow**). Right before any step that uses a tagged resource's shared
@@ -442,8 +449,9 @@ The salvage path. When `/swarm <ref>` hits a `done` or `aborted` run with unmerg
 
 ## Review Flow
 
-`/swarm review [plan ref]` is the owner's batch look, run from a **parallel session** while the run keeps
-going. The orchestrator keeps dispatching. This session:
+`/swarm review [plan ref]` is the owner's optional batch look, run from a **parallel session** while the run
+keeps going. It is needed only for critical parks, or when the owner wants to walk the recorded calls
+or a project opts into looks (`swarm.look`). The orchestrator keeps dispatching. This session:
 - borrows only the shared state the looks need;
 - gives each piece back as soon as its looks are done;
 - ends with one handoff.
