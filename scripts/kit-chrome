@@ -1,0 +1,132 @@
+#!/bin/bash
+# kit-chrome — one Chrome for every project's Puppeteer.
+#
+#   kit-chrome            show which Chrome is shared, and what else is taking up space
+#   kit-chrome update     install the current stable Chrome for Testing, share it, remove every other copy
+#   kit-chrome prune      remove every Chrome copy except the shared one (what /clear-cache runs)
+#   kit-chrome path       print the shared Chrome's executable
+#
+# Why this exists: each puppeteer release pins its own Chrome build and downloads it on
+# `npm install`. Nine projects on five puppeteer versions, upgraded over a few months, left ten
+# copies of Chrome (plus ten of chrome-headless-shell) in ~/.cache/puppeteer: 5 GB of the same
+# browser. Puppeteer drives any recent Chrome fine; the pin only says which one it downloads.
+#
+# How: one version lives in ~/.cache/puppeteer as usual, and a link at ~/.cache/claude-kit/chrome
+# points at it. `update` adds a marked block to ~/.zshenv that sets
+#   PUPPETEER_SKIP_DOWNLOAD=true      npm install never downloads a browser again
+#   PUPPETEER_EXECUTABLE_PATH=<link>  every puppeteer.launch() uses the shared one
+# The link's path never changes, so updating Chrome is re-pointing the link, not editing
+# ~/.zshenv. scripts/puppeteer-server.cjs also finds the link on its own, so /look works even
+# from a process that never read ~/.zshenv.
+
+set -euo pipefail
+
+CACHE="${PUPPETEER_CACHE_DIR:-$HOME/.cache/puppeteer}"
+LINK="$HOME/.cache/claude-kit/chrome"
+ZSHENV="$HOME/.zshenv"
+BEGIN_MARK="# >>> tb-claude-kit: shared Chrome >>>"
+END_MARK="# <<< tb-claude-kit: shared Chrome <<<"
+
+# Executable inside a Chrome for Testing version folder, per platform.
+exe_in() {
+  local dir="$1" rel
+  for rel in \
+    "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" \
+    "chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" \
+    "chrome-linux64/chrome"; do
+    [ -x "$dir/$rel" ] && { echo "$rel"; return 0; }
+  done
+  return 1
+}
+
+shared_dir() { [ -L "$LINK" ] && [ -d "$LINK" ] && readlink "$LINK"; }
+
+size() { du -sh "$1" 2>/dev/null | cut -f1; }
+
+cmd_status() {
+  local target
+  if target=$(shared_dir); then
+    echo "Shared Chrome: $(basename "$target")  ($(size "$target"))"
+    echo "  $LINK/$(exe_in "$LINK")"
+  else
+    echo "Shared Chrome: not set up. Run: $0 update"
+  fi
+  if grep -qF "$BEGIN_MARK" "$ZSHENV" 2>/dev/null; then
+    echo "~/.zshenv:     downloads off, every puppeteer uses the shared Chrome"
+  else
+    echo "~/.zshenv:     not set; npm install will keep downloading Chrome"
+  fi
+  local extra=() d
+  shopt -s nullglob
+  for d in "$CACHE"/chrome/* "$CACHE"/chrome-headless-shell/*; do
+    [ "$d" = "${target:-}" ] || extra+=("$d")
+  done
+  if [ ${#extra[@]} -gt 0 ]; then
+    echo "Other copies (removed by \`$0 prune\`):"
+    for d in "${extra[@]}"; do echo "  $(size "$d")	${d#"$CACHE"/}"; done
+  fi
+}
+
+cmd_prune() {
+  local target
+  target=$(shared_dir) || { echo "No shared Chrome yet, so nothing was removed. Run: $0 update" >&2; exit 1; }
+  shopt -s nullglob
+  local d freed=0
+  for d in "$CACHE"/chrome/* "$CACHE"/chrome-headless-shell/*; do
+    [ "$d" = "$target" ] && continue
+    echo "remove ${d#"$CACHE"/} ($(size "$d"))"
+    freed=$((freed + $(du -sk "$d" | cut -f1)))
+    rm -rf "$d"
+  done
+  rmdir "$CACHE/chrome-headless-shell" 2>/dev/null || true
+  echo "Freed $((freed / 1024)) MB. Kept $(basename "$target")."
+}
+
+write_zshenv() {
+  local rel="$1" tmp
+  tmp=$(mktemp)
+  # Drop any earlier block, whole marker lines only, then append the current one.
+  [ -f "$ZSHENV" ] && awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
+    $0 == b { skip = 1; next }
+    $0 == e { skip = 0; next }
+    !skip' "$ZSHENV" > "$tmp"
+  cat >> "$tmp" <<EOF
+$BEGIN_MARK
+# One Chrome for every project's Puppeteer, managed by ~/.claude-kit/scripts/kit-chrome.
+export PUPPETEER_SKIP_DOWNLOAD=true
+export PUPPETEER_EXECUTABLE_PATH="\$HOME/.cache/claude-kit/chrome/$rel"
+$END_MARK
+EOF
+  cat "$tmp" > "$ZSHENV"   # keeps the file's permissions and any link to it
+  rm -f "$tmp"
+}
+
+cmd_update() {
+  echo "Installing the current stable Chrome for Testing (skipped if already present)..."
+  local out exe dir rel
+  # --format '{{path}}' makes the last line of output the executable's absolute path.
+  out=$(npx -y @puppeteer/browsers@latest install chrome@stable --path "$CACHE" --format '{{path}}' 2>&1) || {
+    echo "Install failed:" >&2; echo "$out" >&2; exit 1; }
+  exe=$(printf '%s\n' "$out" | tail -1)
+  [ -x "$exe" ] || { echo "Could not find the installed Chrome. Installer said:" >&2; echo "$out" >&2; exit 1; }
+  dir="${exe%%/chrome-*}"                     # .../chrome/mac_arm-<version>
+  rel=$(exe_in "$dir") || { echo "Unexpected layout in $dir" >&2; exit 1; }
+  "$exe" --version >/dev/null 2>&1 || { echo "The new Chrome did not start; kept everything as it was." >&2; exit 1; }
+
+  mkdir -p "$(dirname "$LINK")"
+  ln -sfn "$dir" "$LINK"
+  write_zshenv "$rel"
+  echo "Sharing $("$exe" --version) from $(basename "$dir")."
+  cmd_prune
+  echo
+  echo "Open terminals keep the old environment until you start a new one (or run: source ~/.zshenv)."
+}
+
+case "${1:-status}" in
+  status) cmd_status ;;
+  update) cmd_update ;;
+  prune)  cmd_prune ;;
+  path)   target=$(shared_dir) && echo "$LINK/$(exe_in "$LINK")" || exit 1 ;;
+  -h|--help|help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) echo "Unknown command: $1 (try: status, update, prune, path)" >&2; exit 2 ;;
+esac

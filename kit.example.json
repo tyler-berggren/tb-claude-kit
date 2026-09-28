@@ -28,6 +28,12 @@
     "scopeToProjectPath": false
   },
 
+  "_note_clearCache": "For /clear-cache. projectRoots: where your projects live; the deep tier looks there for stale node_modules. staleDays: a project with no file changed in this many days counts as stale (deep tier only).",
+  "clearCache": {
+    "projectRoots": ["~/dev"],
+    "staleDays": 30
+  },
+
   "_note_commit": "Pins the commit author for /commit. Sets --author only, so the committer still comes from git config and the two identities will differ. Most projects should omit this.",
   "commit": {
     "author": null

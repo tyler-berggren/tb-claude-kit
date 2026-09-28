@@ -10,6 +10,7 @@ This project uses Claude Code skills for structured workflows:
 - `/brain` — Project knowledge management (decisions, tasks, questions, insights). Single source of truth in `cowork/brain/BRAIN.db`.
 - `/brainstorm` — Conversational idea development. All outputs logged to brain DB with parent linking.
 - `/bridge` — Start artifact bridge server (port 4444) for HTML artifacts to read/write project files.
+- `/clear-cache` — Measure and clear machine-wide dev caches (npm, pnpm, uv, pip, Homebrew, stale Puppeteer browsers). `report` measures only; `deep` offers costlier cleanups.
 - `/commit` — Stage all files and commit with auto-generated message.
 - `/cto` — Architecture observatory — scans codebase, maps components into SQLite, generates HTML with Mermaid C4 diagrams.
 - `/kill` — Kill dev processes (servers, watchers, bridge) without touching Claude Code.

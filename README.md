@@ -20,6 +20,7 @@ Developed through ongoing trial and error by [Tyler Berggren](https://github.com
 # 1. Clone the kit and create the standard pointer (once per machine)
 git clone https://github.com/tyler-berggren/tb-claude-kit.git ~/dev/tb-claude-kit
 ln -s ~/dev/tb-claude-kit ~/.claude-kit
+~/.claude-kit/scripts/kit-chrome update   # one shared Chrome for /look (see "One Chrome for every project")
 
 # 2. Install into any project
 cd /path/to/your/project
@@ -48,7 +49,7 @@ That's it. Open the project in Claude Code and the skills are available.
 
 ## The skills
 
-Seventeen skills, grouped by what they do for you.
+Eighteen skills, grouped by what they do for you.
 
 **Secrets — so credentials stay out of your repo and your transcripts**
 
@@ -93,6 +94,7 @@ Seventeen skills, grouped by what they do for you.
 |---|---|
 | `/commit` `/push` | Stage, write a real commit message, push. Regenerates SQLite NDJSON sidecars if configured. |
 | `/kill` | Kill dev servers, watchers, and browser instances without touching your Claude session. |
+| `/clear-cache` | Win back disk space from the caches every project shares: npm, pnpm, uv, pip, Homebrew, and extra copies of Chrome (see `kit-chrome` below). Shows sizes before and after. `report` changes nothing; `deep` also offers npx packages, Docker build cache, and `node_modules` in projects you haven't touched in a month. |
 | `/parse` | Local documents — contracts, decks, spreadsheets, scanned PDFs — converted to markdown Claude can actually read. Point it at a file, a glob, or a directory; the `.md` lands beside the original. |
 | `/pbar` | A live progress display for a job that will run for a while. Hands you one path to paste into any terminal: a bar per stage, an ETA from measured throughput, and — the part a bar alone can never tell you — whether the process is still alive. Read-only, so stopping it cannot disturb the job, and checked one frame at a time before it is handed over, so it never shows you nothing. Claude runs it on its own whenever it starts a job that may take 5+ minutes, and re-prints the command whenever you might need to restart the display. |
 | `/video-editor` | Transcript-driven video editing — transcribe, script, cut, caption. |
@@ -559,6 +561,27 @@ node scripts/puppeteer-server.cjs --port 9620 http://localhost:3000
 ```
 
 Each instance gets its own Chrome user data directory at `~/.claude-chrome/<profile>/` — fully isolated cookies, storage, and extensions per project.
+
+### One Chrome for every project
+
+Each Puppeteer release pins its own Chrome build and downloads it on `npm install`. So every
+project, and every Puppeteer upgrade, used to add another ~500 MB copy of Chrome to
+`~/.cache/puppeteer`. One machine collected ten. The co-browser now always launches **one shared
+Chrome for Testing**, whatever version a project's Puppeteer pins. Puppeteer drives any recent
+Chrome; the pin only decides what it downloads.
+
+```bash
+~/.claude-kit/scripts/kit-chrome           # which Chrome is shared, and any other copies taking up space
+~/.claude-kit/scripts/kit-chrome update    # move to the current stable Chrome and remove every other copy
+~/.claude-kit/scripts/kit-chrome prune     # remove every copy except the shared one (/clear-cache runs this)
+```
+
+`update` points `~/.cache/claude-kit/chrome` at the shared version, and adds a marked block to
+`~/.zshenv` with two settings. `PUPPETEER_SKIP_DOWNLOAD=true` means `npm install` never downloads
+a browser again. `PUPPETEER_EXECUTABLE_PATH` points at the link, so any other code that calls
+`puppeteer.launch()` (tests, scripts) also uses the shared Chrome. The link's path never changes,
+so a later `update` only moves the link. `puppeteer-server.cjs` finds the link itself too, so the
+co-browser works even from a process that never read `~/.zshenv`.
 
 ### Multiple projects
 

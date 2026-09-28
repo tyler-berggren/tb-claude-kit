@@ -244,6 +244,21 @@ function resetErrors() {
   networkErrors.length = 0;
 }
 
+// Every project drives the one Chrome that scripts/kit-chrome shares, not the
+// build its own puppeteer version pins: those pins left a separate ~500 MB
+// Chrome per puppeteer upgrade. PUPPETEER_EXECUTABLE_PATH (set in ~/.zshenv by
+// kit-chrome) wins when present; the link covers a process that never read
+// ~/.zshenv. With neither, puppeteer falls back to its pinned build.
+function sharedChrome() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH) return undefined; // puppeteer reads it itself
+  const link = path.join(os.homedir(), '.cache', 'claude-kit', 'chrome');
+  return [
+    'chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    'chrome-mac-x64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',
+    'chrome-linux64/chrome',
+  ].map((rel) => path.join(link, rel)).find((p) => fs.existsSync(p));
+}
+
 async function launchBrowser() {
   fs.mkdirSync(USER_DATA_DIR, { recursive: true });
 
@@ -252,12 +267,20 @@ async function launchBrowser() {
     '--no-default-browser-check',
     '--disable-default-apps',
   ];
-  browser = await puppeteer.launch(HEADLESS
-    // pipe: Chrome talks over stdio rather than a DevTools port, so a
-    // headless instance opens no port besides ours, and Chrome exits with
-    // this process even when it is killed with -9.
-    ? { headless: true, pipe: true, defaultViewport: HEADLESS_VIEWPORT, userDataDir: USER_DATA_DIR, args }
-    : { headless: false, defaultViewport: null, userDataDir: USER_DATA_DIR, args });
+  const executablePath = sharedChrome();
+  try {
+    browser = await puppeteer.launch(HEADLESS
+      // pipe: Chrome talks over stdio rather than a DevTools port, so a
+      // headless instance opens no port besides ours, and Chrome exits with
+      // this process even when it is killed with -9.
+      ? { headless: true, pipe: true, defaultViewport: HEADLESS_VIEWPORT, userDataDir: USER_DATA_DIR, args, executablePath }
+      : { headless: false, defaultViewport: null, userDataDir: USER_DATA_DIR, args, executablePath });
+  } catch (err) {
+    if (/Could not find Chrome|Browser was not found|ENOENT/.test(err.message)) {
+      console.error('No Chrome to launch. Set up the one shared Chrome with:  ~/.claude-kit/scripts/kit-chrome update');
+    }
+    throw err;
+  }
 
   const pages = await browser.pages();
   page = pages[0] || await browser.newPage();
