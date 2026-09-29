@@ -223,6 +223,12 @@ for skill_dir in "$KIT_DIR/.claude/skills"/*/; do
   [ -d "$skill_dir" ] || continue
   KIT_PATHS+=(".claude/skills/$(basename "$skill_dir")")
 done
+# Agent definitions are listed file by file, so a project's own agents in the
+# same directory stay the project's.
+for agent_file in "$KIT_DIR/.claude/agents"/*.md; do
+  [ -f "$agent_file" ] || continue
+  KIT_PATHS+=(".claude/agents/$(basename "$agent_file")")
+done
 KIT_PATHS+=(
   ".claude/hooks/session-start.sh"
   ".claude/hooks/background-pbar.sh"

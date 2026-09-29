@@ -14,6 +14,9 @@ Stages (status names from the swarm schema):
   land  = entering `review` or `shipped` -> `merged`
 `parked` time is waiting on the owner and is never counted as work. A parked unit and everything
 that depends on it get no estimate: the display says what they wait on instead.
+The exception is a STACKED park (`result` begins "stacked on"): a unit built on a branch that has
+not merged yet. It waits on its dependencies, not the owner, so it is scheduled like any unit: it
+starts once its dependencies have merged, takes no build time (it is already built), then lands.
 
 Usage: eta.py --db BRAIN.db --run ID [--slots 6] [--stack-in-lane] [--width 100]
   --stack-in-lane   a wait on a slice in the SAME lane is met once that slice is `shipped`
@@ -116,7 +119,7 @@ def simulate(units, model, now_state, slots, stack, scale=1.0):
         u = units[k]
         if st in DONE:
             finish[k] = shipped_at[k] = 0.0
-        elif st == "parked":
+        elif st == "parked" and not u.get("stacked"):
             blocked.add(k)
         elif st == "working":
             b = model.est("build", u["kind"]) * scale
@@ -134,11 +137,14 @@ def simulate(units, model, now_state, slots, stack, scale=1.0):
                 return True
         return False
 
+    def waiting(k):
+        return state[k][0] == "pending" or (state[k][0] == "parked" and units[k].get("stacked"))
+
     for k in units:
-        if k not in finish and k not in blocked and state[k][0] == "pending" and blocked_by(k):
+        if k not in finish and k not in blocked and waiting(k) and blocked_by(k):
             blocked.add(k)
 
-    pending = [k for k in units if state[k][0] == "pending" and k not in blocked]
+    pending = [k for k in units if waiting(k) and k not in blocked]
 
     def ready_time(k):
         u = units[k]
@@ -146,7 +152,8 @@ def simulate(units, model, now_state, slots, stack, scale=1.0):
         for d in u["deps"]:
             if d not in units:
                 continue
-            same = stack and units[d]["lane"] == u["lane"]
+            # A stacked unit is already built on its parent; it can only ship once the parent MERGES.
+            same = stack and units[d]["lane"] == u["lane"] and not u.get("stacked")
             src = shipped_at if same else finish
             if d not in src:
                 return None
@@ -162,7 +169,7 @@ def simulate(units, model, now_state, slots, stack, scale=1.0):
             if cands:
                 _, k = min(cands)
                 pending.remove(k)
-                b = model.est("build", units[k]["kind"]) * scale
+                b = 0.0 if units[k].get("stacked") else model.est("build", units[k]["kind"]) * scale
                 heapq.heappush(running, (t + b, k))
                 started = True
         if running:
@@ -194,15 +201,16 @@ def main():
     db = sqlite3.connect(f"file:{a.db}?mode=ro", uri=True)
     now = datetime.now(timezone.utc)
     rows = db.execute(
-        "SELECT unit_key, coalesce(lane,''), coalesce(kind,''), status, coalesce(depends_on,''), updated_at "
-        "FROM swarm_units WHERE run_id=?", (a.run,)).fetchall()
+        "SELECT unit_key, coalesce(lane,''), coalesce(kind,''), status, coalesce(depends_on,''), updated_at, "
+        "coalesce(result,'') FROM swarm_units WHERE run_id=?", (a.run,)).fetchall()
     units, state = {}, {}
     last_change = {}
     for key, at in db.execute(
             "SELECT unit_key, at FROM swarm_unit_events WHERE run_id=? ORDER BY at", (a.run,)):
         last_change[key] = ts(at)
-    for key, lane, kind, st, deps, upd in rows:
-        units[key] = {"lane": lane or "-", "kind": kind, "deps": [d.strip() for d in deps.split(",") if d.strip()]}
+    for key, lane, kind, st, deps, upd, result in rows:
+        units[key] = {"lane": lane or "-", "kind": kind, "deps": [d.strip() for d in deps.split(",") if d.strip()],
+                      "stacked": st == "parked" and result.lower().startswith("stacked on")}
         since = last_change.get(key) or (ts(upd) if upd else now)
         state[key] = (st, max(0.0, hours(since, now)))
 
@@ -229,6 +237,12 @@ def main():
 
     # In-flight actions
     live = [k for k in open_units if state[k][0] in {"working"} | LANDING]
+    stacked = [k for k in open_units if units[k]["stacked"]]
+    if stacked:
+        print("\n  stacked (built; ships when its parent merges — not waiting on the owner)")
+        for k in sorted(stacked):
+            print(f"    {k:<6} {units[k]['lane'][:13]:<13} after {', '.join(units[k]['deps']) or 'its parent'}"
+                  f"  -> ships ~{fmt_clock(now, fin[k]) if fin[k] is not None else '--'}")
     if live:
         print("\n  in flight              stage   elapsed  expected  left")
         for k in sorted(live, key=lambda k: units[k]["lane"]):
@@ -250,7 +264,7 @@ def main():
         if done == len(ks):
             continue
         if any(k in blocked for k in ks):
-            waits = " ".join(sorted(k for k in ks if state[k][0] == "parked")) or "a parked unit"
+            waits = " ".join(sorted(k for k in ks if k in blocked and state[k][0] == "parked")) or "a parked unit"
             print(f"    {lane[:13]:<13} {done:>2}/{len(ks):<2}   --    waits on the owner ({waits})")
             continue
         h = max(fin[k] for k in ks if fin[k] is not None)

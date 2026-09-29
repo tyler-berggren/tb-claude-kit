@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS swarm_units (
   resources TEXT,
   territory TEXT,
   model TEXT,
+  model_reason TEXT,
   reviewer_model TEXT,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','working','review','parked','shipped','merged','failed','skipped')),
   branch TEXT,
@@ -146,7 +147,15 @@ name `ListAgents` reports as "This session is …"). `swarm_holds` records share
 has borrowed from a live run (see **Review flow**): one row per resource tag, open while `released_at`
 is empty. **A brain created before these existed** gets them without a rebuild: `CREATE TABLE IF NOT
 EXISTS` adds `swarm_holds`, and when `PRAGMA table_info(swarm_runs)` lacks `orchestrator`, run
-`ALTER TABLE swarm_runs ADD COLUMN orchestrator TEXT;` once.
+`ALTER TABLE swarm_runs ADD COLUMN orchestrator TEXT;` once. Likewise, when
+`PRAGMA table_info(swarm_units)` lacks `model_reason`, run
+`ALTER TABLE swarm_units ADD COLUMN model_reason TEXT;` once.
+
+`swarm_units.model` holds the tier the unit was last dispatched on (an agent type such as
+`swarm-sonnet-medium`, **Model tiers**), and `model_reason` holds the signals behind it and any
+difference between what was asked for and what was served. `reviewer_model` holds the reviewer's tier.
+Setup writes the proposal and the orchestrator overwrites them when it dispatches, so the row always
+records what actually ran and why.
 
 `parked`, `shipped`, `lane`, `kind` and `pr` serve PR-mode runs (see **Team repositories**): `parked`
 is built and held for the owner, normally only for a critical issue (see **Team repositories**); `shipped` has an open PR on its way through the
@@ -195,15 +204,7 @@ A **unit** is the work one agent completes in one worktree: one phase, several p
 
 Identify **gates**: plan checkpoints that must pass before dependents dispatch (e.g. a parity/measurement phase). A gate is a normal unit whose dependents simply wait on it.
 
-**Assign a model per unit and per reviewer.** Setup decides; the user vetoes in S3. The policy:
-
-| Model | Unit work | Review work |
-|---|---|---|
-| `opus` | **Default.** Anything with judgment in it: migrations, scorer/algorithm changes, cross-file refactors, gates, anything touching a resource tag | Gate units and units whose failure cascades |
-| `sonnet` | Simple, mechanical, well-briefed work: copy/label sweeps, config plumbing, isolated UI tweaks with explicit item lists | **Default reviewer** |
-| `haiku` | Never | Only *very* simple reviews — checklist-style verification of a small mechanical unit (files changed match territory, grep-level checks, project checks pass) |
-
-When in doubt, go up a tier — a swarm's cost center is redone work, not tokens. The orchestrator itself always runs on whatever model the run session was started with.
+**Propose a tier per unit and per reviewer** with **Model tiers**. For each unit, write the proposed tier and the signals that decided it into `model` and `model_reason`, and into the unit graph. This is a proposal. The owner can pin a unit's tier in S3, and the orchestrator makes the final call at dispatch (R2).
 
 **Compute the parallelism profile.** From the graph: unit count, max useful concurrency, and the critical path as a share of total work. Turn it into a plain-words expectation for S3 — *"6 units, but the migration→scorer→re-score chain is ~70% of the work; expect roughly serial wall-clock with the UI phases riding alongside"*. A fully serial profile is fine — say so and proceed; the run is still autonomous end-to-end, which is the point. Never split a serial chain to make the profile look better.
 
@@ -214,7 +215,7 @@ This is the heart of setup. Collect and present, via AskUserQuestion (batched, w
 1. Every open question in the plan's `## Open questions` (see `/plan`, **Batches**), and every item in its Risks section that requires human judgment. Setup is the batch's gate: a question that bites any unit is answered here
 2. Every ambiguity or drift found in S1/S2
 3. Run policy for THIS swarm: may agents touch the live/prod database? May the swarm deploy, or does the deploy phase get excluded and left for the user? Merge to main at the end, or leave the integration branch for review? (For a PR-mode plan — a team repository — the answer is never "merge to main", and the ship and look policies come from `swarm.ship` / `swarm.look` when kit.json records them; ask only what they leave open. See **Team repositories** below.) Max concurrent agents (default from `.claude/kit.json` `swarm.maxAgents`, else 6)?
-4. Show the per-unit model assignments (from the S2 policy table) as part of the setup summary. Only ask about assignments that are genuine judgment calls — a plan that's all-`opus` needs no question, just the table
+4. Show the proposed per-unit tiers (from S2) as part of the setup summary: the tier and its deciding signal for each unit. Ask only about proposals that are genuine judgment calls. Tell the owner they can **pin** any unit's tier. A pin becomes a D-numbered decision in SWARM.md, and the orchestrator never moves a pinned unit at dispatch, though a failure can still escalate it (**Model tiers**)
 5. Lead the summary with the parallelism profile and expected wall-clock shape, so the user knows what kind of run they're approving — a wide fan-out or a supervised serial march
 
 Anything the user delegates back ("you decide") gets a committed default written down. **Where answers go:**
@@ -229,7 +230,7 @@ Create `cowork/swarm/<plan_id>/SWARM.md` (own directory — never inside a plan 
 
 - **Run config** — plan path, merge target, policy answers from S3, max agents, the checks contract (exact commands reviewers run), and the parallelism profile
 - **Decision record** — the run-policy answers and delegated defaults, numbered (`D1`, `D2`…) so briefs can cite them. Decisions about what gets built live in the plan, and briefs cite them by the plan's own numbers
-- **Unit graph** — table: unit key, title, plan phases, depends_on, resources, territory, model, reviewer model; plus a short dispatch-order narrative
+- **Unit graph** — table: unit key, title, plan phases, depends_on, resources, territory, proposed tier (with `pinned` and the D-number when the owner pinned it) and its deciding signal, reviewer tier; plus a short dispatch-order narrative
 - **Per-unit briefs** — one section per unit, fully self-contained (`### Unit U3 — <title>`): objective, the plan items it owns (copied, not referenced by number alone), file territory, what it must NOT touch, its verification criteria from the plan, relevant decisions (`per D4: …`), and known landmines from S1
 - **The agent protocol** (copied verbatim into the file so briefs can reference it — see **Run rules** below)
 
@@ -241,6 +242,88 @@ Then:
 ### Step S5 — Hand off
 
 Tell the user: review `SWARM.md` (especially the decision record), giving the line range of the decision record, the unit graph and each brief, then commit (`/commit`), then start a **fresh session** and invoke `/swarm <ref>` — and that starting that session with `/rc` gives remote monitoring of the run. **Never start the run in the setup session** — the run deserves a full context window.
+
+### Model tiers
+
+Every agent a run spawns (builder, fixer, reviewer) is dispatched as one of five **tiers**. A tier is an
+agent type in `.claude/agents/` that fixes both the model and the reasoning effort. The Agent tool has
+no per-call effort, so the agent type is the only way to set it. The definitions name models by
+alias (`sonnet`, `opus`), so they always get the newest model the running Claude Code knows.
+
+| Tier (`subagent_type`) | Model · effort | For a task that is… |
+|---|---|---|
+| `swarm-sonnet-low` | sonnet · low | **very simple**: a copy or label sweep, config plumbing, an explicit item list in one or two files |
+| `swarm-sonnet-medium` | sonnet · medium | **typical and well defined** (the default): the brief names the files and items, the territory is one module or follows an existing pattern, verification is concrete |
+| `swarm-sonnet-high` | sonnet · high | **slightly above average**: well specified but with more moving parts, such as several files in one module, logic with edge cases to test, or user-facing UI to verify |
+| `swarm-opus-medium` | opus · medium | **two notches above average**: exactly one signal from the table below |
+| `swarm-opus-high` | opus · high | **three notches above average**: a heavy signal (marked ★), or two or more signals |
+
+A unit's brief is self-contained and fully specified: objective, the plan items copied in, territory,
+what not to touch, and how to verify. That is narrow, pre-specified work, and Sonnet does it well. So
+**`swarm-sonnet-medium` is the default**, and a unit goes to Opus only when a signal applies:
+
+| Signal | Why it needs Opus |
+|---|---|
+| ★ Holds a resource tag (a live database, deploy, anything outside git) | A mistake there is not undone by reverting a branch |
+| ★ Is a gate | Everything after it trusts its result |
+| ★ Algorithm, scoring, concurrency, auth, permissions or security work | Correctness depends on reasoning, not on following a pattern |
+| Two or more units depend on it | A weak result spreads to every unit after it |
+| Its territory spans modules and the codebase has no pattern to copy | The design is being invented, not repeated |
+| The brief leaves a genuine fork open ("decide X") | The call is the work |
+| Builds on an upstream call marked `uncertain`, or on a conflict the orchestrator resolved | Its footing moved after setup wrote the brief |
+| A remainder-run unit whose earlier attempt failed | It has already beaten one attempt |
+
+Do not move a unit up a tier out of general caution. Each step up needs a reason you can name.
+
+**Reviewers** use the same tiers:
+
+| Tier | Reviews |
+|---|---|
+| `swarm-opus-high` | Gates, units whose failure cascades, and the final integration review (R3), which is always this tier |
+| `swarm-opus-medium` | A Sonnet-built unit that reports an `uncertain` call, and a unit that asked for Opus but ran on Sonnet |
+| `swarm-sonnet-medium` | **Default reviewer** |
+| `swarm-sonnet-low` | A checklist review of a `swarm-sonnet-low` unit: files changed match the territory, grep-level checks, the project's checks pass |
+
+**Who decides.** Setup proposes (S2) and the owner can pin (S3). The orchestrator makes the final call
+when it dispatches (R2): it re-runs the tables with what the run has shown so far, and records the
+tier and the signals that decided it in `model` and `model_reason`. It may move an unpinned unit
+either way. A pinned unit keeps its tier at dispatch. Escalation after a failure applies to every
+unit, pinned or not.
+
+**Escalation.** A tier that turns out too low costs a review cycle, not a stalled run:
+- **First fix cycle:** if the reviewer's findings are about judgment (the wrong approach, a missed edge
+  case, a misread of the brief), the fix runs at least on `swarm-opus-medium`, or one tier above the
+  unit's if that is higher. Mechanical findings (lint, a missed item, a failing check with an obvious
+  cause) keep the unit's tier.
+- **Second fix cycle:** always `swarm-opus-high`.
+- **Watchdog re-dispatch:** the unit goes out one tier higher.
+- **Run-level:** when two Sonnet-built units in one run fail review on judgment, the tiers are too
+  loose for this plan. From then on, every undispatched unit the owner has not pinned goes out one tier
+  higher. Record this as an amendment.
+
+**The orchestrator itself** runs on whatever model and effort the run session was started with. It
+makes the tier calls and resolves every merge conflict, so it should be Opus. R1 says so when it is not.
+
+**When the tiers are missing.** Agent definitions load when a session starts. A session started
+before `.claude/agents/swarm-*.md` existed, or a project installed without them, has no tier types
+(the Agent tool answers "Agent type not found"). Fall back to `general-purpose` with the tier's model
+passed as the per-call `model`. The effort then follows the orchestrator's. Say so in the dispatch
+message, and tell the owner a fresh session picks the tiers up.
+
+**Checking what was served.** The tier you request is not always what runs:
+- **Why it can differ.** Some Claude Code versions have ignored a requested subagent model
+  (anthropics/claude-code#83920, #97588), and the `CLAUDE_CODE_SUBAGENT_MODEL` settings can override
+  it. The VS Code UI can also show a subagent's model wrongly (#97634), so it is not evidence.
+- **Where the truth is.** Every assistant message in a subagent's transcript records the model the API
+  served and the effort it ran at. Read them from the transcript the Agent tool's launch result names
+  as `output_file`:
+  `jq -r 'select(.type=="assistant") | "\(.message.model) \(.effort)"' <output_file> | sort | uniq -c`.
+  A tier is honoured when the served model's family matches (`claude-sonnet-…` for a Sonnet tier) and
+  the effort matches. That file's format is internal to Claude Code: extract only those fields, never
+  read the whole file, and if they cannot be parsed, record the served tier as `unverified`.
+- **When it differs.** A unit that ran above its tier costs more and needs nothing else. A unit that
+  asked for Opus and ran on Sonnet gets a `swarm-opus-medium` reviewer or higher (R2 step 3). One that
+  ran at a lower effort than asked is reviewed one tier higher than planned.
 
 ### Team repositories (PR-mode plans)
 
@@ -363,6 +446,14 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
    - The merge target's tip contains the committed swarm package (`SWARM.md` and the plan with its answers).
    - `git worktree list` shows no leftover `swarm/` worktrees.
    - `.claude/worktrees/` is ignored (**Branches live in worktrees**).
+   - This session runs on `opus` (**Model tiers**). If it does not, say so in the dispatch message
+     and continue. That message is the owner's cue to restart on `opus` if they want to.
+   - **The tiers load and are honoured** (**Model tiers**). Spawn one probe as `swarm-sonnet-low`
+     with a one-line prompt, then read what it was served from its transcript (**Checking what was
+     served**). If the type is not found, use the fallback in **When the tiers are missing**. If it was
+     served something other than Sonnet at low effort, tiers are not being honoured in this session.
+     In either case, say so in the dispatch message, send a push notification, and continue. Units
+     then run on the orchestrator's model or effort, which costs more but builds no worse.
 
    If commits landed since setup, do a fast delta check. If they invalidate unit briefs, stop and tell the user to re-run setup; don't guess.
 3. Create the integration branch in its own worktree, from the merge target's tip, never from the primary checkout's HEAD: `git worktree add -b swarm/<plan_id> .claude/worktrees/swarm-<plan_id> <merge-target>`. Never check it out in the primary checkout. Record `base_commit`, `integration_branch`, `started_at` and `orchestrator` (this session's name, from `ListAgents`), and note the worktree path in SWARM.md's run config. Set status `running`.
@@ -391,18 +482,20 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
 Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 
 1. **Ready set** = pending units whose `depends_on` are all `merged` and whose `resources` collide with no unit currently `working`/`review`.
-2. Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `run_in_background: true`, `isolation: "worktree"`, `model` = the unit's assigned model from the graph. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, run id, the brain's absolute path (for the review-hold check), integration branch name, the integration tip's sha at dispatch, and required branch name `swarm/<plan_id>-<unit_key>`. The Agent tool's worktree does not start on the integration branch, so the agent's first step creates its branch from that sha inside its own worktree. The sha carries every dependency merged so far. An open review hold never blocks dispatch: units honour it themselves, only at the step that uses the held state. Mark units `working`. When the plan's code lives in a checkout other than the session's repo, dispatch without `isolation` and have the brief create the unit's worktree in the target checkout with `swarm.worktree`'s commands (see **Team repositories**).
-3. On a completion notification: spawn a **reviewer agent** (read-only, background, `model` = the unit's assigned reviewer model) with the unit brief, the worktree path, the unit's verification criteria, and the checks contract from SWARM.md (exact commands — reviewers never guess). It inspects the diff, runs those checks in the worktree, and returns PASS or FAIL with findings. Mark the unit `review`.
+2. **Pick each ready unit's tier** (**Model tiers**). Start from its proposal, keep it if pinned, and otherwise re-run the tables against what the run now knows: the calls and conflicts in the units it depends on, and how Sonnet-built units have fared in review so far. Write the result and its deciding signals to `model` and `model_reason` before dispatching.
+
+   Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `subagent_type` = the tier just picked, `run_in_background: true`, `isolation: "worktree"`. Pass no `model`: the tier sets it. Never dispatch a unit as `general-purpose` except as the fallback in **When the tiers are missing**, since that would inherit the orchestrator's model and effort. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, run id, the brain's absolute path (for the review-hold check), integration branch name, the integration tip's sha at dispatch, and required branch name `swarm/<plan_id>-<unit_key>`. The Agent tool's worktree does not start on the integration branch, so the agent's first step creates its branch from that sha inside its own worktree. The sha carries every dependency merged so far. An open review hold never blocks dispatch: units honour it themselves, only at the step that uses the held state. Mark units `working`. When the plan's code lives in a checkout other than the session's repo, dispatch without `isolation` and have the brief create the unit's worktree in the target checkout with `swarm.worktree`'s commands (see **Team repositories**).
+3. On a completion notification: **check what was served** (**Model tiers**, **Checking what was served**). When it differs from the tier requested, record both in `model_reason` and adjust the reviewer's tier as that section says. Then spawn a **reviewer agent** (read-only, background, `subagent_type` = the unit's reviewer tier, raised to at least `swarm-opus-medium` when a Sonnet-built unit reports an `uncertain` call) with the unit brief, the worktree path, the unit's verification criteria, and the checks contract from SWARM.md (exact commands — reviewers never guess). It inspects the diff, runs those checks in the worktree, and returns PASS or FAIL with findings. Mark the unit `review`.
 4. **Reviewer PASS** → merge the unit branch into the integration branch, in the integration worktree (`git -C .claude/worktrees/swarm-<plan_id> merge …`). The orchestrator resolves any conflicts itself — it holds every brief and both sides of the conflict; agents never see each other's work. Then:
    - mark plan items `- [x]` with progress notes (per `/plan` conventions);
    - append the unit's **Calls**, **Unverified** items and any **Critical** park to the plan's `## Review` block (`/plan`, **Batches**) — the orchestrator is its only writer;
    - update `swarm_units` (`merged`, `result` = one-line summary);
    - remove the unit's worktree. The plan edits stay uncommitted in the primary checkout;
    - loop back to 1, because a merge may unblock dependents.
-5. **Reviewer FAIL** → spawn a fix agent in the same worktree with the findings, on the unit's model; the **second** fix cycle always escalates to `opus` regardless of assignment. Max **two** fix cycles; then mark the unit `failed`, record why, and continue — everything not depending on it still runs. Dependents of a failed unit become `skipped`.
+5. **Reviewer FAIL** → spawn a fix agent in the same worktree with the findings. Pick its tier by **Model tiers**, **Escalation**: at least `swarm-opus-medium` when the findings are about judgment, the unit's tier when they are mechanical, and always `swarm-opus-high` on the **second** cycle. Update `model` and `model_reason` whenever the tier changes. Max **two** fix cycles; then mark the unit `failed`, record why, and continue — everything not depending on it still runs. Dependents of a failed unit become `skipped`.
 6. Post a one-line progress note as each unit changes state. Between events there is nothing to poll — background agents re-invoke the session when they finish.
 
-**Stall watchdog.** A hung agent never sends a completion notification, and a remote-monitored run that silently stalls defeats the system. Keep a background timer alive whenever units are in flight (a background `sleep 1800` re-invokes the session when it exits; restart it each cycle). On each wake: any unit in `working`/`review` with no state change for ~30 minutes gets investigated — `ListAgents` to see if its agent is alive. Dead agent, no commits → reset the unit to `pending` and re-dispatch. Dead agent, commits present → send to review. Alive and progressing → leave it, reset the timer. Two watchdog re-dispatches on the same unit → mark it `failed` and move on. A unit waiting on an open review hold is not stalled. A hold whose holder session has left `ListAgents` is released: set `released_at` and note it.
+**Stall watchdog.** A hung agent never sends a completion notification, and a remote-monitored run that silently stalls defeats the system. Keep a background timer alive whenever units are in flight (a background `sleep 1800` re-invokes the session when it exits; restart it each cycle). On each wake: any unit in `working`/`review` with no state change for ~30 minutes gets investigated — `ListAgents` to see if its agent is alive. Dead agent, no commits → reset the unit to `pending` and re-dispatch one tier higher. Dead agent, commits present → send to review. Alive and progressing → leave it, reset the timer. Two watchdog re-dispatches on the same unit → mark it `failed` and move on. A unit waiting on an open review hold is not stalled. A hold whose holder session has left `ListAgents` is released: set `released_at` and note it.
 
 **Mid-run steering.** The no-questions rule binds agents, not the user. A user message arriving mid-run (typically via `/rc`) is an **amendment**: append it to the SWARM.md decision record, timestamped, continuing the D-numbering; one that decides what gets built also becomes a plan decision, and clears any review item it answers. Amendments apply to not-yet-dispatched units immediately; in-flight units are unaffected unless the user explicitly says to stop one (then `TaskStop` it and re-dispatch under the amended brief, or skip it, per their instruction). Every amendment and its effect is listed in REPORT.md. Never pause the swarm to wait for possible steering — amendments are applied when they arrive, not solicited.
 
@@ -411,7 +504,7 @@ Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 When all units are terminal:
 
 1. Run the plan's Verification table end-to-end in the integration worktree, plus the project's standard checks.
-2. Spawn a final reviewer over the integration branch's full diff against `base_commit`: cross-unit coherence, plan coverage, nothing half-merged. Always `opus` — this is the last line of defense, never economized.
+2. Spawn a final reviewer over the integration branch's full diff against `base_commit`: cross-unit coherence, plan coverage, nothing half-merged. Always `swarm-opus-high` — this is the last line of defense, never economized.
 3. Fix findings directly (orchestrator or a fix agent). This is the last line of defense before the merge target.
 
 ### Step R4 — Finalize
@@ -426,8 +519,9 @@ When all units are terminal:
    - Outcome summary: units merged / failed / skipped, wall-clock, phases done
    - **Waiting on you** — the count of critical parks (what actually waits), the count of calls and unverified items, and a pointer to the plan's `## Review` block. The block is the one list; the report never keeps a second one
    - Verification results (actual output, including anything that failed)
+   - **Tiers** — one row per tier: units built, first-pass review rate, and fix cycles. Then list each unit that escalated, with its original tier, the tier it finished on, and why, and each unit whose served model or effort differed from its tier
    - Follow-ups and loose ends, routed like `/plan carry` would
-5. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, whether sub-`opus` assignments survived review, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
+5. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, how each tier fared in review (a tier that kept escalating was too low for its tasks; an Opus tier that never found anything to fix may have been more than needed), and which **Model tiers** signals (from `model_reason`) predicted a failure or turned out unneeded, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
 6. Set run status `done` (`completed_at`), remove the remaining unit worktrees, delete merged unit branches, and keep the integration branch.
    - **Commit the bookkeeping** in the primary checkout, limited to its paths: `git -C <primary> commit --only -- <plan> cowork/swarm/<plan_id>/`. The owner's other staged and unstaged work stays as it was. The review marks in the plan go in with it. Skip the commit, and say so, when the primary checkout is not on the merge target or is mid-merge, mid-rebase or mid-cherry-pick.
    - **Merged:** also remove the integration worktree, never with `--force`. A dirty one means something was written there by mistake: report it and leave it.

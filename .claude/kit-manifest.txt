@@ -18,6 +18,11 @@
 .claude/skills/video-editor
 .claude/skills/web
 .claude/skills/wiki
+.claude/agents/swarm-opus-high.md
+.claude/agents/swarm-opus-medium.md
+.claude/agents/swarm-sonnet-high.md
+.claude/agents/swarm-sonnet-low.md
+.claude/agents/swarm-sonnet-medium.md
 .claude/hooks/session-start.sh
 .claude/hooks/background-pbar.sh
 .vscode/extensions.json

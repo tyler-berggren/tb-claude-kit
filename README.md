@@ -70,7 +70,7 @@ Nineteen skills, grouped by what they do for you.
 |---|---|
 | `/plan` | Phased plans that live in the repo as markdown. Resuming re-reads the plan against the current code and reports drift, rather than trusting what the last session claimed. Supports `{{bracketed}}` change proposals you write offline. Whenever it talks to you about a plan (a question, a review item, a drift it found, where to resume), it points at the exact line as a clickable `path:line`, looked up just before the message, so a long plan is never something you have to search. **Batches** ask the plan's open questions before work starts, then never stop to ask and never wait: Claude makes each call as a senior developer would, builds it to work and keeps going. At a genuine fork it still decides, but builds the lean functional version and leaves polish for later, so little is un-built if you overrule it. Only a critical issue parks. Every call, and anything the UI checks could not verify, goes into one numbered `## Review` block you read and overrule when you choose. **Handoff** (`/plan handoff`) gets a plan ready for another agent to take over: it ticks off what is done after checking the code, tidies the file, and writes what exists only in the current conversation (decisions and why, dead ends, gotchas, uncommitted state, open questions) into a section the next session reads first. **PR mode** (`/plan pr <topic>`) is for work that lands in a team repository: the plan is cut into slices — one concern, one session, one small PR that merges the same day — split by layer so users never see half a change, with wide refactors done expand–contract. Inside each slice, UI is verified by code first and a headless browser second; what neither can check is noted in the plan and the PR, and the slice ships. The full checks run once, at ship time. Draft or ready follows the project's standing ship policy (asked every time when there is none). Because such work usually changes code and decisions other people made, every epic, issue and PR body is a **decision record**. It gives each decision's why, gains and costs, and the alternatives not taken. It credits the prior work found by a prior-art sweep (blame of the replaced lines, the PRs behind them, open PRs over the same files, decision records), and mentions each person it changes with a reason. It reads the remote default branch instead of your checkout, carries decisions with defaults so nothing blocks, and stays short enough to travel with each PR for reviewers who have never seen your notes. **Epic mode** (`/plan NNN epic`) publishes that record to the team's tracker before any code: the epic, and — when the project publishes ahead — one sub-issue per slice in dependency order, with native sub-issue and blocking links, so the team sees the planned workstream and who it touches while they can still shape it; a re-run syncs the tracker to the plan. **Issue mode** (`/plan NNN issue <slice>`, `/plan issue <topic>`) brings one slice's issue current as it starts, or files a standalone issue. Nothing is posted without your go. |
 | `/research` | Parallel agents across a six-tool stack (Brave, Exa, Firecrawl, Tavily, Perplexity, WebFetch). Each writes its own report under an anti-fabrication contract with a mandatory "what I could not verify" section; the orchestrator only synthesizes. Reports accumulate as sourced, dated folders. When it talks to you about a report (a finding, a disagreement between agents, an open question), it points at the exact line as a clickable `path:line`. |
-| `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves every call made in your absence in the plan's `## Review` block. On a PR-mode plan it runs one **lane** per adopter side by side. It ships every invisible slice through your ship command as soon as it is green (ready, when you have pre-approved that). User-facing slices ship the same way. Nothing waits for you unless it is critical: an irreversible or outward-facing action, a security or data exposure, money, or reversing your explicit decision. A fork in the road is decided and built lean, not parked. It never merges into a team's default branch. |
+| `/swarm` | Complete an entire plan autonomously with parallel agents. Setup decomposes the plan into a dependency graph of units, front-loads every human question, and registers it in the brain. Run — in a fresh session — dispatches worktree-isolated agents wave by wave, each on a Sonnet or Opus tier (model plus effort) matched to its task, reviews each unit before merging, serializes anything touching shared state (a live DB, a deploy), and leaves every call made in your absence in the plan's `## Review` block. On a PR-mode plan it runs one **lane** per adopter side by side. It ships every invisible slice through your ship command as soon as it is green (ready, when you have pre-approved that). User-facing slices ship the same way. Nothing waits for you unless it is critical: an irreversible or outward-facing action, a security or data exposure, money, or reversing your explicit decision. A fork in the road is decided and built lean, not parked. It never merges into a team's default branch. |
 
 **Seeing — so Claude can check its own work**
 
@@ -472,6 +472,7 @@ Rules the scripts enforce, learned the hard way:
 .claude/
   kit.json            # mode + configuration (yours)
   skills/             # kit skills, plus any you add
+  agents/             # kit agent definitions (the /swarm tiers), plus any you add
   hooks/              # session-start: loads brain state, heals schema drift
                       # background-pbar: nudges /pbar after background Bash calls
   settings.json       # model, permissions, hooks (yours)
@@ -1094,7 +1095,7 @@ plan's `## Review` block.
 Nothing merges unreviewed. Every completed unit gets an independent **reviewer agent** that runs
 the project's checks (from `swarm.checks`, verbatim — reviewers never guess) and the unit's
 verification criteria from the plan. Failures get up to two fix cycles, the second always on the
-strongest model; then the unit is marked failed, its dependents are skipped, and everything else
+top tier (Opus · high); then the unit is marked failed, its dependents are skipped, and everything else
 continues — **failures degrade the run, never halt it**. The orchestrator merges passing units
 into an integration branch (`swarm/<plan_id>`), resolving conflicts itself: it's the only mind
 that has seen every brief. A final integration gate — the plan's full verification table plus a
@@ -1126,17 +1127,42 @@ Three things keep an unattended run honest:
   applied to everything not yet dispatched.
 - **Push notifications** — completion and failure are the two interruptions worth sending.
 
-### Models
+### Model tiers
 
-Setup assigns a model per unit and per reviewer; you see the table before approving.
+Every agent a run spawns (builder, fixer or reviewer) goes out on one of five **tiers**. Each tier is
+an agent definition the kit ships in `.claude/agents/`, and it sets both the model and the reasoning
+effort. The Agent tool can't set effort per call, so an agent definition is the only way to control it.
 
-| Model | Unit work | Review work |
+| Tier | Model · effort | For a task that is… |
 |---|---|---|
-| `opus` | Default — anything with judgment: migrations, algorithm changes, cross-file refactors, anything touching a resource tag | Gate units, cascading-failure units, and always the final integration review |
-| `sonnet` | Simple, mechanical, well-briefed work | Default reviewer |
-| `haiku` | Never | Only checklist-style verification of small mechanical units |
+| `swarm-sonnet-low` | Sonnet · low | Very simple: a copy sweep, config plumbing, an explicit item list |
+| `swarm-sonnet-medium` | Sonnet · medium | **Default.** Typical and well defined: named files and items, an existing pattern, concrete checks |
+| `swarm-sonnet-high` | Sonnet · high | Slightly above average: more moving parts under a clear spec |
+| `swarm-opus-medium` | Opus · medium | Two notches above: one judgment signal, such as a genuine fork in the brief or a design with no pattern to copy |
+| `swarm-opus-high` | Opus · high | Three notches above: a live database or deploy, a gate, algorithm or security work, or two signals at once |
 
-When in doubt, up a tier — a swarm's cost center is redone work, not tokens.
+Unit briefs are self-contained and fully specified, which is the narrow, pre-specified work Sonnet
+does well. So Sonnet is the default, and a unit goes to Opus only for a reason you can name. The
+tiers name models by alias (`sonnet`, `opus`), so they always run the newest model your Claude Code
+knows, and the kit never needs editing when a new version ships.
+
+- **Who decides.** Setup proposes a tier for each unit, and you can pin any of them. The orchestrator
+  makes the final call at dispatch, using what the run has shown so far. It records the tier and its
+  reason on the unit.
+- **Reviewers** use the same tiers. Sonnet · medium is the default. Opus · high reviews gates, units
+  others depend on, and always the final integration review.
+- **Escalation.** A fix for a judgment mistake runs on Opus. The second fix cycle is always Opus ·
+  high. If two Sonnet units fail review on judgment, the rest of the run moves up a tier.
+- **Verified, not trusted.** Some Claude Code versions have ignored a requested subagent model. The
+  run probes a tier before dispatching anything. After each unit, it reads the model and effort the
+  API actually served from the agent's transcript, and the report lists any mismatch.
+- **Run the orchestrator on Opus.** It makes the tier calls and resolves merge conflicts, and the run
+  says so when it isn't on Opus.
+
+The tier definitions reach existing projects through [automatic adoption](#automatic-adoption-of-new-kit-files).
+Claude Code loads agent definitions when a session starts, so start a fresh session before a run.
+A session that can't see them falls back to the built-in agent with the tier's model, and the effort
+follows the orchestrator's.
 
 ### The report
 
@@ -1146,7 +1172,7 @@ plan's `## Review` block. Every call made autonomously has its alternatives and 
 and every page to look at has its URL. It is the review surface that replaces mid-run questions,
 and you clear it with the next session. After each run the
 orchestrator also logs retro insights to the brain (tagged `swarm-retro`) — slicings that
-conflicted anyway, model assignments that didn't survive review — which the next setup reads
+conflicted anyway, tiers that kept escalating or turned out more than needed — which the next setup reads
 before slicing. The heuristics improve from your runs, not from guesses.
 
 ### When a run doesn't finish clean
