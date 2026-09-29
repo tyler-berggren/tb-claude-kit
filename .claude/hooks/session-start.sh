@@ -12,15 +12,49 @@ DB="cowork/brain/BRAIN.db"
 # ambiguous signal is to do nothing.
 KIT_NOTICE=""
 
+# Rewrite .gitignore with the managed block's repeated lines dropped, and ADD (if
+# given) inserted just before the block's end. Lines outside the block are never
+# touched. Only rewrites when something would change.
+kit_gitignore_rewrite() {
+  local gi=".gitignore" add="$1" tmp
+  tmp=$(mktemp) || return 1
+  awk -v add="$add" -v b="# BEGIN:tb-claude-kit" -v e="# END:tb-claude-kit" '
+    $0 == b { inblock = 1 }
+    $0 == e { if (add != "" && !(add in seen)) print add; inblock = 0 }
+    inblock && $0 != b { if ($0 in seen) next; seen[$0] = 1 }
+    { print }' "$gi" > "$tmp" || { rm -f "$tmp"; return 1; }
+  if cmp -s "$tmp" "$gi"; then rm -f "$tmp"; else mv "$tmp" "$gi"; fi
+}
+
 # 0 = line added, 2 = already ignored, 1 = no managed block to add it to.
 kit_gitignore_add() {
   local gi=".gitignore" rel="$1"
   [ -f "$gi" ] || return 1
   grep -qxF "# END:tb-claude-kit" "$gi" || return 1   # no managed block: install.sh's job
   grep -qxF "/$rel" "$gi" && return 2
-  local tmp; tmp=$(mktemp) || return 1
-  awk -v line="/$rel" -v e="# END:tb-claude-kit" '$0 == e { print line } { print }' \
-    "$gi" > "$tmp" && mv "$tmp" "$gi"
+  kit_gitignore_rewrite "/$rel"
+}
+
+# Two sessions starting together in one project would otherwise both read
+# .gitignore, both add, and write over each other: a repeated line, or a lost one.
+# mkdir is atomic, so it serves as the lock. A lock older than a minute belongs
+# to a hook that died, and is taken over. If the lock can't be had in ~10s, skip
+# the sync: the next session start does it.
+kit_sync_locked() {
+  local lock=".claude/.kit-sync.lock" i
+  [ -d .claude ] || return 0
+  for i in $(seq 50); do
+    mkdir "$lock" 2>/dev/null && break
+    if [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+      rmdir "$lock" 2>/dev/null; continue
+    fi
+    sleep 0.2
+  done
+  [ -d "$lock" ] || return 0
+  kit_sync
+  [ -f .gitignore ] && grep -qxF "# END:tb-claude-kit" .gitignore && kit_gitignore_rewrite ""
+  rmdir "$lock" 2>/dev/null
+  return 0
 }
 
 kit_sync() {
@@ -105,7 +139,16 @@ PY
 
   [ ${#added[@]} -eq 0 ] && [ ${#stale[@]} -eq 0 ] && [ "$healed" -eq 0 ] && return 0
   if [ ${#added[@]} -gt 0 ]; then
-    KIT_NOTICE="🧰 Kit sync: linked $(IFS=', '; echo "${added[*]}") and updated .gitignore. Available this session."
+    # Claude Code loads agent definitions before this hook runs, so a newly linked
+    # agent only appears in the next session; skills and other files work now.
+    local now=() next=() a
+    for a in "${added[@]}"; do
+      case "$a" in .claude/agents/*) next+=("$a") ;; *) now+=("$a") ;; esac
+    done
+    KIT_NOTICE="🧰 Kit sync: linked $(IFS=', '; echo "${added[*]}") and updated .gitignore."
+    [ ${#now[@]} -gt 0 ] && [ ${#next[@]} -eq 0 ] && KIT_NOTICE="$KIT_NOTICE Available this session."
+    [ ${#next[@]} -gt 0 ] && [ ${#now[@]} -gt 0 ] && KIT_NOTICE="$KIT_NOTICE Skills and files are available this session."
+    [ ${#next[@]} -gt 0 ] && KIT_NOTICE="$KIT_NOTICE The agent definitions load at the next session start, since Claude Code reads agents before this hook runs."
   fi
   if [ "$healed" -gt 0 ]; then
     KIT_NOTICE="$KIT_NOTICE Added $healed missing .gitignore line(s) for kit links that were already present."
@@ -454,7 +497,7 @@ if [ "${1:-}" = "memory" ]; then
   exit 0
 fi
 
-kit_sync
+kit_sync_locked
 kit_memory
 [ "$MEM_TELL" = "yes" ] && MEMORY_NOTICE="🧠 Memory: $MEM_MSG"
 
