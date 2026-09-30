@@ -795,13 +795,43 @@ Every `/wiki` invocation runs a hybrid procedure:
 `/wiki deploy` builds the committed pages with the kit's `scripts/wiki-build/` (linked into every project by
 `install.sh`, so a builder change reaches every wiki on its next deploy) and publishes them to Cloudflare Pages.
 The site has in-browser search, per-page contents, a sidebar grouped by the index's `## Headings` (groups start
-expanded), and a bottom-left button that collapses the sidebar on desktop. A folder holding `RESTRICTED.txt` is
-served only to the people it lists, using the Access settings in `.claude/wiki-access.json`. Set the Pages
-project and sidebar title in `kit.json`:
+expanded), and a bottom-left button (or Cmd+B / Ctrl+B) that collapses the sidebar on desktop. A folder holding
+`RESTRICTED.txt` is served only to the people it lists, using the Access settings in `.claude/wiki-access.json`.
+Set the Pages project and the wiki's title in `kit.json`:
 
 ```json
 { "wiki": { "pagesProject": "my-project-wiki", "title": "My Project Wiki" } }
 ```
+
+The build is two steps: **parse**, which turns the pages into a bundle, then a **renderer**, which turns the
+bundle into the site. The kit's plain renderer covers navigation and reading, and deliberately stays that way.
+For anything more (your own branding, sign-in menus, app features), write a renderer of your own and point
+`wiki.renderer` at it; it reads the bundle described below.
+
+#### wiki.json format
+
+`node scripts/wiki-build/parse.mjs <wiki-dir> <bundle-dir> [--title …] [--access …]` writes a bundle directory:
+
+- **`wiki.json`** — the whole wiki, versioned by `format` (currently `1`; bumped on any change a renderer could
+  trip over, and renderers should refuse a format they don't know):
+  - `title` — the wiki's name (`--title`, else the index's first heading).
+  - `generatedAt` — ISO timestamp.
+  - `pages[]` — `source` (the `.md` path), `href` (the `.html` path, relative to the site root), `title`, `html`
+    (the rendered page: `.md` links already point at `.html`, h1–h3 have `id`s), `headings[]` (`depth` 2 or 3,
+    `id`, `text`), `updated` (ISO, from the file), `restricted`.
+  - `nav[]` — the sidebar, in index order: `name` (the `## Heading`, or `null` for links above the first one),
+    `links[]` (`label`, `href`), `restricted` (every link is in a restricted folder).
+  - `redirects[]` — `from`, `to`: old addresses of pages that moved into folders.
+  - `restricted[]` — `folder`, `allow[]` (emails from its `RESTRICTED.txt`).
+  - `access` — `{ team, auds }` from the Access settings file, or `null`.
+  - `assets[]` — image paths used by pages, relative to the wiki root.
+- **`search.json`** — `[{ title, href, text, restricted }]`, `text` lowercased plain text.
+- **`files/`** — the images, at their `assets` paths.
+
+A renderer is run as `<wiki.renderer> <bundle-dir> <out-dir>` from the project root, and must write a complete
+site into `<out-dir>`. What it does with restricted pages is its responsibility. The plain renderer publishes
+them (path-scoped Access apps guard them) and writes a `_worker.js` that shows their menus only to the people
+on the allow list.
 
 ### Style guide
 
@@ -823,7 +853,8 @@ The style guide itself is organic — it travels with the project and evolves as
     "root": "wiki",
     "styleScaffold": "templates/STYLE.md",
     "pagesProject": "my-project-wiki",
-    "title": "My Project Wiki"
+    "title": "My Project Wiki",
+    "renderer": null
   }
 }
 ```
@@ -831,7 +862,8 @@ The style guide itself is organic — it travels with the project and evolves as
 - **`root`** — wiki directory (default: `wiki/`)
 - **`styleScaffold`** — path to a `STYLE.md` template that `/wiki init` copies when creating a new wiki
 - **`pagesProject`** — the Cloudflare Pages project `/wiki deploy` publishes to (default: `<repo-name>-wiki`)
-- **`title`** — the text at the top of the site's sidebar (default: the index's first heading)
+- **`title`** — the wiki's name: the top of the sidebar and the end of every tab title (default: the index's first heading)
+- **`renderer`** — a command that renders the parsed bundle instead of the plain renderer (see "wiki.json format")
 
 A folder containing `RESTRICTED.txt` (one `allow: person@example.com` line per reader) is left out of the
 shared sidebar, search and Home page, and served only to the people it lists. The site needs its Cloudflare

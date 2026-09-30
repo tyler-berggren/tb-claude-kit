@@ -79,10 +79,11 @@
     "ignore": []
   },
 
-  "_note_wiki": "Configuration for /wiki. root is the wiki directory (default: wiki/). styleScaffold is a path to a STYLE.md template that /wiki init copies when creating a new wiki — lets an organization maintain a standard starting point while allowing per-project evolution. Both keys are optional.",
+  "_note_wiki": "Configuration for /wiki. root is the wiki directory (default: wiki/). styleScaffold is a path to a STYLE.md template that /wiki init copies when creating a new wiki — lets an organization maintain a standard starting point while allowing per-project evolution. renderer is a command /wiki deploy uses to render the parsed wiki bundle instead of the kit's plain renderer; it runs from the project root with the bundle directory and the output directory appended (see the README's \"wiki.json format\"). All keys are optional.",
   "wiki": {
     "root": "wiki",
-    "styleScaffold": null
+    "styleScaffold": null,
+    "renderer": null
   },
 
   "_note_swarm": "Configuration for /swarm autonomous plan execution. maxAgents caps how many unit agents run concurrently during a swarm run (setup can override per-run with user approval). checks is the project's verification command list — reviewer agents run these verbatim on every unit; when absent, swarm setup determines the commands itself and records them in SWARM.md.",

@@ -117,7 +117,13 @@ Build the wiki as a static HTML site and deploy it to Cloudflare Pages.
 A static site: one HTML page per markdown file, a sidebar built from the index (`README.md`), in-browser
 search, per-page heading contents and "last updated" stamps. In the sidebar, each `## Heading` in the index
 becomes a group, and **groups start expanded**. A button in the bottom-left corner collapses the sidebar on
-desktop (Lucide `panel-left`) and expands it again (`panel-right`); the choice is remembered per browser.
+desktop (Lucide `panel-left`) and expands it again (`panel-right`), also with Cmd+B / Ctrl+B; the choice is
+remembered per browser. Tabs read `Page · Wiki title`.
+
+The build runs in two steps: `parse.mjs` turns the pages into a bundle (`wiki.json`, `search.json`, images), then
+a renderer turns the bundle into the site. The default is the kit's plain renderer (`render.mjs`). A project can
+plug in its own with `kit.json` `wiki.renderer` — a command that is given the bundle directory and the output
+directory. The bundle format is documented in the kit README ("wiki.json format").
 
 A folder containing `RESTRICTED.txt` (lines of `allow: person@example.com`) is kept out of the shared sidebar,
 search and Home page, and is served only to the people it lists. That needs the site's Cloudflare Access
@@ -164,14 +170,19 @@ or a file passed with `--access`.
    ```bash
    TITLE=$(jq -r '.wiki.title // empty' .claude/kit.json 2>/dev/null)
    ```
+   And the renderer, if the project set one (empty means the plain renderer):
+   ```bash
+   RENDERER=$(jq -r '.wiki.renderer // empty' .claude/kit.json 2>/dev/null)
+   ```
 
 6. Build **from the committed pages**, so uncommitted drafts are never published, running from the
    project root so `.claude/wiki-access.json` resolves:
    ```bash
    (cd scripts/wiki-build && npm install --silent)
    SRC=$(mktemp -d) && git archive HEAD "$WIKI_ROOT" | tar -x -C "$SRC"
-   TITLE_ARGS=(); [ -n "$TITLE" ] && TITLE_ARGS=(--title "$TITLE")   # an array: works in bash and zsh
-   node scripts/wiki-build/build.mjs "$SRC/$WIKI_ROOT" _wiki-site "${TITLE_ARGS[@]}"
+   ARGS=(); [ -n "$TITLE" ] && ARGS+=(--title "$TITLE")   # an array: works in bash and zsh
+   [ -n "$RENDERER" ] && ARGS+=(--renderer "$RENDERER")
+   node scripts/wiki-build/build.mjs "$SRC/$WIKI_ROOT" _wiki-site "${ARGS[@]}"
    rm -rf "$SRC"
    ```
    If the user explicitly asks to publish uncommitted changes, build from `"$WIKI_ROOT"` directly.
