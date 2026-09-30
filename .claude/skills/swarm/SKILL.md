@@ -371,6 +371,23 @@ checkout at `.claude/worktrees/<slug>`, using the create and bootstrap commands 
 `swarm.worktree` in kit.json. It works only there, and removes the worktree once its slice has merged. The target's
 primary checkout is someone's IDE too, so its branch is never switched (**Branches live in worktrees**).
 
+**A worktree pool, when the project has one.** Creating a worktree per agent is expensive in a big
+repository: every build, fix, ship and replay agent pays for a fresh checkout and dependency install,
+installs queue behind each other, and removing them all stalls the orchestrator. When
+`swarm.worktree.pool` is set, units **lease a slot** instead:
+
+- **Slots are bootstrapped once and reused.** They persist across runs; nothing removes one mid-run.
+- **A unit leases a slot at dispatch** (the pool's `acquire` command, with the unit's lane and
+  branch) **and hands it back once its branch is pushed** (`shipped`) or it parks (`release`). A
+  released slot is reset to a clean, detached default branch with its installed dependencies kept.
+- **Lane affinity.** The pool prefers the slot the lane used last, so a stacked slice starts where its
+  parent's tree already is, and a replay onto the default branch is an in-place rebase.
+- **A fix, ship or replay agent for a unit reuses that unit's slot** while it still holds one. For a
+  `shipped` unit it leases again (affinity usually returns the same slot) and switches to the
+  existing branch; it never creates a new worktree.
+- **No free slot is a scheduling signal, not an error:** the unit waits for the next release, like a
+  unit waiting on a resource tag. Size the pool at the concurrency cap plus two.
+
 **Standing policies are read, not re-asked.** A project may record two in kit.json; setup reads
 them and asks (S3) only what they leave open:
 
@@ -398,8 +415,11 @@ them and asks (S3) only what they leave open:
    whose verdict the team's merge honours. It runs against the pushed head and replaces the
    swarm's reviewer agent for that unit; a second review would be duplicate spend. A blocking
    finding is fixed and re-reviewed, two cycles at most, then `failed`.
-5. **Watch CI; fix on red at once.** Each open PR (`status = 'shipped'`, `pr` recorded) gets a
-   watcher. When a CI group fails, push the fix as soon as it is ready — that run is already
+5. **Watch CI; fix on red at once.** One watcher per run covers every open PR (`status =
+   'shipped'`, `pr` recorded); shipping agents end at the push and never wait on CI themselves.
+   **A red caused by the CI infrastructure** (a process killed for memory, a lost or hung machine,
+   every failing test at 0–1 ms) is rerun first — by the project's watcher when `swarm.watch` names
+   one — and gets a fix agent only if it repeats on the same head. When a CI group fails, push the fix as soon as it is ready — that run is already
    lost, and waiting only lets the default branch move under the PR. A PR the host reports as
    conflicting is re-synced by merging the default branch in, once reviewers have seen its
    history.
@@ -490,7 +510,8 @@ Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
    - mark plan items `- [x]` with progress notes (per `/plan` conventions);
    - append the unit's **Calls**, **Unverified** items and any **Critical** park to the plan's `## Review` block (`/plan`, **Batches**) — the orchestrator is its only writer;
    - update `swarm_units` (`merged`, `result` = one-line summary);
-   - remove the unit's worktree. The plan edits stay uncommitted in the primary checkout;
+   - remove the unit's worktree, **in the background** (`run_in_background`), never inline in the
+     dispatch loop, or release its slot when the project has a pool. The plan edits stay uncommitted in the primary checkout;
    - loop back to 1, because a merge may unblock dependents.
 5. **Reviewer FAIL** → spawn a fix agent in the same worktree with the findings. Pick its tier by **Model tiers**, **Escalation**: at least `swarm-opus-medium` when the findings are about judgment, the unit's tier when they are mechanical, and always `swarm-opus-high` on the **second** cycle. Update `model` and `model_reason` whenever the tier changes. Max **two** fix cycles; then mark the unit `failed`, record why, and continue — everything not depending on it still runs. Dependents of a failed unit become `skipped`.
 6. Post a one-line progress note as each unit changes state. Between events there is nothing to poll — background agents re-invoke the session when they finish.
@@ -569,6 +590,11 @@ Orchestrator-side:
 - **Only the orchestrator merges, and only after review.** No unit branch reaches the integration branch unreviewed.
 - **Resource locks are absolute** — never dispatch into a held tag, even if the code territories are disjoint.
 - **Keep `swarm_runs` / `swarm_units` current at every transition** — it's what a resume session reconstructs the world from.
+- **Every time written to a run log comes from the clock** (`date -u +%H:%MZ` at the moment of
+  writing), never from memory: a remembered time drifts by hours across a long session.
+- **Long waits never run in the foreground.** A poll loop (`while/until … sleep`) holds its agent
+  until a tool timeout kills it. Waits run in the background and notify on completion, or belong to
+  the run's watcher.
 - **Re-read the plan from disk before every write.** The owner can edit it at any time, most often by marking review items, and a write from a stale copy erases their marks.
 - **Honour review holds yourself.** A database reset, a check that starts a server, a batch step: check `swarm_holds` first, exactly as units do.
 - **Failures degrade, never halt.** One failed unit skips its dependents and the rest of the swarm continues. The report tells the user what's left.
@@ -743,6 +769,8 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 
 | Key | What it holds |
 |---|---|
+| `swarm.worktree.pool` | `{ "acquire": "<command>", "release": "<command>", "list": "<command>", "size": <n> }` — the slot pool (**Where the code lives**); `<lane>`, `<branch>`, `<base>` and `<slot>` are substituted, and `acquire` prints the slot's path on its last line |
+| `swarm.watch` | The project's CI watcher: what reruns infrastructure reds, and where it logs; the orchestrator dispatches no fix for a red the watcher will rerun |
 | `swarm.worktree` | `{ "create": "<command>", "remove": "<command>" }` for a target checkout outside the session's repo; `<slug>` and `<branch>` are substituted. Put the worktree at `.claude/worktrees/<slug>` in the target, and include the repo's own bootstrap in `create` |
 | `swarm.resources` | `{ "<path glob>": "<tag>" }` — shared local state a unit touching that path holds: a fixed-port dev server, the one local database, the package install |
 | `swarm.review` | The team's review tool, run against a pushed PR (`<pr>` is substituted); it replaces the swarm's reviewer agent |

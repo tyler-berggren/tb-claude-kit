@@ -1214,6 +1214,15 @@ and the swarm adapts to that instead of fighting it:
 - **A repository outside the session.** When the code lives in another checkout (a sibling
   clone, a symlink, a submodule), the Agent tool's worktree isolation would copy the wrong repo, so
   each unit makes its own worktree in the target with `swarm.worktree`'s commands.
+- **A worktree pool, for big repositories.** With `swarm.worktree.pool`, units lease a slot
+  that was bootstrapped once instead of creating a worktree each: the slot is branched in place,
+  handed back once the branch is pushed, reset to a clean default branch with dependencies kept,
+  and reused — a lane prefers its last slot, and fix, ship and replay agents reuse their unit's.
+  Nothing is removed mid-run.
+- **One CI watcher per run.** Shipping agents end at the push. A red caused by CI's
+  infrastructure (a process killed for memory, a hung machine, every failing test at 0–1 ms) is
+  rerun first, by the project's watcher when `swarm.watch` names one, and gets a fix agent only
+  if it repeats on the same head. No agent waits in a foreground poll loop.
 - **Shared local state is locked by path.** One local database, dev servers on fixed ports, one
   package install: `swarm.resources` maps path globs to tags, and two units holding a tag never
   run at once.
@@ -1273,7 +1282,9 @@ one message.
     "ship": "ready",
     "look": "batch",
     "review": "node scripts/review.mjs --pr <pr>",
-    "worktree": { "create": "git -C ../app worktree add .claude/worktrees/<slug> -b <branch> origin/main", "remove": "git -C ../app worktree remove .claude/worktrees/<slug>" },
+    "worktree": { "create": "git -C ../app worktree add .claude/worktrees/<slug> -b <branch> origin/main", "remove": "git -C ../app worktree remove .claude/worktrees/<slug>",
+                  "pool": { "acquire": "scripts/slot.sh acquire <lane> <branch> <base>", "release": "scripts/slot.sh release <slot>", "list": "scripts/slot.sh list", "size": 8 } },
+    "watch": "scripts/ci-watch.mjs (launchd, every 5 min) — reruns infrastructure reds once per head",
     "resources": { "db/schema/**": "db:local", "apps/web/**": "port:web", "package-lock.json": "install" },
     "reviewStack": {
       "shared": "curl -sf http://localhost:8080/health",
