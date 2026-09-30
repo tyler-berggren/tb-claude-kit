@@ -61,6 +61,8 @@ body {
 
 /* Project groups (accordion) */
 .nav-project { margin-top: 0.75rem; }
+/* A "###" group inside a "##" one: closer to the links around it. */
+.nav-project-links > .nav-project { margin-top: 0.25rem; }
 
 .nav-project-toggle {
   display: flex;

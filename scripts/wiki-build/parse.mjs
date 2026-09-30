@@ -57,21 +57,31 @@ const isRestricted = f => f.includes('/') && restrictedDirs.has(f.split('/')[0])
 
 // The README is the index. Its first heading names the wiki; its links, grouped under the
 // "## Heading" they sit beneath, become the sidebar. Links above the first heading stay ungrouped.
+// A "### Heading" is a group inside the "##" group above it: it gets `parent` (that group's name).
+// Renderers that don't read `parent` still draw every group, just side by side, so FORMAT stays 1.
 const readme = existsSync(join(wikiDir, 'README.md')) ? readFileSync(join(wikiDir, 'README.md'), 'utf-8') : '';
 const readmeTitle = readme.match(/^#\s+(.+)$/m)?.[1]?.trim() || 'Wiki';
 const navGroups = [{ name: null, links: [] }];
+let parentGroup = null;
 for (const line of readme.split('\n')) {
-  const heading = line.match(/^##\s+(.+)$/);
+  const heading = line.match(/^(###?)\s+(.+)$/);
   if (heading) {
-    navGroups.push({ name: heading[1].trim(), links: [] });
+    const name = heading[2].trim();
+    if (heading[1] === '##') {
+      parentGroup = name;
+      navGroups.push({ name, links: [] });
+    } else {
+      navGroups.push(parentGroup ? { name, parent: parentGroup, links: [] } : { name, links: [] });
+    }
     continue;
   }
   for (const [, label, href] of line.matchAll(/\[([^\]]+)\]\(([^)]+\.md)\)/g)) {
     if (!SKIP.has(href)) navGroups[navGroups.length - 1].links.push({ label, href: href.replace(/\.md$/, '.html') });
   }
 }
+// A "##" group with no links of its own stays when one of its "###" groups has some.
 const nav = navGroups
-  .filter(g => g.links.length)
+  .filter(g => g.links.length || navGroups.some(c => c.parent === g.name && c.links.length))
   .map(g => ({ ...g, restricted: g.links.every(l => isRestricted(l.href)) }));
 const restrictedNames = new Set(nav.filter(g => g.restricted).map(g => g.name));
 
@@ -80,9 +90,11 @@ function pageSource(mdFile) {
   const src = readFileSync(join(wikiDir, mdFile), 'utf-8');
   if (mdFile !== 'README.md' || !restrictedNames.size) return src;
   let skipping = false;
+  let parentSkipping = false; // a "###" section inside a restricted "##" one goes too
   return src.split('\n').filter(line => {
-    const h = line.match(/^##\s+(.+)$/);
-    if (h) skipping = restrictedNames.has(h[1].trim());
+    const h = line.match(/^(###?)\s+(.+)$/);
+    if (h && h[1] === '##') skipping = parentSkipping = restrictedNames.has(h[2].trim());
+    else if (h) skipping = parentSkipping || restrictedNames.has(h[2].trim());
     return !skipping;
   }).join('\n');
 }

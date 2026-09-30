@@ -820,7 +820,9 @@ For anything more (your own branding, sign-in menus, app features), write a rend
     (the rendered page: `.md` links already point at `.html`, h1–h3 have `id`s), `headings[]` (`depth` 2 or 3,
     `id`, `text`), `updated` (ISO, from the file), `restricted`.
   - `nav[]` — the sidebar, in index order: `name` (the `## Heading`, or `null` for links above the first one),
-    `links[]` (`label`, `href`), `restricted` (every link is in a restricted folder).
+    `links[]` (`label`, `href`), `restricted` (every link is in a restricted folder). A `### Heading` group
+    also has `parent`, the name of the `##` group it sits inside; a renderer may ignore it and show the group
+    beside the others.
   - `redirects[]` — `from`, `to`: old addresses of pages that moved into folders.
   - `restricted[]` — `folder`, `allow[]` (emails from its `RESTRICTED.txt`).
   - `access` — `{ team, auds }` from the Access settings file, or `null`.

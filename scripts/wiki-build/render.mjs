@@ -71,8 +71,12 @@ function buildNav(page, root, tocHtml) {
   };
   // Restricted groups show only on restricted pages; everyone else gets them from the worker.
   // Groups start open so every page is in view; readers can collapse any of them.
-  return wiki.nav.filter(g => !g.restricted || page.restricted).map(group => {
-    const links = group.links.map(navLink).join('\n            ');
+  // A "###" group (it has `parent`) is drawn inside its "##" group, after that group's own links.
+  const shown = wiki.nav.filter(g => !g.restricted || page.restricted);
+  const names = new Set(shown.map(g => g.name));
+  const drawGroup = group => {
+    const children = shown.filter(c => c.parent && c.parent === group.name).map(drawGroup);
+    const links = [...group.links.map(navLink), ...children].join('\n            ');
     if (!group.name) return links;
     return `<div class="nav-project">
           <button class="nav-project-toggle" aria-expanded="true">${chevron('nav-project-chevron')}<span>${group.name}</span></button>
@@ -80,7 +84,9 @@ function buildNav(page, root, tocHtml) {
             ${links}
           </div>
         </div>`;
-  }).join('\n          ');
+  };
+  // A sub-group whose parent isn't shown here (e.g. a hidden restricted parent) is drawn on its own.
+  return shown.filter(g => !g.parent || !names.has(g.parent)).map(drawGroup).join('\n          ');
 }
 
 function renderPage(page) {
