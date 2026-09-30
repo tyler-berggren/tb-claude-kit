@@ -255,12 +255,15 @@ alias (`sonnet`, `opus`), so they always get the newest model the running Claude
 | `swarm-sonnet-low` | sonnet · low | **very simple**: a copy or label sweep, config plumbing, an explicit item list in one or two files |
 | `swarm-sonnet-medium` | sonnet · medium | **typical and well defined** (the default): the brief names the files and items, the territory is one module or follows an existing pattern, verification is concrete |
 | `swarm-sonnet-high` | sonnet · high | **slightly above average**: well specified but with more moving parts, such as several files in one module, logic with edge cases to test, or user-facing UI to verify |
-| `swarm-opus-medium` | opus · medium | **two notches above average**: exactly one signal from the table below |
-| `swarm-opus-high` | opus · high | **three notches above average**: a heavy signal (marked ★), or two or more signals |
+| `swarm-opus-medium` | opus · medium | **two notches above average**: exactly one unstarred signal from the table below, or a narrow ★ unit that has no pattern to copy |
+| `swarm-opus-high` | opus · high | **three notches above average**: a ★ signal with reach (dependents, several packages, an open fork), or two or more signals |
 
 A unit's brief is self-contained and fully specified: objective, the plan items copied in, territory,
 what not to touch, and how to verify. That is narrow, pre-specified work, and Sonnet does it well. So
-**`swarm-sonnet-medium` is the default**, and a unit goes to Opus only when a signal applies:
+**`swarm-sonnet-medium` is the default**, and a unit goes to Opus only when a signal applies. Lean
+toward the cheaper, faster tier: when a unit sits on the line between two tiers, pick the lower one and
+let review and **Escalation** catch a miss. A wrong low pick costs one review cycle, while a wrong high
+pick costs time and tokens on every unit it touches.
 
 | Signal | Why it needs Opus |
 |---|---|
@@ -275,11 +278,20 @@ what not to touch, and how to verify. That is narrow, pre-specified work, and So
 
 Do not move a unit up a tier out of general caution. Each step up needs a reason you can name.
 
+**Narrow ★ units build on Sonnet, reviewed by Opus.** A ★ signal is about what's at stake, not
+always about how hard the work is. When a ★ unit is **narrow** (one clause, one function, or one
+file) and **copies a pattern the codebase already has** (the brief names the precedent), and it has
+no other signal (no dependents, no open fork, no resource tag), build it on `swarm-sonnet-high` and
+give it a `swarm-opus-high` reviewer. The builder follows the pattern, and the Opus reviewer judges
+whether the result is safe. Record `narrow ★, pattern <precedent>` in `model_reason`. A narrow ★ unit
+with no pattern to copy goes to `swarm-opus-medium`. Resource tags and gates never take this route:
+they stay on Opus.
+
 **Reviewers** use the same tiers:
 
 | Tier | Reviews |
 |---|---|
-| `swarm-opus-high` | Gates, units whose failure cascades, and the final integration review (R3), which is always this tier |
+| `swarm-opus-high` | Gates, units whose failure cascades, a narrow ★ unit built on Sonnet, and the final integration review (R3), which is always this tier |
 | `swarm-opus-medium` | A Sonnet-built unit that reports an `uncertain` call, and a unit that asked for Opus but ran on Sonnet |
 | `swarm-sonnet-medium` | **Default reviewer** |
 | `swarm-sonnet-low` | A checklist review of a `swarm-sonnet-low` unit: files changed match the territory, grep-level checks, the project's checks pass |
@@ -542,7 +554,7 @@ When all units are terminal:
    - Verification results (actual output, including anything that failed)
    - **Tiers** — one row per tier: units built, first-pass review rate, and fix cycles. Then list each unit that escalated, with its original tier, the tier it finished on, and why, and each unit whose served model or effort differed from its tier
    - Follow-ups and loose ends, routed like `/plan carry` would
-5. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, how each tier fared in review (a tier that kept escalating was too low for its tasks; an Opus tier that never found anything to fix may have been more than needed), and which **Model tiers** signals (from `model_reason`) predicted a failure or turned out unneeded, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
+5. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, how each tier fared in review (a tier that kept escalating was too low for its tasks; an Opus tier that never found anything to fix may have been more than needed; whether narrow ★ units built on Sonnet passed their Opus review), and which **Model tiers** signals (from `model_reason`) predicted a failure or turned out unneeded, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
 6. Set run status `done` (`completed_at`), remove the remaining unit worktrees, delete merged unit branches, and keep the integration branch.
    - **Commit the bookkeeping** in the primary checkout, limited to its paths: `git -C <primary> commit --only -- <plan> cowork/swarm/<plan_id>/`. The owner's other staged and unstaged work stays as it was. The review marks in the plan go in with it. Skip the commit, and say so, when the primary checkout is not on the merge target or is mid-merge, mid-rebase or mid-cherry-pick.
    - **Merged:** also remove the integration worktree, never with `--force`. A dirty one means something was written there by mistake: report it and leave it.
