@@ -80,9 +80,13 @@ for (const line of readme.split('\n')) {
   }
 }
 // A "##" group with no links of its own stays when one of its "###" groups has some.
+// A group is restricted when every link it shows is. A "##" group with none of its own is judged
+// by its "###" groups' links: every() on an empty list is true, which used to mark such a group
+// restricted, drop it from Home and fail the build for want of Access settings.
+const shownLinks = g => g.links.length ? g.links : navGroups.filter(c => c.parent === g.name).flatMap(c => c.links);
 const nav = navGroups
-  .filter(g => g.links.length || navGroups.some(c => c.parent === g.name && c.links.length))
-  .map(g => ({ ...g, restricted: g.links.every(l => isRestricted(l.href)) }));
+  .filter(g => shownLinks(g).length)
+  .map(g => ({ ...g, restricted: shownLinks(g).every(l => isRestricted(l.href)) }));
 const restrictedNames = new Set(nav.filter(g => g.restricted).map(g => g.name));
 
 // Page source, except that the shared Home page loses restricted projects' sections.
