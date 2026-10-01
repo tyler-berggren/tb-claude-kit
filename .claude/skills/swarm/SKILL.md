@@ -32,7 +32,7 @@ The intended workflow: `/plan` generates the plan → `/swarm <ref>` (setup) →
 - Every question a human must answer is answered during Setup, and written into the plan.
 - During Run, no agent stops to ask the user anything, and that includes the orchestrator. Agents make the call a senior developer would, build it to work, keep going, and record it as a call in the plan. At a genuine fork they still decide, but build the lean functional version and leave polish for a later pass.
 - **Nothing parks for the owner unless it is critical** (`/plan`, **Batches**: irreversible, outward-facing, security or data exposure, money, or reversing an explicit owner decision). A fork in the road is not critical: decide it and build lean. Everything else ships through the normal pipeline.
-- **UI is verified by code first, a headless browser second** (`/look`, **Headless**). What neither can verify is written down as unverified in the plan and the PR notes, and the unit moves on. Nobody spends time on UI that code or a headless browser cannot easily check.
+- **UI is verified by code first, a headless browser second** (`/look`, **Headless**). This is every run's default and needs no setting. **No agent, and not the orchestrator, verifies in a headed browser on its own:** nobody drives the owner's shared window, and nobody launches a visible browser of their own. A visible browser appears only in `/swarm review`, which the owner runs. What neither code nor headless can verify is written down as unverified in the plan and the PR notes, and the unit moves on. Nobody spends time on UI that code or a headless browser cannot easily check.
 - Calls, unverified items and critical parks all land in one numbered block in the plan. Only the critical parks wait on the owner; the rest they read when they choose.
 
 ## Branches live in worktrees
@@ -417,7 +417,8 @@ them and asks (S3) only what they leave open:
 1. **Build** in the unit's worktree with the project's quick checks. **Verify UI by code first**
    (types, tests, the rendering logic), then **in a headless browser of the agent's own** (`/look`,
    **Headless**) when code cannot settle it. What neither verifies is recorded as unverified and
-   left; the agent does not keep trying. The owner's shared browser is never the agent's to drive.
+   left; the agent does not keep trying. No agent verifies in a headed browser: it never drives the
+   owner's shared window and never launches a visible browser of its own.
 2. **Every slice ships:** write its tests, then run the project's ship command (`rules.plan` names
    it) under the `swarm.ship` policy. Its calls and unverified items go into the plan's review
    block, and the unverified ones also go into the PR notes.
@@ -460,7 +461,8 @@ When the handoff arrives:
 - Apply the handoff as **one amendment** across the slices it touches: D-numbered in SWARM.md, and
   a product or design answer also becomes a plan decision. A consequence the review session applied
   without asking is flagged as that in the review block.
-- Only what changed is shown again at the next look. Each approved slice writes its tests and ships.
+- Only what changed is shown again at the next look. A slice that was parked for the look writes its
+  tests and ships once approved; under the default (`swarm.look: none`) the rest have already shipped.
 
 A run whose remaining work is critical parks waiting on the owner is **waiting, not stalled**, and so
 is a unit waiting on a review hold: the status says so, and the stall watchdog leaves both alone.
@@ -575,7 +577,7 @@ Copied into SWARM.md at setup; binding for every spawned agent.
 - **Never ask the user anything.** Facing a judgment call, including a design, layout or wording one? Decide as a senior developer would, applying the decision protocol: (1) the plan and its decisions are authoritative → (2) the SWARM.md decision record → (3) brain DB decisions → (4) the codebase's conventions and the smallest reasonable reading of the item. Build it so it works, keep going, and record it under `Calls`. A call the owner overrules later becomes a fix slice, which beats a stalled swarm.
 - **At a genuine fork, decide and build lean.** When it is truly unclear which way best reaches the goal, still pick one, but keep follow-on work to a minimum: make it functional end to end and stop there, with no polish, extensions or dependent work stacked on it until a later pass needs them. Tokens spent building what may be un-built are waste. Mark the call `uncertain`.
 - **The one exception is a critical issue:** an action not pre-approved in SWARM.md that is irreversible or outward-facing (deleting shared data, notifying people, spending money, touching production), a security, privacy or permissions exposure, or reversing a decision the owner explicitly made. Do not take it and do not wait: finish what does not depend on it, and report it under `Critical`. The orchestrator parks the unit and notifies the owner. When unsure, it is not critical.
-- **Verify UI in order, then stop.** (1) Code: types, tests, the logic that renders it. (2) Only if code cannot settle it, your own headless browser (`/look`, **Headless**): the page loads without errors, the changed control is there, the interaction works, and nothing overflows at a phone width. (3) If neither can verify it cheaply, record it under `Unverified` with what you could not check and why, and move on. Do not fight a page that will not render headless. Never drive the owner's shared browser.
+- **Verify UI in order, then stop.** (1) Code: types, tests, the logic that renders it. (2) Only if code cannot settle it, your own headless browser (`/look`, **Headless**): the page loads without errors, the changed control is there, the interaction works, and nothing overflows at a phone width. (3) If neither can verify it cheaply, record it under `Unverified` with what you could not check and why, and move on. Do not fight a page that will not render headless. Never verify in a headed browser: do not drive the owner's shared window, and do not launch a visible browser of your own.
 - **Stay in your territory.** Read anything; edit only your unit's files. Never edit the plan file, `cowork/**` (brain, plans, swarm files), or `.claude/**` — your worktree's copies would conflict on merge. The orchestrator owns all bookkeeping.
 - **Work only in your own worktree.** Your first step is creating your assigned branch there from the integration sha in your prompt (`git switch -c <branch> <sha>`). Never `cd` into, check out in, or write to the primary checkout (the owner's IDE) or another unit's worktree. The brain's absolute path is for reading `swarm_holds`, nothing else.
 - **Commit your work** on your assigned branch, in coherent chunks with real messages. Never stage `cowork/` paths.
@@ -787,7 +789,7 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 | `swarm.resources` | `{ "<path glob>": "<tag>" }` — shared local state a unit touching that path holds: a fixed-port dev server, the one local database, the package install |
 | `swarm.review` | The team's review tool, run against a pushed PR (`<pr>` is substituted); it replaces the swarm's reviewer agent |
 | `swarm.ship` | `ready` \| `draft` \| `ask` (default `ask`) — the owner's standing ship policy |
-| `swarm.look` | `batch` \| `per-slice` \| `none` (default `batch`) — when the owner reviews user-facing slices |
+| `swarm.look` | `none` \| `batch` \| `per-slice` (default `none`) — whether user-facing slices wait for the owner's look. `none`: they ship once verified by code, then headless |
 | `swarm.reviewStack` | How `/swarm review` serves a look (below) |
 
 `swarm.reviewStack` keys (`<app>` and `<checkout>` are substituted; every key is optional):
@@ -804,6 +806,6 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 | `logs` | The directory server logs go to |
 
 ```bash
-jq -r '.swarm.maxAgents // 6, ((.swarm.checks // []) | join(" && ")), (.swarm.ship // "ask"), (.swarm.look // "batch"), (.rules."swarm" // empty)' .claude/kit.json 2>/dev/null
+jq -r '.swarm.maxAgents // 6, ((.swarm.checks // []) | join(" && ")), (.swarm.ship // "ask"), (.swarm.look // "none"), (.rules."swarm" // empty)' .claude/kit.json 2>/dev/null
 jq '.swarm.reviewStack // empty' .claude/kit.json 2>/dev/null
 ```
