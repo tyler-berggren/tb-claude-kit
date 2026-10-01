@@ -1,0 +1,325 @@
+#!/usr/bin/env python3
+"""claude-switcher — several Claude accounts on one machine, picked by VS Code profile.
+
+  claude-switcher                 show every account: who is signed in, which VS Code profile
+                                  uses it, which folders open in that profile, and what is off
+  claude-switcher add <name>      create an account folder and point a VS Code profile at it
+      --profile "<Profile>"         the VS Code profile's name (default: <name>)
+      --share-history <account>     same session list and memories as an existing account
+      --copy-settings <account>     start from that account's settings.json (default: default)
+  claude-switcher login <name>    sign in to an account. Run this in a real terminal.
+  claude-switcher run <name> ...  start `claude` on that account from any terminal
+
+<name> is `default` for ~/.claude, otherwise the part after `~/.claude-` (work -> ~/.claude-work).
+
+Why this exists: Claude Code keeps one login per config folder, and CLAUDE_CONFIG_DIR picks
+the folder. A VS Code profile can set that variable in its own settings, so "which account"
+becomes "which profile", and VS Code already remembers a profile per folder. Nothing here is
+stored by this script: the status is read from the folders and VS Code's own files every time.
+
+What a profile gets (written to that profile's settings.json):
+  claudeCode.environmentVariables   CLAUDE_CONFIG_DIR for the Claude panel
+  terminal.integrated.env.<os>      the same for `claude` typed in the VS Code terminal
+"""
+import argparse, glob, json, os, re, shutil, subprocess, sys
+from concurrent.futures import ThreadPoolExecutor
+
+HOME = os.path.expanduser("~")
+DEFAULT_PROFILE = "__default__profile__"
+ENV_KEY = "claudeCode.environmentVariables"
+TERM_KEY = "terminal.integrated.env." + {"darwin": "osx", "win32": "windows"}.get(sys.platform, "linux")
+
+
+def me():
+    pointer = os.path.join(HOME, ".claude-kit/scripts/claude-switcher")
+    same = os.path.exists(pointer) and os.path.samefile(pointer, __file__)
+    return tilde(pointer if same else os.path.abspath(__file__))
+
+
+def tilde(path):
+    return "~" + path[len(HOME):] if path == HOME or path.startswith(HOME + os.sep) else path
+
+
+def account_dir(name):
+    return os.path.join(HOME, ".claude" if name == "default" else f".claude-{name}")
+
+
+def account_name(path):
+    base = os.path.basename(path.rstrip("/"))
+    return "default" if base == ".claude" else base[len(".claude-"):]
+
+
+def is_account(path):
+    # ~/.claude-kit, ~/.claude-chrome and friends share the prefix but hold neither file.
+    return os.path.isdir(path) and any(os.path.exists(os.path.join(path, f)) for f in (".claude.json", "settings.json"))
+
+
+def accounts():
+    found = [p for p in sorted(glob.glob(os.path.join(HOME, ".claude-*"))) if is_account(p)]
+    return [os.path.join(HOME, ".claude")] + found
+
+
+def claude_bin():
+    found = shutil.which("claude")
+    if found:
+        return found
+    # A machine with only the VS Code extension still has the binary inside it.
+    bundled = sorted(glob.glob(os.path.join(HOME, ".vscode/extensions/anthropic.claude-code-*/resources/native-binary/claude")))
+    return bundled[-1] if bundled else None
+
+
+def env_for(path):
+    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+    if account_name(path) != "default":
+        env["CLAUDE_CONFIG_DIR"] = path
+    return env
+
+
+def signed_in(path):
+    """(email, plan) for an account folder; ("", "") when nobody is signed in.
+
+    Asks the CLI, because .claude.json can still name an account whose login is gone.
+    Falls back to the file when there is no CLI to ask.
+    """
+    cli = claude_bin()
+    if cli:
+        try:
+            out = subprocess.run([cli, "auth", "status"], env=env_for(path), cwd=HOME,
+                                 capture_output=True, text=True, timeout=30).stdout
+            s = json.loads(out)
+            return (s.get("email") or "", s.get("subscriptionType") or "") if s.get("loggedIn") else ("", "")
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
+    conf = os.path.join(path, ".claude.json") if account_name(path) != "default" else os.path.join(HOME, ".claude.json")
+    try:
+        return json.load(open(conf)).get("oauthAccount", {}).get("emailAddress", ""), ""
+    except (OSError, ValueError):
+        return "", ""
+
+
+def vscode_user_dir():
+    if os.environ.get("VSCODE_USER_DIR"):          # for tests, and for VS Code Insiders / VSCodium
+        return os.environ["VSCODE_USER_DIR"]
+    if sys.platform == "darwin":
+        return os.path.join(HOME, "Library/Application Support/Code/User")
+    return os.path.join(os.environ.get("APPDATA", os.path.join(HOME, ".config")), "Code/User")
+
+
+def read_settings(path):
+    """dict, {} when the file is missing, None when it has comments and cannot be edited safely."""
+    try:
+        return json.load(open(path))
+    except FileNotFoundError:
+        return {}
+    except ValueError:
+        return None
+
+
+def profiles():
+    """Every VS Code profile: name, settings path, the account folder it uses, its folders."""
+    user = vscode_user_dir()
+    try:
+        store = json.load(open(os.path.join(user, "globalStorage/storage.json")))
+    except (OSError, ValueError):
+        store = {}
+    folders = {}
+    for uri, pid in (store.get("profileAssociations", {}).get("workspaces") or {}).items():
+        if uri.startswith("file://"):
+            from urllib.parse import unquote
+            folders.setdefault(pid, []).append(tilde(unquote(uri[len("file://"):])))
+    out = [{"name": "Default", "id": DEFAULT_PROFILE, "settings": os.path.join(user, "settings.json")}]
+    for p in store.get("userDataProfiles") or []:
+        out.append({"name": p["name"], "id": p["location"],
+                    "settings": os.path.join(user, "profiles", p["location"], "settings.json")})
+    for p in out:
+        s = read_settings(p["settings"])
+        p["unreadable"] = s is None
+        s = s or {}
+        panel = next((v.get("value") for v in s.get(ENV_KEY) or [] if v.get("name") == "CLAUDE_CONFIG_DIR"), None)
+        p["dir"] = os.path.expanduser(panel) if panel else os.path.join(HOME, ".claude")
+        p["terminal"] = (s.get(TERM_KEY) or {}).get("CLAUDE_CONFIG_DIR")
+        p["wrapper"] = s.get("claudeCode.claudeProcessWrapper")
+        p["folders"] = sorted(folders.get(p["id"], []))
+    return out
+
+
+def cmd_status(_args):
+    dirs, profs = accounts(), profiles()
+    with ThreadPoolExecutor() as pool:
+        who = dict(zip(dirs, pool.map(signed_in, dirs)))
+    here = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
+    problems, notes = [], []
+
+    print("Claude accounts on this machine\n")
+    for d in dirs:
+        name, (email, plan) = account_name(d), who[d]
+        mark = "   <- this session" if os.path.realpath(d) == os.path.realpath(here) else ""
+        print(f"{name}  ({tilde(d)}){mark}")
+        print(f"    signed in:  {email + (f'  ({plan})' if plan else '') if email else 'nobody'}")
+        if not email:
+            problems.append(f"{name}: nobody is signed in. In a terminal (not the VS Code panel): {me()} login {name}")
+        mine = [p for p in profs if os.path.realpath(p["dir"]) == os.path.realpath(d)]
+        for p in mine:
+            if p["id"] == DEFAULT_PROFILE:
+                where = "every folder not tied to another profile"
+            else:
+                where = ", ".join(p["folders"]) or "no folder opened in it yet"
+            print(f"    VS Code:    profile \"{p['name']}\"  ->  {where}")
+            if p["id"] != DEFAULT_PROFILE and not p["folders"]:
+                notes.append(f"profile \"{p['name']}\" has no folder yet: open the project folder, run "
+                             f"'Profiles: Switch Profile' -> {p['name']}, then 'Developer: Reload Window'.")
+            if name != "default" and p["terminal"] != p["dir"] and not p["wrapper"]:
+                notes.append(f"profile \"{p['name']}\": `claude` typed in the VS Code terminal uses the default "
+                             f"account. Fix: {me()} add {name} --profile \"{p['name']}\"")
+        if not mine:
+            print(f"    VS Code:    no profile uses it (terminal only: {me()} run {name})")
+        link = os.path.join(d, "projects")
+        if os.path.islink(link):
+            print(f"    history:    shared with {account_name(os.path.dirname(os.path.realpath(link)))}")
+        print()
+
+    for p in profs:
+        if not os.path.isdir(p["dir"]):
+            problems.append(f"profile \"{p['name']}\" points at {tilde(p['dir'])}, which does not exist.")
+    seen = {}
+    for d in dirs:
+        if who[d][0]:
+            seen.setdefault(who[d][0], []).append(account_name(d))
+    for email, names in seen.items():
+        if len(names) > 1:
+            problems.append(f"{email} is signed in to {' and '.join(names)}. One of them was probably meant for "
+                            f"another account (the VS Code panel's login can land in the wrong folder).")
+    for p in profs:
+        if p["unreadable"]:
+            notes.append(f"profile \"{p['name']}\": its settings.json has comments, so which account it uses "
+                         f"could not be read (shown as default).")
+    wrappers = sorted({p["wrapper"] for p in profs if p["wrapper"]})
+    if wrappers:
+        notes.append(f"a process wrapper is set ({', '.join(tilde(w) for w in wrappers)}). It may pick accounts by "
+                     f"folder on its own; this script does not manage it.")
+
+    if problems:
+        print("Needs attention:")
+        for line in problems:
+            print(f"  - {line}")
+    if notes:
+        print("Notes:")
+        for line in notes:
+            print(f"  - {line}")
+    if not problems and not notes:
+        print("Nothing needs attention.")
+
+
+def point_profile(profile_name, path):
+    """Make a VS Code profile use an account folder. Returns a one-line result."""
+    prof = next((p for p in profiles() if p["name"].lower() == profile_name.lower()), None)
+    if not prof:
+        return (f"[todo]  VS Code has no profile named \"{profile_name}\". Create it: 'Profiles: Create Profile', "
+                f"name it exactly \"{profile_name}\", copy from the profile you normally use. Then run this again.")
+    s = read_settings(prof["settings"])
+    if s is None:
+        return (f"[manual] {prof['settings']} has comments, so it was left alone. Add by hand: "
+                f"\"{ENV_KEY}\": [{{\"name\": \"CLAUDE_CONFIG_DIR\", \"value\": \"{path}\"}}] and "
+                f"\"{TERM_KEY}\": {{\"CLAUDE_CONFIG_DIR\": \"{path}\"}}")
+    # Other variables in either setting belong to the user; only CLAUDE_CONFIG_DIR is ours.
+    panel = [v for v in s.get(ENV_KEY) or [] if v.get("name") != "CLAUDE_CONFIG_DIR"]
+    panel.append({"name": "CLAUDE_CONFIG_DIR", "value": path})
+    term = dict(s.get(TERM_KEY) or {}, CLAUDE_CONFIG_DIR=path)
+    if s.get(ENV_KEY) == panel and s.get(TERM_KEY) == term:
+        return f"[ok]    VS Code profile \"{prof['name']}\" uses {tilde(path)}"
+    s[ENV_KEY], s[TERM_KEY] = panel, term
+    os.makedirs(os.path.dirname(prof["settings"]), exist_ok=True)
+    with open(prof["settings"], "w") as f:
+        json.dump(s, f, indent=4, ensure_ascii=False)
+        f.write("\n")
+    return f"[add]   VS Code profile \"{prof['name']}\" now uses {tilde(path)} (reload its windows)"
+
+
+def cmd_add(args):
+    name = args.name
+    if name == "default" or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+        sys.exit("Pick a short lowercase name (letters, digits, dashes), e.g. work. `default` is ~/.claude itself.")
+    path = account_dir(name)
+    if os.path.lexists(path) and not is_account(path):
+        sys.exit(f"{tilde(path)} exists and is not a Claude account folder. Pick another name.")
+
+    source = account_dir(args.share_history or args.copy_settings or "default")
+    if (args.share_history or args.copy_settings) and not is_account(source):
+        sys.exit(f"No account at {tilde(source)}. Run `{os.path.basename(__file__)}` to see the ones that exist.")
+    existed = is_account(path)
+    os.makedirs(path, exist_ok=True)
+    settings = os.path.join(path, "settings.json")
+    if not os.path.exists(settings):
+        if os.path.exists(os.path.join(source, "settings.json")):
+            shutil.copy(os.path.join(source, "settings.json"), settings)
+        else:
+            open(settings, "w").write("{}\n")
+    print(f"[{'ok' if existed else 'add'}]    account folder {tilde(path)}")
+
+    if args.share_history:
+        link, target = os.path.join(path, "projects"), os.path.join(source, "projects")
+        os.makedirs(target, exist_ok=True)
+        if os.path.islink(link) and os.path.realpath(link) == os.path.realpath(target):
+            print(f"[ok]    session history shared with {args.share_history}")
+        elif os.path.lexists(link):
+            # Sessions already written here would vanish behind a link; merging is the user's call.
+            print(f"[manual] {tilde(link)} already holds sessions. Move them into {tilde(target)}, "
+                  f"delete the folder, then run this again.")
+        else:
+            os.symlink(target, link)
+            print(f"[add]   session history shared with {args.share_history}")
+
+    profile = args.profile or name
+    print(point_profile(profile, path))
+    profile = next((p["name"] for p in profiles() if p["name"].lower() == profile.lower()), profile)
+    email, _ = signed_in(path)
+    cmd = me()
+    print("\nNext:")
+    if email:
+        print(f"  - signed in as {email}; nothing to do there.")
+    else:
+        print(f"  - sign in from Terminal (not the VS Code panel, whose login can land in the wrong folder):\n"
+              f"      {cmd} login {name}")
+    print(f"  - in the PROJECT's VS Code window: 'Profiles: Switch Profile' -> {profile}, then 'Developer: Reload Window'.\n"
+          f"  - check: {cmd}")
+
+
+def cmd_login(args):
+    path, cli = account_dir(args.name), claude_bin()
+    if not is_account(path):
+        sys.exit(f"No account at {tilde(path)}. Create it first: {me()} add {args.name}")
+    if not cli:
+        sys.exit("The `claude` command is not installed. Install the Claude Code CLI first.")
+    os.chdir(HOME)
+    os.execve(cli, [cli, "auth", "login"], env_for(path))
+
+
+def cmd_run(args):
+    path, cli = account_dir(args.name), claude_bin()
+    if not is_account(path):
+        sys.exit(f"No account at {tilde(path)}. Run `{os.path.basename(__file__)}` to see the ones that exist.")
+    if not cli:
+        sys.exit("The `claude` command is not installed. Install the Claude Code CLI first.")
+    os.execve(cli, [cli] + args.rest, env_for(path))
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="claude-switcher", description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd")
+    sub.add_parser("status")
+    add = sub.add_parser("add")
+    add.add_argument("name")
+    add.add_argument("--profile")
+    add.add_argument("--share-history", metavar="ACCOUNT")
+    add.add_argument("--copy-settings", metavar="ACCOUNT")
+    sub.add_parser("login").add_argument("name")
+    run = sub.add_parser("run")
+    run.add_argument("name")
+    run.add_argument("rest", nargs=argparse.REMAINDER)
+    args = ap.parse_args()
+    {"add": cmd_add, "login": cmd_login, "run": cmd_run}.get(args.cmd, cmd_status)(args)
+
+
+if __name__ == "__main__":
+    main()

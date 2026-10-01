@@ -2,6 +2,7 @@
 .claude/skills/brain
 .claude/skills/brainstorm
 .claude/skills/bridge
+.claude/skills/claude-switcher
 .claude/skills/clear-cache
 .claude/skills/commit
 .claude/skills/cto
