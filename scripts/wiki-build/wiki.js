@@ -1,12 +1,8 @@
 // The plain wiki renderer's page script: mobile drawer, sidebar collapse (+ Cmd/Ctrl+B), search,
-// sidebar accordions, and restricted folders' extra menu. Each page sets window.WIKI first:
-//   root        "../" per folder level, so links written from the wiki root work in any folder
-//   privateNav  "all" = ask the site's worker for restricted groups + search entries;
-//               "search" = on a restricted page (its groups are already in the sidebar), search only;
-//               null = the wiki has no restricted folders
+// and sidebar accordions. Each page sets window.WIKI first:
+//   root  "../" per folder level, so links written from the wiki root work in any folder
 (function () {
-  const { root: ROOT, privateNav } = window.WIKI;
-  const CHEVRON = '<svg class="nav-project-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>';
+  const { root: ROOT } = window.WIKI;
   const html = document.documentElement;
   const toggle = document.querySelector('.nav-toggle');
   const sidebar = document.getElementById('sidebar');
@@ -46,10 +42,9 @@
   });
 
   // Search. The index lives in search.json, fetched once, the first time someone uses the search box,
-  // so pages stay small. Restricted entries arrive separately from the worker (below).
+  // so pages stay small.
   const searchInput = document.getElementById('search');
   const searchResults = document.getElementById('search-results');
-  const extraSearch = [];
   let searchIndex = null;
   let loading = null;
   let focusIdx = -1;
@@ -79,7 +74,7 @@
     if (q.length < 2) { searchResults.classList.remove('open'); return; }
     if (!searchIndex) await loadIndex();
     if (searchInput.value.trim().toLowerCase() !== q) return; // typing moved on while the index loaded
-    const hits = searchIndex.concat(extraSearch)
+    const hits = searchIndex
       .filter(p => p.title.toLowerCase().includes(q) || p.text.includes(q))
       .slice(0, 8);
     searchResults.innerHTML = hits.length
@@ -109,7 +104,7 @@
     items.forEach((el, i) => el.classList.toggle('focused', i === focusIdx));
   });
 
-  // Project groups accordion, delegated so groups added after load work too.
+  // Project groups accordion.
   sidebar.addEventListener('click', e => {
     const btn = e.target.closest('.nav-project-toggle');
     if (!btn) return;
@@ -117,28 +112,6 @@
     btn.setAttribute('aria-expanded', String(!expanded));
     btn.nextElementSibling.hidden = expanded;
   });
-
-  // Restricted folders: the site's worker answers this only for readers on a restricted folder's
-  // allow list. Everyone else gets 404, and nothing is added.
-  if (privateNav) {
-    fetch(ROOT + 'private/nav.json', { credentials: 'same-origin', redirect: 'manual', cache: 'no-store' })
-      .then(r => (r.ok && (r.headers.get('content-type') || '').includes('json')) ? r.json() : null)
-      .then(extra => {
-        if (!extra) return;
-        extraSearch.push(...extra.search);
-        if (privateNav !== 'all') return;
-        for (const g of extra.groups) {
-          const div = document.createElement('div');
-          div.className = 'nav-project';
-          div.innerHTML = '<button class="nav-project-toggle" aria-expanded="true">' + CHEVRON +
-            '<span>' + escapeHtml(g.name) + '</span></button><div class="nav-project-links">' +
-            g.links.map(l => '<a href="' + ROOT + l.href + '">' + escapeHtml(l.label) + '</a>').join('') +
-            '</div>';
-          sidebar.appendChild(div);
-        }
-      })
-      .catch(() => {});
-  }
 
   // Heading contents accordion.
   document.querySelectorAll('.toc-chevron').forEach(btn => {

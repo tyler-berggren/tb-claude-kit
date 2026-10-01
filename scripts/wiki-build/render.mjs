@@ -1,7 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { workerSource } from './worker.mjs';
 
 // Step 2 of the wiki build, the plain renderer: turns a bundle from parse.mjs into a static site.
 //
@@ -11,6 +10,9 @@ import { workerSource } from './worker.mjs';
 // page's headings, search), the page, a collapse button (+ Cmd/Ctrl+B) and a phone drawer. It is
 // deliberately plain and meant to stay that way; anything fancier belongs in a renderer of your own,
 // plugged in with kit.json "wiki.renderer" (see the kit README).
+//
+// Restricted folders (RESTRICTED.txt) are left out of the site altogether: showing a folder to some
+// readers and not others needs a server, which this renderer doesn't have.
 const SUPPORTED_FORMAT = 1;
 const here = dirname(fileURLToPath(import.meta.url));
 const [bundleArg, outArg] = process.argv.slice(2);
@@ -24,7 +26,8 @@ if (wiki.format !== SUPPORTED_FORMAT) {
 }
 const search = JSON.parse(readFileSync(join(bundleDir, 'search.json'), 'utf-8'));
 const hasProjects = wiki.nav.some(g => g.name);
-const hasRestricted = wiki.nav.some(g => g.restricted);
+const restrictedFolders = new Set(wiki.restricted.map(r => r.folder));
+const pages = wiki.pages.filter(p => !p.restricted);
 
 const escapeHtml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const chevron = cls => `<svg class="${cls}" width="${cls === 'toc-chevron-icon' ? 14 : 12}" height="${cls === 'toc-chevron-icon' ? 14 : 12}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${cls === 'toc-chevron-icon' ? 2 : 2.5}" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
@@ -69,10 +72,10 @@ function buildNav(page, root, tocHtml) {
     const link = `<a href="${root}${href}"${href === page.href ? ' class="active"' : ''}>${label}</a>`;
     return href === page.href && tocHtml ? link + '\n          ' + tocHtml : link;
   };
-  // Restricted groups show only on restricted pages; everyone else gets them from the worker.
+  // Restricted groups are left out, with their pages.
   // Groups start open so every page is in view; readers can collapse any of them.
   // A "###" group (it has `parent`) is drawn inside its "##" group, after that group's own links.
-  const shown = wiki.nav.filter(g => !g.restricted || page.restricted);
+  const shown = wiki.nav.filter(g => !g.restricted);
   const names = new Set(shown.map(g => g.name));
   const drawGroup = group => {
     const children = shown.filter(c => c.parent && c.parent === group.name).map(drawGroup);
@@ -85,7 +88,7 @@ function buildNav(page, root, tocHtml) {
           </div>
         </div>`;
   };
-  // A sub-group whose parent isn't shown here (e.g. a hidden restricted parent) is drawn on its own.
+  // A sub-group whose parent isn't shown here (e.g. a restricted parent) is drawn on its own.
   return shown.filter(g => !g.parent || !names.has(g.parent)).map(drawGroup).join('\n          ');
 }
 
@@ -97,7 +100,6 @@ function renderPage(page) {
   const nav = buildNav(page, root, tocHtml);
   // With project groups, Home's own headings would just repeat the group names.
   const indexToc = isIndex && !hasProjects ? tocHtml : '';
-  const privateNav = !hasRestricted ? null : page.restricted ? 'search' : 'all';
   const title = isIndex ? wiki.title : `${page.title} · ${wiki.title}`;
   const content = page.html.replace(/<\/h1>/, `</h1>\n        <div class="last-updated">Last updated ${formatDate(page.updated)}</div>`);
   return `<!DOCTYPE html>
@@ -135,7 +137,7 @@ function renderPage(page) {
       </article>
     </main>
   </div>
-  <script>window.WIKI = ${JSON.stringify({ root, privateNav })};</script>
+  <script>window.WIKI = ${JSON.stringify({ root })};</script>
   <script src="${root}wiki.js"></script>
 </body>
 </html>`;
@@ -147,11 +149,11 @@ const write = (rel, text) => {
   writeFileSync(dest, text);
 };
 
-for (const page of wiki.pages) {
+for (const page of pages) {
   write(page.href, renderPage(page));
   console.log(`  ${page.source} → ${page.href}`);
 }
-for (const img of wiki.assets) {
+for (const img of wiki.assets.filter(a => !restrictedFolders.has(a.split('/')[0]))) {
   mkdirSync(dirname(join(outDir, img)), { recursive: true });
   copyFileSync(join(bundleDir, 'files', img), join(outDir, img));
   console.log(`  ${img} (image)`);
@@ -167,24 +169,9 @@ if (wiki.redirects.length) {
   console.log(`  _redirects (${wiki.redirects.length} rules for pages moved into project folders)`);
 }
 
-// Restricted folders: the pages are published (a path-scoped Access app guards them) and the
-// worker serves their menus and search entries to the people on the allow list only.
-if (hasRestricted) {
-  if (!wiki.access) {
-    console.error('Restricted folders need Access settings: .claude/wiki-access.json ({ "team": ..., "auds": [...] }), or parse with --access <file>');
-    process.exit(1);
-  }
-  const privateGroups = wiki.nav.filter(g => g.restricted).map(g => {
-    const folder = g.links[0].href.split('/')[0];
-    return {
-      allow: wiki.restricted.find(r => r.folder === folder)?.allow ?? [],
-      group: { name: g.name, links: g.links },
-      search: search.filter(e => e.restricted && e.href.startsWith(folder + '/')).map(withoutFlag),
-    };
-  });
-  const redirectMap = Object.fromEntries(wiki.redirects.map(r => [r.from, r.to]));
-  write('_worker.js', workerSource(redirectMap, privateGroups, wiki.access));
-  console.log(`  _worker.js (serves /private/nav.json for: ${privateGroups.map(g => `${g.group.name} → ${g.allow.join(', ')}`).join('; ')})`);
+const leftOut = wiki.pages.length - pages.length;
+if (leftOut) {
+  console.warn(`  Left out ${leftOut} pages in restricted folders (${[...restrictedFolders].join(', ')}): the plain renderer doesn't publish them.`);
 }
 
-console.log(`\nBuilt ${wiki.pages.length} pages → ${outDir}`);
+console.log(`\nBuilt ${pages.length} pages → ${outDir}`);

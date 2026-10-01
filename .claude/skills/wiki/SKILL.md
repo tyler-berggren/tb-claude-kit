@@ -125,10 +125,11 @@ a renderer turns the bundle into the site. The default is the kit's plain render
 plug in its own with `kit.json` `wiki.renderer` — a command that is given the bundle directory and the output
 directory. The bundle format is documented in the kit README ("wiki.json format").
 
-A folder containing `RESTRICTED.txt` (lines of `allow: person@example.com`) is kept out of the shared sidebar,
-search and Home page, and is served only to the people it lists. That needs the site's Cloudflare Access
-settings in `.claude/wiki-access.json` (`{ "team": "https://<team>.cloudflareaccess.com", "auds": [...] }`),
-or a file passed with `--access`.
+A folder containing `RESTRICTED.txt` (lines of `allow: person@example.com`) is for those readers only. The plain
+renderer leaves it out of the site altogether and says how many pages it skipped; a project's own renderer may
+serve it to the people listed, using the allow lists and the Cloudflare Access settings the bundle carries
+(`.claude/wiki-access.json`: `{ "team": "https://<team>.cloudflareaccess.com", "auds": [...] }`, or a file passed
+with `--access`).
 
 ### Procedure
 

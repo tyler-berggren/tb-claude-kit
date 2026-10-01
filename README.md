@@ -1401,8 +1401,7 @@ Every `/wiki` invocation runs a hybrid procedure:
 The site has in-browser search, per-page contents, a sidebar grouped by the index's `## Headings` with
 `### Headings` nested inside them (groups start expanded), and a bottom-left button (or Cmd+B / Ctrl+B) that
 collapses the sidebar on desktop. It tells search engines not to index it. A top-level folder holding
-`RESTRICTED.txt` is shown only to the people it lists, using the Access settings in `.claude/wiki-access.json`
-(see Configuration for what that does and does not protect).
+`RESTRICTED.txt` is left out of the site by the plain renderer (see Configuration).
 
 Deploying needs Cloudflare credentials in `.env` (`CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN`), read
 through `oprun` when the project keeps secrets in 1Password. The Pages project is created on the first deploy.
@@ -1442,9 +1441,8 @@ which parses into a temporary bundle and renders it. To keep the bundle, run the
 - **`files/`** — the images, at their `assets` paths.
 
 A renderer is run as `<wiki.renderer> <bundle-dir> <out-dir>` from the project root, and must write a complete
-site into `<out-dir>`. What it does with restricted pages is its responsibility. The plain renderer publishes
-them (path-scoped Access apps guard them) and writes a `_worker.js` that shows their menus only to the people
-on the allow list.
+site into `<out-dir>`. What it does with restricted pages is its responsibility. The plain renderer leaves
+them out of the site altogether.
 
 ### Style guide
 
@@ -1478,10 +1476,12 @@ The style guide itself is organic — it travels with the project and evolves as
 - **`title`** — the wiki's name: the top of the sidebar and the end of every tab title (default: the index's first heading)
 - **`renderer`** — a command that renders the parsed bundle instead of the plain renderer (see "wiki.json format")
 
-A top-level folder containing `RESTRICTED.txt` (one `allow: person@example.com` line per reader) is left out of
-the shared sidebar, search and Home page. Its menu and search entries are served only to the people it lists.
-**The pages themselves are still published**, so guard them with a path-scoped Cloudflare Access app on that
-folder, set up by hand. The site needs its Cloudflare Access settings, in `.claude/wiki-access.json`:
+A top-level folder containing `RESTRICTED.txt` (one `allow: person@example.com` line per reader) is for those
+readers only. **The plain renderer doesn't publish it at all**: its pages, images, menu and search entries are
+left out of the site, and the build says how many pages it skipped. Showing a folder to some readers and not
+others needs a server, so that is a job for a renderer of your own (`wiki.renderer`): the bundle carries each
+folder's allow list (`restricted[]`) and, when `.claude/wiki-access.json` exists, the site's Cloudflare Access
+settings (`access`) for it to check a reader against:
 
 ```json
 { "team": "https://<team>.cloudflareaccess.com", "auds": ["<Access application AUD tag>"] }
