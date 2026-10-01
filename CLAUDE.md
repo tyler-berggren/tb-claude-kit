@@ -10,11 +10,14 @@ This project uses Claude Code skills for structured workflows:
 - `/brain` — Project knowledge management (decisions, tasks, questions, insights). Single source of truth in `cowork/brain/BRAIN.db`.
 - `/brainstorm` — Conversational idea development. All outputs logged to brain DB with parent linking.
 - `/bridge` — Start artifact bridge server (port 4444) for HTML artifacts to read/write project files.
+- `/claude-switcher` — Several Claude accounts on one machine, picked by VS Code profile. Checks who is signed in where and which profile uses which account; `add <name>` sets up a new one.
 - `/clear-cache` — Measure and clear machine-wide dev caches (npm, pnpm, uv, pip, Homebrew, stale Puppeteer browsers). `report` measures only; `deep` offers costlier cleanups.
 - `/commit` — Stage all files and commit with auto-generated message.
 - `/cto` — Architecture observatory — scans codebase, maps components into SQLite, generates HTML with Mermaid C4 diagrams.
 - `/kill` — Kill dev processes (servers, watchers, bridge) without touching Claude Code.
 - `/look` — Inspect shared Chrome viewport via Puppeteer (DOM-first to diagnose; a screenshot to confirm a visual change landed).
+- `/parse` — Convert local documents (docx, pdf, xlsx, pptx…) to markdown via Firecrawl. Takes a file, a glob, or a directory.
+- `/pbar` — Live terminal progress display for a background job expected to run 5+ minutes. Claude starts it unprompted.
 - `/plan` — Multi-phased project planning with fresh-eyes reconciliation on every resume.
 - `/prune` — Review a repo's worktrees and recommend which to remove (merged, abandoned, stale); removes only what you pick. `report` changes nothing.
 - `/push` — Commit and push to remote.
@@ -22,6 +25,8 @@ This project uses Claude Code skills for structured workflows:
 - `/swarm` — Autonomous parallel plan execution. Setup phase resolves every human question and registers a unit graph in the brain; run phase dispatches worktree-isolated agents, reviews, merges, and reports.
 - `/vibe-audit` — Codebase health and security audit with self-learning pattern database.
 - `/video-editor` — Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption.
+- `/web` — Audit a static site's SEO/AEO assets (metadata, structured data, sitemap, robots, llms.txt, markdown mirrors) for being present, correct and current.
+- `/wiki` — Maintain an organic project wiki; `deploy` publishes it to Cloudflare Pages.
 
 ## Brain System
 
@@ -38,6 +43,7 @@ All project knowledge lives in `cowork/brain/BRAIN.db` — a SQLite database wit
 
 - **SessionStart:** Loads brain state (focus, tasks, questions, mantra) and last session's work into context. Recalculates tiers. Instructs Claude to review the last session and update the mantra if warranted.
 - **SessionEnd:** Records session end timestamp.
+- **PostToolUse (Bash):** After a background Bash call, reminds Claude to hand over a `/pbar` progress display.
 
 ### Mantra
 The mantra is Claude's self-authored evolving context — patterns, non-obvious knowledge, tricky areas, current momentum, and working assumptions that CLAUDE.md doesn't cover. It lives in three synced locations:

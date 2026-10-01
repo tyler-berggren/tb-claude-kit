@@ -3,10 +3,10 @@
 
   "kitVersion": 1,
 
-  "_note_mode": "outside = kit files are symlinks to your kit checkout, gitignored, never travel with the repo. inside = kit files are real files, tracked in git, travel with the repo. Choose inside if a machine without your kit checkout needs this repo to work.",
+  "_note_mode": "outside = kit files are symlinks to your kit checkout and are meant to stay out of git (install.sh prints the .gitignore lines and never writes them). inside = kit files are real files, tracked in git, travel with the repo. Choose inside if a machine without your kit checkout needs this repo to work.",
   "mode": "outside",
 
-  "_note_kitPath": "Optional override for where the kit lives. Resolution order: $TB_CLAUDE_KIT, then this key, then ~/.claude-kit. Leave unset unless this project needs a different checkout than the rest.",
+  "_note_kitPath": "Optional override for where the kit lives. Resolution order: $TB_CLAUDE_KIT, then this key, then ~/.claude-kit, then the folder install.sh is in. Leave unset unless this project needs a different checkout than the rest.",
   "kitPath": null,
 
   "_note_fork": "Paths this project owns outright. They EXIST here, but the kit never touches them: real files instead of symlinks in outside mode, skipped by drift detection in inside mode. Prefer the other lanes below — fork is a last resort for when kit behavior itself must change.",
@@ -45,6 +45,9 @@
     "author": null
   },
 
+  "_note_subtrees": "Folders that are also pushed to a repo of their own. `/commit sub <name>` and `/push sub <name>` push that entry's prefix to its remote and branch after committing. Each entry: prefix (the folder), remote (a git remote name), branch (default main). Example: { \"app\": { \"prefix\": \"app\", \"remote\": \"app\", \"branch\": \"main\" } }.",
+  "subtrees": {},
+
   "_note_secrets": "Which 1Password vault holds this project's secrets, for ~/.claude-kit/scripts/oprun. One read-only service account per vault (created by op-sa-bootstrap <vault>), token in the macOS Keychain as op-sa-<vault>, never exported globally. account is only used by op-sa-bootstrap to pick the 1Password account the vault lives in.",
   "secrets": {
     "vault": null,
@@ -55,7 +58,7 @@
   "plan": {
     "roots": ["cowork/plans"],
 
-    "_note_issues": "Tracker settings for /plan's epic and issue modes (PR-mode plans). publish: ahead = `/plan NNN epic` puts every slice on the tracker as a sub-issue before building starts; on-start (default) = the epic alone, and each slice's issue is created by `/plan NNN issue <slice>` when it starts. repo: the tracker repo when it is not this one. assignee and labels go on every issue created; neverLabels are labels the team's automation acts on (an agent queue, an auto-close rule) and are never applied. check: a command that lints a body file before posting, with {file} and {kind} (epic, issue, pr, comment) filled in. sweep: the prior-art sweep agent or script. Nothing is posted without the owner's go.",
+    "_note_issues": "Tracker settings for /plan's epic and issue modes (PR-mode plans). publish: ahead = `/plan NNN epic` puts every slice on the tracker as a sub-issue before building starts; on-start (default) = the epic alone, and each slice's issue is created by `/plan NNN issue <slice>` when it starts. repo: the tracker repo when it is not this one. assignee and labels go on every issue created; neverLabels are labels the team's automation acts on (an agent queue, an auto-close rule) and are never applied. check: a command that lints a body file before posting, with {file} and {kind} (epic, issue, pr, comment) filled in. sweep: the prior-art sweep agent or script. No issue is created and nobody is mentioned without the owner's go; refreshing the body of an existing issue does not wait.",
     "issues": {
       "publish": "on-start",
       "repo": null,
@@ -79,23 +82,45 @@
     "ignore": []
   },
 
-  "_note_wiki": "Configuration for /wiki. root is the wiki directory (default: wiki/). styleScaffold is a path to a STYLE.md template that /wiki init copies when creating a new wiki — lets an organization maintain a standard starting point while allowing per-project evolution. renderer is a command /wiki deploy uses to render the parsed wiki bundle instead of the kit's plain renderer; it runs from the project root with the bundle directory and the output directory appended (see the README's \"wiki.json format\"). All keys are optional.",
+  "_note_wiki": "Configuration for /wiki. root is the wiki directory (default: wiki/). styleScaffold is a path to a STYLE.md template that /wiki init copies when creating a new wiki — lets an organization maintain a standard starting point while allowing per-project evolution. pagesProject is the Cloudflare Pages project /wiki deploy publishes to (default: <repo-name>-wiki). title is the wiki's name, shown at the top of the sidebar and the end of every tab title (default: the index's first heading). renderer is a command /wiki deploy uses to render the parsed wiki bundle instead of the kit's plain renderer; it runs from the project root with the bundle directory and the output directory appended (see the README's \"wiki.json format\"). All keys are optional.",
   "wiki": {
     "root": "wiki",
     "styleScaffold": null,
+    "pagesProject": null,
+    "title": null,
     "renderer": null
   },
 
-  "_note_swarm": "Configuration for /swarm autonomous plan execution. maxAgents caps how many unit agents run concurrently during a swarm run (setup can override per-run with user approval). checks is the project's verification command list — reviewer agents run these verbatim on every unit; when absent, swarm setup determines the commands itself and records them in SWARM.md.",
+  "_note_swarm": "Configuration for /swarm autonomous plan execution. maxAgents caps how many unit agents run concurrently during a swarm run (setup can override per-run with user approval). checks is the project's verification command list — reviewer agents run these verbatim on every unit; when absent, swarm setup determines the commands itself and records them in SWARM.md. Agents always verify UI by code first and in a headless browser of their own second; none of them verifies in a headed browser. The rest matter for PR-mode plans in a team repo. ship: ready = the owner has pre-approved ready PRs; draft = every PR opens as a draft; ask (default) = the ship command asks, so setup settles it once. look: none (default) = user-facing slices ship without waiting for the owner; batch = they park for one batch look; per-slice = each parks and notifies on its own. review: the team's own review tool, run against a pushed PR (<pr> is filled in); it replaces the swarm's reviewer agent. watch: the project's CI watcher, which reruns a red caused by CI's own infrastructure before any fix agent is sent. resources: path globs mapped to tags for shared local state (a fixed-port dev server, the one local database, the package install); two units holding the same tag never run at once.",
   "swarm": {
     "maxAgents": 6,
-    "checks": []
+    "checks": [],
+    "ship": "ask",
+    "look": "none",
+    "review": null,
+    "watch": null,
+    "resources": {},
+
+    "_note_worktree": "Only when the code lives in a checkout OUTSIDE the session's repo (a sibling clone, a symlink, a submodule). create and remove are the commands that make and delete a unit's worktree there, with <slug> and <branch> filled in; put it at .claude/worktrees/<slug> in that repo and include the repo's own bootstrap in create. pool is for a big repository: units lease a slot that was bootstrapped once instead of creating a worktree each. Its acquire, release and list commands get <lane>, <branch>, <base> and <slot> filled in, and size is the number of slots (the concurrency cap plus two is a good start). Example: { \"create\": \"git -C ../app worktree add .claude/worktrees/<slug> -b <branch> origin/main\", \"remove\": \"git -C ../app worktree remove .claude/worktrees/<slug>\", \"pool\": { \"acquire\": \"scripts/slot.sh acquire <lane> <branch> <base>\", \"release\": \"scripts/slot.sh release <slot>\", \"list\": \"scripts/slot.sh list\", \"size\": 8 } }.",
+    "worktree": null,
+
+    "_note_reviewStack": "How /swarm review serves the owner's look. Every key is optional; without them the review asks once how to start an app. <app> and <checkout> are filled in. shared: a command that exits 0 when the stack every app sits behind (a proxy, an auth service) is up. sharedStart: how to start it when it is down. serve: the long-running command that serves one app from one checkout. port: a command printing the port that app listens on. tag: the resource tag a served app holds, matching swarm.resources (e.g. port:<app>). holdAlso: tags the whole review holds, such as the local database its fixtures live in. restore: path globs the dev server rewrites in a checkout, restored when a server stops. logs: the directory server logs go to.",
+    "reviewStack": {
+      "shared": null,
+      "sharedStart": null,
+      "serve": null,
+      "port": null,
+      "tag": null,
+      "holdAlso": [],
+      "restore": [],
+      "logs": null
+    }
   },
 
-  "_note_sqlite_tracking": "SQLite databases that get NDJSON snapshot files on /commit, using the AirSQLite sidecar layout: {dbname}.airsqlite/{table}.snapshot.ndjson. Each entry names a .db file and optionally which tables to track (default: all non-internal tables). One JSON line per row (including _rowid), sorted by rowid. Regenerated before staging, not as a git hook.",
+  "_note_sqlite_tracking": "SQLite databases that get NDJSON snapshot files on /commit, using the AirSQLite sidecar layout: {dbname}.airsqlite/{table}.snapshot.ndjson. Each entry is { \"db\": \"path/to/file.db\", \"tables\": [...], \"exclude\": [...] }: db is the .db file, tables is which tables to track (default: all non-internal tables), and exclude is table-name globs to leave out, such as logs_fts*. One JSON line per row (including _rowid), sorted by rowid. Regenerated before staging, not as a git hook.",
   "sqlite_tracking": [],
 
-  "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
+  "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Skills that read one: 1password, brain, brainstorm, bridge, claude-switcher, clear-cache, commit, cto, kill, look, parse, pbar, plan, prune, push, research, swarm, vibe-audit, video-editor, web, wiki. rules.plan is where a team repo's ship command and policy, branch conventions, priority tiers and CI path map go; rules.look names the base URL and how a fresh headless profile signs in. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
   "rules": {
     "push": "Example: if the post-commit hook reports undeployed worker changes, ask before pushing — never auto-deploy."
   }
