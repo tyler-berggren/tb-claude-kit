@@ -570,6 +570,22 @@ An interrupted run. Record this session's name as `swarm_runs.orchestrator` (a r
 
 ---
 
+## Machine budget
+
+A swarm shares one machine with the owner, who is working on it, and with any other session running there. Left alone, every unit's checks assume they have the whole machine: a test runner starts a worker per core, a check script fans out across the cores, each unit starts its own dev server and browser. Six units doing that at once ask for several times the cores there are, and the machine stalls for everyone. So a run keeps to a budget.
+
+- **Fewer builders than cores.** `swarm.maxAgents` caps the units building at once. The default is 4. Agents that are reading and editing are cheap; their checks are not.
+- **Heavy steps take turns.** A heavy step is anything that loads the machine for more than a moment: a check or test run, a type-check or build, a cold dev-server start, a browser capture run. Every heavy step goes through the gate:
+
+  ```bash
+  <this skill's folder>/machine.sh run --label "<unit>: <what>" -- <command> [args…]
+  ```
+
+  The gate lets `swarm.machine.heavySlots` steps run at once (default 2), machine-wide, across every swarm on the machine. A step waits its turn, then runs at lower priority with the project's worker caps (`swarm.machine.env`) in its environment, and exits with the command's own code. A holder that died gives its slot back, and a step that has waited `waitMax` seconds runs anyway, so the gate cannot stall a run. Never wrap a long-running server in the gate: start it through the gate only when the start itself is the heavy part and the command returns, otherwise start it outside and let its first compile be the cost.
+- **Run only the checks the change can affect.** Related tests, the type-check of the packages touched, the guards the diff can trip. A whole package suite, or the whole repository's, belongs to CI when the project has one; a unit runs one locally only when the project's checks say so.
+- **Clean up what you started.** Before reporting, a unit stops every server, watcher and browser it started, by process id or port. After each report the orchestrator sweeps the unit's worktree (`machine.sh sweep <worktree>`), which stops anything still running from inside it, and says so in the run log when it found something.
+- **A stalled machine is a finding.** When the load stays far above the core count, or the session restarts, the orchestrator lowers `maxAgents` for the rest of the run, records it as an amendment, and puts the cause it found in the report.
+
 ## Run rules (the agent protocol)
 
 Copied into SWARM.md at setup; binding for every spawned agent.
@@ -579,6 +595,7 @@ Copied into SWARM.md at setup; binding for every spawned agent.
 - **The one exception is a critical issue:** an action not pre-approved in SWARM.md that is irreversible or outward-facing (deleting shared data, notifying people, spending money, touching production), a security, privacy or permissions exposure, or reversing a decision the owner explicitly made. Do not take it and do not wait: finish what does not depend on it, and report it under `Critical`. The orchestrator parks the unit and notifies the owner. When unsure, it is not critical.
 - **Verify UI in order, then stop.** (1) Code: types, tests, the logic that renders it. (2) Only if code cannot settle it, your own headless browser (`/look`, **Headless**): the page loads without errors, the changed control is there, the interaction works, and nothing overflows at a phone width. (3) If neither can verify it cheaply, record it under `Unverified` with what you could not check and why, and move on. Do not fight a page that will not render headless. Never verify in a headed browser: do not drive the owner's shared window, and do not launch a visible browser of your own.
 - **Stay in your territory.** Read anything; edit only your unit's files. Never edit the plan file, `cowork/**` (brain, plans, swarm files), or `.claude/**` — your worktree's copies would conflict on merge. The orchestrator owns all bookkeeping.
+- **Stay inside the machine budget.** Run every heavy step (a check, a test run, a type-check or build, a browser capture run) through the gate, `<the swarm skill's folder>/machine.sh run -- <command>`; your prompt gives the full path. Run only the checks your change can affect: never a whole suite the project's checks do not ask for. Before you report, stop every server, watcher and browser you started, by process id or port, never by a pattern that could match another unit's (see **Machine budget**).
 - **Work only in your own worktree.** Your first step is creating your assigned branch there from the integration sha in your prompt (`git switch -c <branch> <sha>`). Never `cd` into, check out in, or write to the primary checkout (the owner's IDE) or another unit's worktree. The brain's absolute path is for reading `swarm_holds`, nothing else.
 - **Commit your work** on your assigned branch, in coherent chunks with real messages. Never stage `cowork/` paths.
 - **Verify before reporting done.** Run your brief's verification criteria and the project's checks yourself. Report honestly: what passed, what you couldn't verify, what you decided, what a human should look at. The structured final report is your only channel out, and it has five sections:
@@ -611,6 +628,7 @@ Orchestrator-side:
   the run's watcher.
 - **Re-read the plan from disk before every write.** The owner can edit it at any time, most often by marking review items, and a write from a stale copy erases their marks.
 - **Honour review holds yourself.** A database reset, a check that starts a server, a batch step: check `swarm_holds` first, exactly as units do.
+- **Keep the run inside the machine budget** (**Machine budget**): dispatch no more than `swarm.maxAgents` builders, put the gate's full path in every dispatch, sweep each unit's worktree after its report, and route your own heavy steps through the gate too.
 - **Failures degrade, never halt.** One failed unit skips its dependents and the rest of the swarm continues. The report tells the user what's left.
 
 ---
@@ -779,13 +797,14 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 
 ## Project overrides
 
-`.claude/kit.json` — `swarm.maxAgents` (default 6) caps concurrency; `swarm.checks` is the project's verification command list (reviewers run these verbatim; when absent, setup determines and records them in SWARM.md); `rules."swarm"` applies as an additional instruction. For PR-mode plans (see **Team repositories**):
+`.claude/kit.json` — `swarm.maxAgents` (default 4) caps how many units build at once (**Machine budget**); `swarm.checks` is the project's verification command list (reviewers run these verbatim; when absent, setup determines and records them in SWARM.md); `rules."swarm"` applies as an additional instruction. For PR-mode plans (see **Team repositories**):
 
 | Key | What it holds |
 |---|---|
 | `swarm.worktree.pool` | `{ "acquire": "<command>", "release": "<command>", "list": "<command>", "size": <n> }` — the slot pool (**Where the code lives**); `<lane>`, `<branch>`, `<base>` and `<slot>` are substituted, and `acquire` prints the slot's path on its last line |
 | `swarm.watch` | The project's CI watcher: what reruns infrastructure reds, and where it logs; the orchestrator dispatches no fix for a red the watcher will rerun |
 | `swarm.worktree` | `{ "create": "<command>", "remove": "<command>" }` for a target checkout outside the session's repo; `<slug>` and `<branch>` are substituted. Put the worktree at `.claude/worktrees/<slug>` in the target, and include the repo's own bootstrap in `create` |
+| `swarm.machine` | `{ "heavySlots": <n>, "nice": <0–19>, "waitMax": <seconds>, "env": { "<NAME>": "<value>" } }` — the machine budget (**Machine budget**): how many heavy steps run at once (default 2), their priority drop (default 10), how long one waits before running anyway (default 900), and worker caps exported to each (for example a test runner's maximum workers) |
 | `swarm.resources` | `{ "<path glob>": "<tag>" }` — shared local state a unit touching that path holds: a fixed-port dev server, the one local database, the package install |
 | `swarm.review` | The team's review tool, run against a pushed PR (`<pr>` is substituted); it replaces the swarm's reviewer agent |
 | `swarm.ship` | `ready` \| `draft` \| `ask` (default `ask`) — the owner's standing ship policy |
@@ -806,6 +825,7 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 | `logs` | The directory server logs go to |
 
 ```bash
-jq -r '.swarm.maxAgents // 6, ((.swarm.checks // []) | join(" && ")), (.swarm.ship // "ask"), (.swarm.look // "none"), (.rules."swarm" // empty)' .claude/kit.json 2>/dev/null
+jq -r '.swarm.maxAgents // 4, ((.swarm.checks // []) | join(" && ")), (.swarm.ship // "ask"), (.swarm.look // "none"), (.rules."swarm" // empty)' .claude/kit.json 2>/dev/null
 jq '.swarm.reviewStack // empty' .claude/kit.json 2>/dev/null
+jq '.swarm.machine // empty' .claude/kit.json 2>/dev/null
 ```

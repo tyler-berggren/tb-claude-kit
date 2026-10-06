@@ -93,8 +93,16 @@
 
   "_note_swarm": "Configuration for /swarm autonomous plan execution. maxAgents caps how many unit agents run concurrently during a swarm run (setup can override per-run with user approval). checks is the project's verification command list — reviewer agents run these verbatim on every unit; when absent, swarm setup determines the commands itself and records them in SWARM.md. Agents always verify UI by code first and in a headless browser of their own second; none of them verifies in a headed browser. The rest matter for PR-mode plans in a team repo. ship: ready = the owner has pre-approved ready PRs; draft = every PR opens as a draft; ask (default) = the ship command asks, so setup settles it once. look: none (default) = user-facing slices ship without waiting for the owner; batch = they park for one batch look; per-slice = each parks and notifies on its own. review: the team's own review tool, run against a pushed PR (<pr> is filled in); it replaces the swarm's reviewer agent. watch: the project's CI watcher, which reruns a red caused by CI's own infrastructure before any fix agent is sent. resources: path globs mapped to tags for shared local state (a fixed-port dev server, the one local database, the package install); two units holding the same tag never run at once.",
   "swarm": {
-    "maxAgents": 6,
+    "maxAgents": 4,
     "checks": [],
+
+    "_note_machine": "The machine budget for a run, so a swarm does not stall the machine it shares with you. maxAgents above caps the units building at once. heavySlots: how many heavy steps (a check, a test run, a build, a browser capture run) may run at once, across every swarm on the machine. nice: the priority drop each gets (0-19). waitMax: seconds a step waits for a slot before running anyway. env: variables exported to every heavy step, the place for worker caps, e.g. { \"VITEST_MAX_WORKERS\": \"3\" }. Units run heavy steps through the swarm skill's machine.sh.",
+    "machine": {
+      "heavySlots": 2,
+      "nice": 10,
+      "waitMax": 900,
+      "env": {}
+    },
     "ship": "ask",
     "look": "none",
     "review": null,
