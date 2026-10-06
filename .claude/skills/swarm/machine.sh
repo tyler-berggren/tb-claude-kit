@@ -24,7 +24,9 @@
 set -u
 
 here="$(cd "$(dirname "$0")" && pwd)"
-kit_json="${SWARM_KIT_JSON:-$here/../../kit.json}"
+# The skill folder is usually a symlink into the kit, so "$here/../.." would resolve inside the kit
+# checkout, not the project. Strip the last two path components as text instead.
+kit_json="${SWARM_KIT_JSON:-${here%/*/*}/kit.json}"
 lock_root="${SWARM_HEAVY_DIR:-${TMPDIR:-/tmp}/swarm-heavy-$(id -u)}"
 
 setting() { # setting <jq path> <default>
