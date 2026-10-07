@@ -1,7 +1,7 @@
 ---
 name: swarm
-description: Prep a plan for autonomous parallel execution, then run it with an orchestrated agent swarm. Phase is inferred from brain state — unregistered plan -> Setup, registered ready -> Run, running -> Resume. Also status / abort / report, and review — the owner's optional batch look from a parallel session while the run keeps going. Agents decide and continue; only critical issues park.
-argument-hint: "[plan ref | scope NNN | status | abort | report | review [plan ref]]"
+description: Prep a plan for autonomous parallel execution, then run it with an orchestrated agent swarm. Phase is inferred from brain state — unregistered plan -> Setup, registered ready -> Run, running -> Resume. A team-repository run ends at the push; `land` then follows its open pull requests to merged. Also status / abort / report, and review — the owner's optional batch look from a parallel session while the run keeps going. Agents decide and continue; only critical issues park.
+argument-hint: "[plan ref | scope NNN | status | abort | report | land [plan ref] | review [plan ref]]"
 ---
 
 ## Swarm State
@@ -21,6 +21,7 @@ Take a `/plan`-style plan file and complete it end-to-end without stopping — o
 | No `swarm_runs` row | **Setup** — decompose, resolve every open question with the user, register the swarm |
 | Row with `status = 'ready'` | **Run** — dispatch agents, review, merge, report |
 | Row with `status = 'running'` | **Resume** — reconcile live state, continue the run |
+| Row with `status = 'done'`, PR-mode, units still `shipped` or stacked | **Landing** — follow the open pull requests to merged (**Landing**); holds no builder slots |
 | Row with `status = 'done'` / `'aborted'`, unfinished units remain | Report the outcome, then offer **Remainder setup** — a new, smaller run over what's left |
 | Row with `status = 'done'`, everything merged | Report the outcome; a re-swarm requires the user to say so explicitly |
 
@@ -61,6 +62,7 @@ Optional argument: `$ARGUMENTS`
 - `status` → **Status flow** (read-only)
 - `abort` → **Abort flow**
 - `report` → print the most recent run's `REPORT.md` path and summarize it
+- `land [plan ref]` → **Landing**: follow a PR-mode run's open pull requests to merged, after the build run has ended. With no ref, every plan that has units still `shipped` or stacked
 - `review [plan ref]` → **Review flow**: the owner's optional batch look, run from a **parallel session** while the run keeps going. Never the orchestrator's own session
 - A plan ref (`021`, `mvp 001`, filename fragment, or full path) → resolve using the same rules as `/plan` (check `meta.plan_path` on brain tasks first, then scan roots; ask if ambiguous), then route by the table above
 - Empty → if exactly one run is `ready` or `running`, use it; otherwise list and ask
@@ -199,6 +201,13 @@ A **unit** is the work one agent completes in one worktree: one phase, several p
 3. **A unit should be completable in one agent session.** Split a phase that mixes two independent territories; merge trivial phases into a neighbor.
 4. Every unit gets: `depends_on` (unit keys — derived from real data/code dependencies, not plan numbering), `resources` (see below), `territory` (primary files/dirs it will edit — advisory, used for conflict forecasting), and its plan phases/items.
 5. **A PR-mode plan decomposes by slice and lane instead** — each slice is a unit with a `lane` and a `kind`, its `depends_on` taken from the plan's *waits on* line, and its resource tags from `swarm.resources`. See **Team repositories**.
+6. **A PR-mode plan keeps dependencies few.** Every *waits on* line costs a wait on the team's CI and review, so challenge each one at setup:
+   - a slice waits on another only when its code cannot compile or run without it, never because the plan lists it later;
+   - a chain small enough for one pull request is one slice;
+   - a shared change that many slices need goes first, alone, or is built expand–contract (the new form beside the old) so adopters do not wait on a deletion;
+   - what remains is stacked (**Team repositories**), and each surviving *waits on* says why in one clause.
+
+   Report how many slices are independent in the parallelism profile.
 
 **Resource tags** name shared mutable state *outside* git that the unit touches: `db:<name>` (a live database it migrates or rewrites), `deploy`, `tiles`, `dev-server`, or anything project-specific. Two units holding the same tag never run concurrently, even with disjoint code. Tag conservatively — a missing tag is a race, an extra tag is just lost parallelism.
 
@@ -352,6 +361,11 @@ split a slice's files across two agents. A slice may **stack** on its lane's pre
 (branch from that branch, in its own worktree) so the lane never stalls behind a review or CI; once the
 earlier slice's squash merge lands, the later one replays only its own commits
 (`git rebase --onto origin/<default> <earlier-branch-head>`, run in that slice's worktree).
+A dependent is **ready to build as soon as the slice it waits on is `shipped`**: it never waits for
+that pull request to merge. When it finishes building it checks the parent's pull request once. If the
+parent has merged, it replays onto the default branch and ships. If not, it stops there as
+`parked` with `result` beginning `stacked on <unit>`, hands its slot back, and **Landing** ships it
+when the parent merges. A stacked unit is not waiting on the owner and is never listed as a park.
 
 **Every unit carries a `kind`**, which says how its UI is verified. None of them waits for the owner:
 
@@ -428,18 +442,62 @@ them and asks (S3) only what they leave open:
    whose verdict the team's merge honours. It runs against the pushed head and replaces the
    swarm's reviewer agent for that unit; a second review would be duplicate spend. A blocking
    finding is fixed and re-reviewed, two cycles at most, then `failed`.
-5. **Watch CI; fix on red at once.** One watcher per run covers every open PR (`status =
-   'shipped'`, `pr` recorded); shipping agents end at the push and never wait on CI themselves.
+   **When `swarm.review` is `"team"`**, the team's bot reviews every pull request by itself once it
+   is open, and its verdict is what the merge honours. Then no review runs before the push and no
+   reviewer agent is spawned for the unit: the unit ships as soon as its checks pass, and a blocking
+   verdict reaches **Landing** like a red CI group. The project's rules name any class of slice that
+   still gets a review before it ships.
+5. **The build run ends at the push.** A shipping agent ends at the push and never waits on CI or
+   review, and neither does the run: once every unit is `shipped`, stacked, `parked`, `failed` or
+   `skipped`, the orchestrator finalizes (R4) and the builder slots are free for the next run. What
+   happens to the open pull requests after that is **Landing**'s job.
+6. **Landing watches CI and fixes on red at once.** One watcher covers every open PR (`status =
+   'shipped'`, `pr` recorded).
    **A red caused by the CI infrastructure** (a process killed for memory, a lost or hung machine,
    every failing test at 0–1 ms) is rerun first — by the project's watcher when `swarm.watch` names
    one — and gets a fix agent only if it repeats on the same head. When a CI group fails, push the fix as soon as it is ready — that run is already
    lost, and waiting only lets the default branch move under the PR. A PR the host reports as
    conflicting is re-synced by merging the default branch in, once reviewers have seen its
    history.
-6. **`merged` means the team merged it.** When the PR lands on the default branch, the lane's
-   next slice rebases (replaying only its own commits if it stacked) and continues.
+7. **`merged` means the team merged it.** When the PR lands on the default branch, Landing marks
+   the unit and replays and ships whatever was stacked on it.
 
 **Never merge anything into the team's default branch locally.**
+
+#### Landing
+
+A team's CI and review take minutes to tens of minutes per pull request, and nothing a builder does
+makes them faster. So the build run does not wait for them. **Landing** is the small loop that
+follows the open pull requests to merged. The orchestrator enters it in its own session as soon as
+the build run is finalized, and `/swarm land` enters it from any later session; either way it is
+safe to start a new build run for another plan while it goes on.
+
+- **It holds no builder slots.** At most `swarm.land.maxAgents` agents (default 2) work for it at
+  once, each leasing a worktree or pool slot only for its fix or replay. Its heavy steps go through
+  the same gate as everyone else's (**Machine budget**).
+- **It is event-driven.** Start the project's watcher (`swarm.land.watch`, `<prs>` replaced by the
+  open PR numbers) in the background. It exits when any pull request changes state, which re-invokes
+  the session. Never poll in the foreground. With no watcher configured, use one background wait
+  matched to how long the team's CI takes, then read every open PR's state once.
+- **On each wake, for every unit whose pull request changed:**
+  - **Merged** → set `merged`, tick its plan items, close out its issue if the project does that.
+    Then, for each unit stacked on it: lease a slot, replay its own commits onto the default branch,
+    run the ship command, set `shipped`.
+  - **A CI group red, or the team's review tool blocked it** → one fix agent on the unit's branch
+    with the failing output, tier by **Model tiers**, **Escalation**. Push the fix as soon as it is
+    ready. Two fix cycles at most, then `failed`, and whatever is stacked on it becomes `skipped`.
+    An infrastructure red is left to the project's rerun (`swarm.watch`) unless it repeats on the
+    same head.
+  - **Conflicting with the default branch** → re-sync it (merge the default branch in) and push.
+  - **Closed without merging** → `failed`, with who closed it in `result`.
+- **Nothing here waits on the owner** except a critical park, which was already recorded at build time.
+- **It ends when no unit is `shipped` or stacked.** Then: append a **Landing** section to the run's
+  `REPORT.md` (merged, failed, fix cycles, the time from push to merge per unit), log the retro
+  entries R4 would have logged about CI and review, and send one push notification with the outcome.
+- **A stalled pull request is a finding, not a wait.** One with no state change for a long time
+  (three times the team's usual CI time) is read once: a required check that never started, a review
+  nobody was asked for, a label that pauses CI. Record what it is waiting on in `result` and in the
+  report, notify once, and keep landing the rest.
 
 **An optional batch look happens beside the run, not inside it.** When a slice is parked for a
 critical issue, when `swarm.look` opts into looks, or when the owner asks, the orchestrator:
@@ -488,6 +546,12 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
      served something other than Sonnet at low effort, tiers are not being honoured in this session.
      In either case, say so in the dispatch message, send a push notification, and continue. Units
      then run on the orchestrator's model or effort, which costs more but builds no worse.
+   - **The prompt guard is live.** The same probe's prompt asks it to run `cd /tmp && git --version`
+     once and report what came back. A refusal that names `bash-guard` means agents cannot stop the
+     run on a permission prompt. Anything else (the command ran, or the owner was asked) means the
+     hook in the agent definitions did not load: say so in the dispatch message, send a push
+     notification, and lead every unit's prompt with the **Never make the owner approve a command**
+     rule under a bold heading, since the written rule is then the only protection.
 
    If commits landed since setup, do a fast delta check. If they invalidate unit briefs, stop and tell the user to re-run setup; don't guess.
 3. Create the integration branch in its own worktree, from the merge target's tip, never from the primary checkout's HEAD: `git worktree add -b swarm/<plan_id> .claude/worktrees/swarm-<plan_id> <merge-target>`. Never check it out in the primary checkout. Record `base_commit`, `integration_branch`, `started_at` and `orchestrator` (this session's name, from `ListAgents`), and note the worktree path in SWARM.md's run config. Set status `running`.
@@ -515,7 +579,7 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
 
 Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 
-1. **Ready set** = pending units whose `depends_on` are all `merged` and whose `resources` collide with no unit currently `working`/`review`.
+1. **Ready set** = pending units whose `depends_on` are all `merged` and whose `resources` collide with no unit currently `working`/`review`. In a PR-mode run a dependency counts once it is `shipped` (or stacked): the dependent builds stacked on its branch and never waits for the merge (**Team repositories**).
 2. **Pick each ready unit's tier** (**Model tiers**). Start from its proposal, keep it if pinned, and otherwise re-run the tables against what the run now knows: the calls and conflicts in the units it depends on, and how Sonnet-built units have fared in review so far. Write the result and its deciding signals to `model` and `model_reason` before dispatching.
 
    Dispatch every ready unit up to the concurrency cap, in a single message: `Agent` tool, `subagent_type` = the tier just picked, `run_in_background: true`, `isolation: "worktree"`. Pass no `model`: the tier sets it. Never dispatch a unit as `general-purpose` except as the fallback in **When the tiers are missing**, since that would inherit the orchestrator's model and effort. The prompt is the unit's brief from SWARM.md plus the agent protocol, plus: unit key, run id, the brain's absolute path (for the review-hold check), integration branch name, the integration tip's sha at dispatch, and required branch name `swarm/<plan_id>-<unit_key>`. The Agent tool's worktree does not start on the integration branch, so the agent's first step creates its branch from that sha inside its own worktree. The sha carries every dependency merged so far. An open review hold never blocks dispatch: units honour it themselves, only at the step that uses the held state. Mark units `working`. When the plan's code lives in a checkout other than the session's repo, dispatch without `isolation` and have the brief create the unit's worktree in the target checkout with `swarm.worktree`'s commands (see **Team repositories**).
@@ -536,7 +600,9 @@ Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
 
 ### Step R3 — Integration gate
 
-When all units are terminal:
+When all units are terminal — and for a PR-mode run that means `shipped`, stacked, `parked`,
+`failed` or `skipped`, since the build run ends at the push (**Team repositories**). A PR-mode run
+has no integration branch to verify: skip to R4, then continue into **Landing**.
 
 1. Run the plan's Verification table end-to-end in the integration worktree, plus the project's standard checks.
 2. Spawn a final reviewer over the integration branch's full diff against `base_commit`: cross-unit coherence, plan coverage, nothing half-merged. Always `swarm-opus-high` — this is the last line of defense, never economized.
@@ -595,7 +661,7 @@ Copied into SWARM.md at setup; binding for every spawned agent.
 - **The one exception is a critical issue:** an action not pre-approved in SWARM.md that is irreversible or outward-facing (deleting shared data, notifying people, spending money, touching production), a security, privacy or permissions exposure, or reversing a decision the owner explicitly made. Do not take it and do not wait: finish what does not depend on it, and report it under `Critical`. The orchestrator parks the unit and notifies the owner. When unsure, it is not critical.
 - **Verify UI in order, then stop.** (1) Code: types, tests, the logic that renders it. (2) Only if code cannot settle it, your own headless browser (`/look`, **Headless**): the page loads without errors, the changed control is there, the interaction works, and nothing overflows at a phone width. (3) If neither can verify it cheaply, record it under `Unverified` with what you could not check and why, and move on. Do not fight a page that will not render headless. Never verify in a headed browser: do not drive the owner's shared window, and do not launch a visible browser of your own.
 - **Stay in your territory.** Read anything; edit only your unit's files. Never edit the plan file, `cowork/**` (brain, plans, swarm files), or `.claude/**` — your worktree's copies would conflict on merge. The orchestrator owns all bookkeeping.
-- **Never make the owner approve a command.** A run is unattended, and some command shapes prompt the owner whatever the project allows. The common one: `cd <dir>` followed by `git` or `gh` in the same shell call. Use `git -C <path> …` for every git command and the host CLI's repository flag (`gh … --repo <owner>/<name>`), with absolute paths for scripts and files, so no `cd` is needed. When a tool truly needs a working directory, give the `cd` a shell call of its own. Scripts you write for your own unit follow the same rule.
+- **Never make the owner approve a command.** A run is unattended, and some command shapes prompt the owner whatever the project allows. The common one: `cd <dir>` followed by `git` or `gh` in the same shell call. Use `git -C <path> …` for every git command and the host CLI's repository flag (`gh … --repo <owner>/<name>`), with absolute paths for scripts and files, so no `cd` is needed. When a tool truly needs a working directory, use `env -C <dir> <command>` or give the `cd` a shell call of its own. Also avoid command substitution (`$(…)`, backticks), process substitution, here-documents and `eval`: run the inner command in its own call, and write longer text to a file and pass the file. Scripts you write for your own unit follow the same rule. **The swarm agent types enforce this:** `bash-guard.py` in this skill's folder refuses those shapes before they can prompt and tells you the form to use. A refusal is not a failure: re-issue the command in that form, and never retry the refused shape.
 - **Stay inside the machine budget.** Run every heavy step (a check, a test run, a type-check or build, a browser capture run) through the gate, `<the swarm skill's folder>/machine.sh run -- <command>`; your prompt gives the full path. Run only the checks your change can affect: never a whole suite the project's checks do not ask for. Before you report, stop every server, watcher and browser you started, by process id or port, never by a pattern that could match another unit's (see **Machine budget**).
 - **Work only in your own worktree.** Your first step is creating your assigned branch there from the integration sha in your prompt (`git switch -c <branch> <sha>`). Never `cd` into, check out in, or write to the primary checkout (the owner's IDE) or another unit's worktree. The brain's absolute path is for reading `swarm_holds`, nothing else.
 - **Commit your work** on your assigned branch, in coherent chunks with real messages. Never stage `cowork/` paths.
@@ -803,11 +869,13 @@ Confirm with the user unless the session is non-interactive. Then: stop live age
 | Key | What it holds |
 |---|---|
 | `swarm.worktree.pool` | `{ "acquire": "<command>", "release": "<command>", "list": "<command>", "size": <n> }` — the slot pool (**Where the code lives**); `<lane>`, `<branch>`, `<base>` and `<slot>` are substituted, and `acquire` prints the slot's path on its last line |
+| `swarm.worktree.pool.prune` | A command that drops build output from every free slot, when `release` does not already do it |
+| `swarm.land` | `{ "maxAgents": <n>, "watch": "<command>" }` — **Landing**: how many fix and replay agents work at once (default 2), and the background watcher that exits when any of `<prs>` changes state |
 | `swarm.watch` | The project's CI watcher: what reruns infrastructure reds, and where it logs; the orchestrator dispatches no fix for a red the watcher will rerun |
 | `swarm.worktree` | `{ "create": "<command>", "remove": "<command>" }` for a target checkout outside the session's repo; `<slug>` and `<branch>` are substituted. Put the worktree at `.claude/worktrees/<slug>` in the target, and include the repo's own bootstrap in `create` |
 | `swarm.machine` | `{ "heavySlots": <n>, "nice": <0–19>, "waitMax": <seconds>, "env": { "<NAME>": "<value>" } }` — the machine budget (**Machine budget**): how many heavy steps run at once (default 2), their priority drop (default 10), how long one waits before running anyway (default 900), and worker caps exported to each (for example a test runner's maximum workers) |
 | `swarm.resources` | `{ "<path glob>": "<tag>" }` — shared local state a unit touching that path holds: a fixed-port dev server, the one local database, the package install |
-| `swarm.review` | The team's review tool, run against a pushed PR (`<pr>` is substituted); it replaces the swarm's reviewer agent |
+| `swarm.review` | The team's review tool, run against a pushed PR (`<pr>` is substituted); it replaces the swarm's reviewer agent. Or `"team"`: the team's bot reviews every PR itself, so nothing reviews before the push |
 | `swarm.ship` | `ready` \| `draft` \| `ask` (default `ask`) — the owner's standing ship policy |
 | `swarm.look` | `none` \| `batch` \| `per-slice` (default `none`) — whether user-facing slices wait for the owner's look. `none`: they ship once verified by code, then headless |
 | `swarm.reviewStack` | How `/swarm review` serves a look (below) |
