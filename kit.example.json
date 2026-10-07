@@ -96,11 +96,16 @@
     "maxAgents": 4,
     "checks": [],
 
-    "_note_machine": "The machine budget for a run, so a swarm does not stall the machine it shares with you. maxAgents above caps the units building at once. heavySlots: how many heavy steps (a check, a test run, a build, a browser capture run) may run at once, across every swarm on the machine. nice: the priority drop each gets (0-19). waitMax: seconds a step waits for a slot before running anyway. env: variables exported to every heavy step, the place for worker caps, e.g. { \"VITEST_MAX_WORKERS\": \"3\" }. Units run heavy steps through the swarm skill's machine.sh.",
+    "_note_machine": "The machine budget for a run, so a swarm does not stall the machine it shares with you. maxAgents above caps the units building at once. heavySlots: how many heavy slots there are (a check, a test run, a build or a browser capture run takes one), across every swarm on the machine. weights: text matched in a step's command line -> how many slots it takes; give a big build enough slots that two cannot run at once but a light check still can, e.g. with 3 slots { \"xcodebuild\": 2, \"next build\": 2 }; \"all\" takes every slot. The budget is there to keep the machine usable, not to slow the run: with memory to spare it adds no waiting. nice: the priority drop each gets (0-19). waitMax: seconds a step waits for its slots before running anyway. minFreePct and memWait: below this share of free memory a step waits, up to memWait seconds. serverSlots and serverWait: how many leased long-running servers (machine.sh serve) run at once, and how long one waits for a lease. env: variables exported to every step, the place for worker caps and no-daemon switches, e.g. { \"VITEST_MAX_WORKERS\": \"3\" }. Units run heavy steps and servers through the swarm skill's machine.sh.",
     "machine": {
       "heavySlots": 2,
+      "weights": {},
       "nice": 10,
       "waitMax": 900,
+      "minFreePct": 10,
+      "memWait": 300,
+      "serverSlots": 2,
+      "serverWait": 600,
       "env": {}
     },
     "ship": "ask",
