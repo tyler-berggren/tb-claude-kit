@@ -1,0 +1,43 @@
+#!/bin/bash
+# install-lidsleep — put `lidsleep` on your PATH.
+#
+#   install-lidsleep              link ~/.local/bin/lidsleep to this kit's scripts/lidsleep
+#   install-lidsleep --uninstall  remove the link
+#
+# A link, not a copy, so a `git pull` of the kit updates the command too. Set BIN_DIR to
+# install somewhere other than ~/.local/bin. Safe to re-run.
+
+set -euo pipefail
+
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lidsleep"
+BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
+DEST="$BIN_DIR/lidsleep"
+
+if [ "${1:-}" = "--uninstall" ]; then
+  if [ -L "$DEST" ]; then
+    rm "$DEST"
+    echo "Removed $DEST"
+  else
+    echo "Nothing to remove: $DEST is not a link."
+  fi
+  exit 0
+fi
+
+[ -f "$SRC" ] || { echo "Missing $SRC" >&2; exit 1; }
+chmod +x "$SRC"
+mkdir -p "$BIN_DIR"
+
+# Leave a different real file alone; replace links and identical copies.
+if [ -e "$DEST" ] && [ ! -L "$DEST" ] && ! cmp -s "$SRC" "$DEST"; then
+  echo "$DEST already exists and differs from the kit's version. Move it aside and re-run." >&2
+  exit 1
+fi
+
+ln -sfn "$SRC" "$DEST"
+echo "Linked $DEST -> $SRC"
+
+case ":$PATH:" in
+  *":$BIN_DIR:"*) echo "Done. Run: lidsleep" ;;
+  *) echo "Note: $BIN_DIR is not on your PATH. Add to your shell profile:"
+     echo "  export PATH=\"$BIN_DIR:\$PATH\"" ;;
+esac

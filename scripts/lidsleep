@@ -1,0 +1,73 @@
+#!/bin/bash
+# lidsleep — show and toggle whether closing the lid puts the Mac to sleep.
+# Uses `pmset disablesleep`. Arrow keys to choose, Enter to apply, q/Esc to quit.
+
+GREEN=$'\e[32m'; RED=$'\e[31m'; BOLD=$'\e[1m'; DIM=$'\e[2m'; RESET=$'\e[0m'
+
+is_disabled() {
+  pmset -g | awk '/SleepDisabled/ {print $2}' | grep -q 1
+}
+
+print_status() {
+  if is_disabled; then
+    echo "Lid sleep: ${RED}${BOLD}OFF${RESET} — Mac stays awake with the lid closed"
+  else
+    echo "Lid sleep: ${GREEN}${BOLD}ON${RESET} — Mac sleeps normally when the lid closes"
+  fi
+}
+
+options=("Enable lid sleep (normal)" "Disable lid sleep (stay awake)" "Cancel")
+
+draw_menu() {
+  local i
+  for i in "${!options[@]}"; do
+    if [ "$i" -eq "$selected" ]; then
+      printf '\e[2K  %s> %s%s\n' "$BOLD" "${options[$i]}" "$RESET"
+    else
+      printf '\e[2K    %s%s%s\n' "$DIM" "${options[$i]}" "$RESET"
+    fi
+  done
+}
+
+cleanup() { printf '\e[?25h'; }
+trap cleanup EXIT
+trap 'exit 130' INT
+
+echo
+print_status
+echo
+
+# Preselect the option that would change the current state.
+if is_disabled; then selected=0; else selected=1; fi
+
+printf '\e[?25l'  # hide cursor
+draw_menu
+while true; do
+  IFS= read -rsn1 key
+  case "$key" in
+    $'\e')
+      read -rsn2 -t 1 rest
+      case "$rest" in
+        '[A') selected=$(( (selected + ${#options[@]} - 1) % ${#options[@]} )) ;;
+        '[B') selected=$(( (selected + 1) % ${#options[@]} )) ;;
+        '')   selected=2; break ;;
+      esac
+      ;;
+    k) selected=$(( (selected + ${#options[@]} - 1) % ${#options[@]} )) ;;
+    j) selected=$(( (selected + 1) % ${#options[@]} )) ;;
+    q) selected=2; break ;;
+    '') break ;;
+  esac
+  printf '\e[%dA' "${#options[@]}"
+  draw_menu
+done
+printf '\e[?25h'
+echo
+
+case "$selected" in
+  0) sudo pmset -a disablesleep 0 || exit 1 ;;
+  1) sudo pmset -a disablesleep 1 || exit 1 ;;
+  *) echo "No changes."; exit 0 ;;
+esac
+
+print_status

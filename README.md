@@ -109,6 +109,7 @@ Twenty-one skills, grouped by what they do for you. The bigger ones link to thei
 | `/1password` | Secrets out of your repo and your transcripts. Bootstraps one read-only service account per vault, converts plaintext `.env` files to `op://` references, verifies resolution, and diagnoses failures. [More](#secrets-1password) |
 | `/claude-switcher` | Several Claude accounts on one machine — a personal plan and an employer's, or a second account for when the first runs out — each one a VS Code profile switch away. Shows who is signed in where and what is off; `add <name>` sets up a new one. [More](#claude-switcher-claude-switcher) |
 | `/clear-cache` | Win back disk space from the caches every project shares: npm, pnpm, uv, pip, Homebrew, and extra copies of Chrome and Playwright browsers. Shows sizes before and after. `report` changes nothing; `deep` also offers npx packages, Docker build cache, and `node_modules` in projects you haven't touched in a month. |
+| `lidsleep` | A terminal command, not a skill: shows whether closing the lid puts the Mac to sleep, and switches it with the arrow keys. Off means everything keeps running with the lid shut. [More](#lid-sleep-lidsleep) |
 | `/prune` | Review a repo's worktrees and clean up the ones you're done with. Each gets a plain-words verdict: **remove** (merged, or its folder is already gone), **ask** (PR closed without merging, or untouched for two weeks) or **keep** (uncommitted or unpushed work, an open PR, something running in it). Nothing is removed until you pick, never with `--force`, and remote branches are never touched. `report` changes nothing. |
 
 ---
@@ -1680,6 +1681,31 @@ Or run `/claude-switcher add <name>` and Claude walks through it and checks the 
   `claude-switcher run <name>` there.
 - **A profile whose settings file has comments is left alone.** `add` prints the two settings to
   paste in by hand.
+
+## Lid Sleep (`lidsleep`)
+
+A MacBook sleeps when its lid closes, which stops long jobs, downloads and agent runs. `lidsleep`
+switches that off and back on. It's a terminal command, not a skill.
+
+```bash
+~/.claude-kit/scripts/install-lidsleep   # once per machine: links ~/.local/bin/lidsleep to the kit
+lidsleep                                 # current state, then ↑/↓ and Enter to change it (q to cancel)
+```
+
+```
+Lid sleep: ON — Mac sleeps normally when the lid closes
+
+    Enable lid sleep (normal)
+  > Disable lid sleep (stay awake)
+    Cancel
+```
+
+- **Under the hood** it runs `sudo pmset -a disablesleep 1|0`, so changing it asks for your
+  password. The setting survives restarts until you switch it back.
+- **The installer makes a link, not a copy**, so pulling the kit updates the command.
+  `BIN_DIR=<dir>` installs somewhere else; `--uninstall` removes the link.
+- **With lid sleep off, don't put the Mac in a bag.** It can't cool itself there, and on battery
+  it drains without ever sleeping.
 
 ## Customization
 
