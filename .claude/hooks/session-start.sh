@@ -587,14 +587,15 @@ WHERE status IN ('active', 'blocked') AND focus = 1;
 PLAN_IDS=$(sqlite3 "$DB" "SELECT DISTINCT json_extract(meta, '\$.plan_id') FROM logs WHERE type='task' AND status='active' AND json_extract(meta, '\$.plan_id') IS NOT NULL;")
 for PLAN_ID in $PLAN_IDS; do
   HAS_COMPLETION=$(sqlite3 "$DB" "SELECT count(*) FROM logs WHERE json_extract(meta, '\$.plan_id') = '$PLAN_ID' AND completed_at >= datetime('now', '-14 days', 'localtime');")
-  PLAN_MOD=$(git log -1 --format=%aI -- "cowork/plans/*${PLAN_ID}*.md" 2>/dev/null)
+  # Unix seconds straight from git: %aI's offset has a colon ("-07:00") that BSD date's %z cannot
+  # parse, which left every plan without file momentum. Plain arithmetic works on macOS and Linux.
+  MOD_TS=$(git log -1 --format=%at -- "cowork/plans/*${PLAN_ID}*.md" 2>/dev/null)
   DOMINATED=0
   if [ "$HAS_COMPLETION" -gt 0 ]; then
     DOMINATED=1
-  elif [ -n "$PLAN_MOD" ]; then
-    MOD_TS=$(date -j -f '%Y-%m-%dT%H:%M:%S%z' "$PLAN_MOD" +%s 2>/dev/null)
-    CUTOFF=$(date -v-14d +%s)
-    if [ -n "$MOD_TS" ] && [ "$MOD_TS" -gt "$CUTOFF" ]; then
+  elif [ -n "$MOD_TS" ]; then
+    CUTOFF=$(( $(date +%s) - 14 * 86400 ))
+    if [ "$MOD_TS" -gt "$CUTOFF" ]; then
       DOMINATED=1
     fi
   fi

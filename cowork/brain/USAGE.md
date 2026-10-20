@@ -186,11 +186,13 @@ For each plan_id, check momentum:
 # Check 1: sibling task completed in last 14 days
 HAS_COMPLETION=$(sqlite3 cowork/brain/BRAIN.db "SELECT count(*) FROM logs WHERE json_extract(meta, '$.plan_id') = '<plan_id>' AND completed_at >= datetime('now', '-14 days', 'localtime');")
 
-# Check 2: plan file modified in last 14 days
-PLAN_MOD=$(git log -1 --format=%aI -- "cowork/plans/*<plan_id>*.md" 2>/dev/null)
+# Check 2: plan file modified in last 14 days (Unix seconds from git; works on macOS and Linux,
+# where parsing %aI with BSD date fails on the colon in its offset)
+MOD_TS=$(git log -1 --format=%at -- "cowork/plans/*<plan_id>*.md" 2>/dev/null)
+CUTOFF=$(( $(date +%s) - 14 * 86400 ))
 
 # If either signal, heat up active tasks in this plan
-if [ "$HAS_COMPLETION" -gt 0 ] || [ -n "$PLAN_MOD" -a "$(date -j -f '%Y-%m-%dT%H:%M:%S%z' "$PLAN_MOD" +%s 2>/dev/null)" -gt "$(date -v-14d +%s)" ]; then
+if [ "$HAS_COMPLETION" -gt 0 ] || { [ -n "$MOD_TS" ] && [ "$MOD_TS" -gt "$CUTOFF" ]; }; then
   sqlite3 cowork/brain/BRAIN.db "UPDATE logs SET tier = 'hot' WHERE type='task' AND status='active' AND json_extract(meta, '$.plan_id') = '<plan_id>';"
 fi
 ```
