@@ -75,6 +75,15 @@
     "roots": ["cowork/research"]
   },
 
+  "_note_report": "Configuration for /report. authors: whose work counts, as git author names (git) and GitHub logins (github); omit for everyone. repos: where the work is; each has path, an optional name for the report, and an optional github slug (owner/repo) to read merged pull requests instead of commits on ref (default HEAD). brain: the brain DB path. metrics: commands whose output the report may quote, each with name, command, an optional explain (how to read the output) and an optional window (e.g. 7d: run only for periods of that length); they get REPORT_START, REPORT_END, REPORT_PRIOR_START, their _UTC forms, and REPORT_DAYS. audience: who reads the report and what it must never mention; it outranks the skill's template.",
+  "report": {
+    "authors": { "git": [], "github": [] },
+    "repos": [{ "path": ".", "name": null, "github": null }],
+    "brain": "cowork/brain/BRAIN.db",
+    "metrics": [],
+    "audience": null
+  },
+
   "_note_web": "Where /web looks for the built static site, and the canonical origin it checks URLs against. roots is a candidate list; the first directory that exists and contains HTML wins. Absent, /web tries web, public, dist, site, build, _site, out, sitemd/site, then the project root. baseUrl is required for canonical/sitemap URL checks and for /web live. ignore records divergences you have decided are correct so re-runs stop re-reporting them — each rule needs check, plus optional file and match (substring of the message) to narrow it, and a note explaining the call. Suppressed findings are still counted and listed under --show-suppressed, never silently dropped.",
   "web": {
     "roots": ["web"],
@@ -133,7 +142,7 @@
   "_note_sqlite_tracking": "SQLite databases that get NDJSON snapshot files on /commit, using the AirSQLite sidecar layout: {dbname}.airsqlite/{table}.snapshot.ndjson. Each entry is { \"db\": \"path/to/file.db\", \"tables\": [...], \"exclude\": [...] }: db is the .db file, tables is which tables to track (default: all non-internal tables), and exclude is table-name globs to leave out, such as logs_fts*. One JSON line per row (including _rowid), sorted by rowid. Regenerated before staging, not as a git hook.",
   "sqlite_tracking": [],
 
-  "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Skills that read one: 1password, brain, brainstorm, bridge, claude-switcher, clear-cache, commit, cto, kill, look, parse, pbar, plan, prune, push, research, swarm, vibe-audit, video-editor, web, wiki. rules.plan is where a team repo's ship command and policy, branch conventions, priority tiers and CI path map go; rules.look names the base URL and how a fresh headless profile signs in. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
+  "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Skills that read one: 1password, brain, brainstorm, bridge, claude-switcher, clear-cache, commit, cto, kill, look, parse, pbar, plan, prune, push, report, research, swarm, vibe-audit, video-editor, web, wiki. rules.plan is where a team repo's ship command and policy, branch conventions, priority tiers and CI path map go; rules.look names the base URL and how a fresh headless profile signs in. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
   "rules": {
     "push": "Example: if the post-commit hook reports undeployed worker changes, ask before pushing — never auto-deploy."
   }

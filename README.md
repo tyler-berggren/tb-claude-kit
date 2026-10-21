@@ -58,7 +58,7 @@ That's it. Open the project in Claude Code and the skills are available.
 
 ## The skills
 
-Twenty-one skills, grouped by what they do for you. The bigger ones link to their section in the
+Twenty-two skills, grouped by what they do for you. The bigger ones link to their section in the
 [Reference](#reference).
 
 **Remembering — so context accumulates instead of resetting**
@@ -91,6 +91,7 @@ Twenty-one skills, grouped by what they do for you. The bigger ones link to thei
 | | |
 |---|---|
 | `/wiki` | A project wiki that grows with the codebase: every run updates what just changed and scans for what is stale or missing. `/wiki deploy` publishes it to Cloudflare Pages as a searchable site. [More](#wiki-wiki) |
+| `/report` | A progress report for managers, stakeholders and peers on what the last 7 days (or `month`, `quarter`, `2026-09`, `q3`, `since <date>`) achieved, written from the brain, merged work and any metrics you configure. It covers outcomes and measured results, never pull requests, commits or lines of code. It opens with a TL;DR of five bullets at most, and it claims momentum only where a comparison with the previous period shows it. |
 
 **Everyday — the small stuff, done consistently**
 
@@ -403,6 +404,11 @@ Other keys are documented with the skill that reads them: `plan.issues` under [P
 - **`web`** — `roots` (where the built site is), `baseUrl` (the canonical origin) and `ignore`, for `/web`.
 - **`subtrees`** — `{ "<name>": { "prefix": "app", "remote": "app", "branch": "main" } }`. With it,
   `/commit sub <name>` and `/push sub <name>` push that folder to its own repo after committing.
+- **`report`** — for `/report`. `authors` (`git` names and `github` logins whose work counts; omit for
+  everyone), `repos` (where the work is, each with an optional `github` slug so merged pull requests are
+  read instead of commits), `metrics` (commands whose output the report may quote, given the period in
+  `REPORT_START`/`REPORT_END` and their `_UTC` forms; `window` limits one to periods of that length) and
+  `audience` (who reads it and what it must never mention).
 - **`kitPath`** — where this project's kit checkout is, when it is not `~/.claude-kit`.
 
 ### `sqlite_tracking` — Git-friendly SQLite change tracking
@@ -493,6 +499,7 @@ cowork/
     MANTRA.md         # Claude's self-authored context
   plans/              # NNN_YYYY-MM-DD_topic.md
   research/           # NNN_YYYY-MM-DD_topic/ — agent-*.md + SUMMARY.md
+  reports/            # YYYY-MM-DD_<period>-report.md (created by /report)
   swarm/              # <plan_id>/ — SWARM.md + REPORT.md per swarmed plan (created by /swarm)
   architecture/       # CTO.db, generated architecture.html, dated summaries
   vibe-audit/         # VIBE-AUDIT.db, GUARDRAILS.md (yours)
