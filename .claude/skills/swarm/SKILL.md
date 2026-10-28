@@ -47,6 +47,7 @@ The intended workflow: `/plan` generates the plan → `/swarm <ref>` (setup) →
 
   A PR-mode plan whose code lives in another repository follows the same layout inside that repository (**Where the code lives**).
 - **Address a worktree by its path.** Git work goes through `git -C <worktree>`, and files are read and written at the worktree's absolute path. The orchestrator's own working directory stays at the primary checkout. Switching branches is allowed only inside a worktree the session or agent created itself.
+- **Point other agents only at the integration worktree.** A path given to another agent (a tool to run, a dossier to read, research to build on) names `.claude/worktrees/swarm-<plan_id>`, never a unit's own worktree: unit worktrees are removed at merge, and an agent still holding that path then fails or reads nothing. When an agent must read a unit's work before it merges, record which agent holds that path, and repoint it to the integration worktree before removing the unit's worktree. (Swarm 051 removed a worktree three times while a running agent was reading from it: a tool, two county dossiers, the final reviewer's input.)
 - **Branch without checking out.** Use `git worktree add -b <branch> <path> <base>` or `git branch <branch> <base>`. Git refuses to check out one branch in two worktrees, so when a branch is needed, use the worktree that already has it (`git worktree list`). Never move that branch out of its worktree.
 - **Keep worktrees out of `git status`.** Unless `git check-ignore -q .claude/worktrees/` already succeeds, append `/.claude/worktrees/` to `.git/info/exclude`. That file is local to this clone, so the project's `.gitignore` stays the project's decision.
 - **The brain has one copy.** `cowork/brain/BRAIN.db` is git-ignored and lives only in the primary checkout. Every session and agent uses it by that absolute path, never a worktree's copy.
@@ -589,7 +590,9 @@ Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
    - append the unit's **Calls**, **Unverified** items and any **Critical** park to the plan's `## Review` block (`/plan`, **Batches**) — the orchestrator is its only writer;
    - update `swarm_units` (`merged`, `result` = one-line summary);
    - remove the unit's worktree, **in the background** (`run_in_background`), never inline in the
-     dispatch loop, or release its slot when the project has a pool. The plan edits stay uncommitted in the primary checkout;
+     dispatch loop, or release its slot when the project has a pool. First check no running agent was handed a path
+     inside it (**Point other agents only at the integration worktree**); if one was, message it the integration
+     path and remove the worktree once it reports. The plan edits stay uncommitted in the primary checkout;
    - loop back to 1, because a merge may unblock dependents.
 5. **Reviewer FAIL** → spawn a fix agent in the same worktree with the findings. Pick its tier by **Model tiers**, **Escalation**: at least `swarm-opus-medium` when the findings are about judgment, the unit's tier when they are mechanical, and always `swarm-opus-high` on the **second** cycle. Update `model` and `model_reason` whenever the tier changes. Max **two** fix cycles; then mark the unit `failed`, record why, and continue — everything not depending on it still runs. Dependents of a failed unit become `skipped`.
 6. Post a one-line progress note as each unit changes state. Between events there is nothing to poll — background agents re-invoke the session when they finish.
