@@ -1,0 +1,307 @@
+#!/usr/bin/env node
+// cross-artifact — read claude.ai artifacts shared with ANOTHER Claude account, live.
+//
+//   cross-artifact sign-in <name>              a Chrome window for that account: sign in there once
+//   cross-artifact accounts                    the accounts set up, and whether each is signed in
+//   cross-artifact visit <url>... [--as <n>]   open each artifact in a new tab and wait for it
+//   cross-artifact tabs [--as <n>]             what that account's Chrome has open
+//   cross-artifact read [<url|id>] [--as <n>]  the open artifact's files and page source
+//   cross-artifact read ... --file <text>      one loaded file whose address holds <text>
+//                                              (text printed; anything else saved to a temp file)
+//   cross-artifact read ... --dom              each frame's page after it has run
+//   cross-artifact quit [--as <n>]             close that Chrome cleanly
+//
+// Why it works this way (found 2026-11-02):
+// - The Artifact tool reads only what the signed-in Claude Code account was shared, and a free
+//   Claude account cannot sign in to Claude Code at all. A browser can, so an account is an
+//   ordinary Chrome profile of its own, signed in once by a person.
+// - claude.ai's Cloudflare check refuses any automated or headless browser, even signed in. So
+//   the Chrome is a plain one started with a local DevTools port, and this only opens tabs in it
+//   and reads them, as DevTools would. When the check comes up anyway, it stops for a person to
+//   click it. Never make a browser pass for something it is not.
+// - The login is the profile's own cookie, which survives a quit. It is never read out: a bare
+//   cookie is refused by Cloudflare and cannot reach the artifact's files, which are served from
+//   a frame claude.ai's page sets up. Quit with `quit` (or Cmd-Q), never a kill, or the cookie
+//   may not be written out.
+// - Profiles live in ~/.cross-artifact/<name>/, outside ~/.claude-chrome, which /kill kills.
+//
+// Nothing is saved but a binary --file (to the temp folder). Needs Node 22+ (global WebSocket)
+// and Google Chrome.
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const HOME = path.join(os.homedir(), '.cross-artifact');
+const FIRST_PORT = 9330;
+const CHROME_MAC = '/Applications/Google Chrome.app';
+const CHROME_LINUX = ['google-chrome', 'google-chrome-stable', 'chromium'];
+const ARTIFACT_PAGE = /claude\.ai\/(public\/)?artifacts?\/[^/?#]+/;
+
+const argv = process.argv.slice(2);
+const opt = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : null);
+const positional = argv.filter((a, i) => !a.startsWith('--') && !['--as', '--file'].includes(argv[i - 1]));
+const [cmd, ...rest] = positional;
+// Output piped into head is cut short on purpose: stop quietly.
+process.stdout.on('error', (e) => process.exit(e.code === 'EPIPE' ? 0 : 1));
+// DevTools sends titles HTML-escaped.
+const unescape = (t = '') => t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const die = (msg, code = 1) => {
+  console.error(msg);
+  process.exit(code);
+};
+
+// ---- accounts: a folder each, holding the Chrome profile and the port it listens on ----
+
+function accounts() {
+  if (!fs.existsSync(HOME)) return [];
+  return fs.readdirSync(HOME).filter((n) => fs.existsSync(path.join(HOME, n, 'port')));
+}
+
+function account(name) {
+  const dir = path.join(HOME, name);
+  return { name, dir, profile: path.join(dir, 'chrome'), port: Number(fs.readFileSync(path.join(dir, 'port'), 'utf8')) };
+}
+
+function pick() {
+  const name = opt('--as') || process.env.CROSS_ARTIFACT_AS;
+  const all = accounts();
+  if (name) {
+    if (!all.includes(name)) die(`No account "${name}": run  cross-artifact sign-in ${name}`, 2);
+    return account(name);
+  }
+  if (all.length === 1) return account(all[0]);
+  if (!all.length) die('No account set up: run  cross-artifact sign-in <name>', 2);
+  die(`Several accounts (${all.join(', ')}): name one with --as <name>`, 2);
+}
+
+function create(name) {
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) die('An account name is lower-case letters, digits and dashes.', 64);
+  const taken = accounts().map((n) => account(n).port);
+  let port = FIRST_PORT;
+  while (taken.includes(port)) port++;
+  fs.mkdirSync(path.join(HOME, name, 'chrome'), { recursive: true });
+  fs.writeFileSync(path.join(HOME, name, 'port'), String(port));
+  return account(name);
+}
+
+// ---- Chrome: a plain one, with a DevTools port on localhost ----
+
+function startChrome(acct, { background, url }) {
+  const flags = [`--user-data-dir=${acct.profile}`, `--remote-debugging-port=${acct.port}`, '--no-first-run', url];
+  if (process.platform === 'darwin') {
+    if (!fs.existsSync(CHROME_MAC)) die('Google Chrome is not installed in /Applications.');
+    // -g: behind other windows, so a read never takes the person's focus. -n: its own instance.
+    spawn('open', [...(background ? ['-g'] : []), '-na', CHROME_MAC, '--args', ...flags], { stdio: 'ignore', detached: true }).unref();
+    return;
+  }
+  for (const bin of CHROME_LINUX) {
+    try {
+      spawn(bin, flags, { stdio: 'ignore', detached: true }).unref();
+      return;
+    } catch {}
+  }
+  die('No Chrome found.');
+}
+
+const devtools = (acct, p, init) => fetch(`http://127.0.0.1:${acct.port}${p}`, init).then((r) => r.json());
+const running = (acct) => devtools(acct, '/json/version').then(() => true, () => false);
+
+async function ensureChrome(acct) {
+  if (await running(acct)) return;
+  startChrome(acct, { background: true, url: 'https://claude.ai/artifacts' });
+  for (let i = 0; i < 40; i++) {
+    await sleep(500);
+    if (await running(acct)) return sleep(2000); // let the first tab settle
+  }
+  die(`Could not start the Chrome for "${acct.name}".`, 3);
+}
+
+// One DevTools connection: send(method, params) -> result.
+async function connect(wsUrl) {
+  const ws = new WebSocket(wsUrl);
+  await new Promise((res, rej) => {
+    ws.onopen = res;
+    ws.onerror = () => rej(new Error(`cannot connect to ${wsUrl}`));
+  });
+  let next = 0;
+  const waiting = new Map();
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    const w = waiting.get(msg.id);
+    if (!w) return;
+    waiting.delete(msg.id);
+    msg.error ? w.rej(new Error(msg.error.message)) : w.res(msg.result);
+  };
+  return {
+    send: (method, params = {}) =>
+      new Promise((res, rej) => {
+        const id = ++next;
+        waiting.set(id, { res, rej });
+        ws.send(JSON.stringify({ id, method, params }));
+      }),
+    close: () => ws.close(),
+  };
+}
+
+async function signedIn(acct) {
+  const { webSocketDebuggerUrl } = await devtools(acct, '/json/version');
+  const b = await connect(webSocketDebuggerUrl);
+  try {
+    const { cookies } = await b.send('Storage.getCookies');
+    // Only whether the session cookie is there: its value is never read out.
+    return cookies.some((c) => c.name === 'sessionKey' && c.domain.endsWith('claude.ai'));
+  } finally {
+    b.close();
+  }
+}
+
+const blocked = (t) => /challenge/.test(t.url) || /just a moment/i.test(t.title);
+
+// ---- commands ----
+
+async function cmdSignIn(name) {
+  if (!name) die('usage: cross-artifact sign-in <name>', 64);
+  const acct = accounts().includes(name) ? account(name) : create(name);
+  if (await running(acct)) {
+    await devtools(acct, `/json/new?${encodeURIComponent('https://claude.ai/login')}`, { method: 'PUT' });
+  } else startChrome(acct, { background: false, url: 'https://claude.ai/login' });
+  console.log(`A Chrome window for "${name}" is open on claude.ai's sign-in page. Sign in there, leave the window
+as it is (it can stay open or be quit with Cmd-Q), and check with:  cross-artifact accounts`);
+}
+
+async function cmdAccounts() {
+  const all = accounts();
+  if (!all.length) return console.log('No accounts. Set one up with:  cross-artifact sign-in <name>');
+  for (const n of all) {
+    const acct = account(n);
+    const state = (await running(acct)) ? ((await signedIn(acct)) ? 'signed in' : 'NOT signed in') : 'Chrome not running (visit starts it)';
+    console.log(`${n.padEnd(20)} port ${acct.port}  ${state}`);
+  }
+}
+
+async function cmdVisit(acct, urls) {
+  if (!urls.length) die('usage: cross-artifact visit <url>...', 64);
+  await ensureChrome(acct);
+  if (!(await signedIn(acct))) die(`"${acct.name}" is not signed in: run  cross-artifact sign-in ${acct.name}`, 3);
+  for (const url of urls) {
+    const tab = await devtools(acct, `/json/new?${encodeURIComponent(url)}`, { method: 'PUT' });
+    let t = tab;
+    let frames = [];
+    for (let i = 0; i < 60; i++) {
+      await sleep(1000);
+      const list = await devtools(acct, '/json/list');
+      t = list.find((x) => x.id === tab.id) || t;
+      if (blocked(t)) die(`Cloudflare's check came up on ${url}: a person clicks it in that Chrome, then visit again.`, 5);
+      frames = list.filter((x) => x.type === 'iframe' && x.parentId === tab.id);
+      if (frames.length && t.title && !/^claude$/i.test(t.title)) break;
+    }
+    console.log(`${unescape(t.title).slice(0, 60).padEnd(60)}  frames ${frames.length}  ${t.url}`);
+  }
+}
+
+async function cmdTabs(acct) {
+  await ensureChrome(acct);
+  for (const t of await devtools(acct, '/json/list')) if (t.type === 'page') console.log(`${unescape(t.title).slice(0, 60).padEnd(60)}  ${t.url}`);
+}
+
+// Runs inside each artifact frame: its own document and every file it loaded, fetched again from
+// there (the browser's cache, the frame's own sign-in). Bodies are sent back as base64.
+const GATHER = `(async () => {
+  const urls = [location.href, ...performance.getEntriesByType('resource').map((e) => e.name)];
+  const out = [];
+  for (const u of [...new Set(urls)]) {
+    if (!/^https?:/.test(u)) continue;
+    try {
+      const r = await fetch(u, { cache: 'force-cache', credentials: 'include' });
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      out.push({ url: u, status: r.status, type: r.headers.get('content-type') || '', b64: btoa(bin) });
+    } catch (e) {
+      out.push({ url: u, status: 0, type: '', b64: '', error: String(e.message || e) });
+    }
+  }
+  return out;
+})()`;
+
+const isText = (type) => /^text\/|json|javascript|xml|svg|csv/.test(type);
+
+async function cmdRead(acct, target) {
+  await ensureChrome(acct);
+  const list = await devtools(acct, '/json/list');
+  const id = target && target.replace(/[?#].*$/, '').split('/').pop();
+  const pages = list.filter((t) => t.type === 'page');
+  const page = id ? pages.find((t) => t.url.includes(id)) : pages.find((t) => ARTIFACT_PAGE.test(t.url));
+  if (!page) die(id ? `No open tab holds ${id}: run  cross-artifact visit <url>  first.` : 'No artifact tab is open.', 4);
+  if (blocked(page)) die("Cloudflare's check is up in that tab: a person clicks it first.", 5);
+  // The artifact's frames, nested ones included.
+  const ids = new Set([page.id]);
+  const frames = [];
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const t of list) if (t.type === 'iframe' && ids.has(t.parentId) && !ids.has(t.id)) ids.add(t.id), frames.push(t), (grew = true);
+  }
+  if (!frames.length) die(`The tab (${page.url}) holds no artifact frame yet: it may still be loading.`, 4);
+
+  if (argv.includes('--dom')) {
+    for (const f of frames) {
+      const c = await connect(f.webSocketDebuggerUrl);
+      const { result } = await c.send('Runtime.evaluate', { expression: 'document.documentElement.outerHTML', returnByValue: true });
+      c.close();
+      console.log(`===== frame ${f.url}\n${result.value}\n`);
+    }
+    return;
+  }
+
+  const files = [];
+  for (const f of frames) {
+    const c = await connect(f.webSocketDebuggerUrl);
+    const { result, exceptionDetails } = await c.send('Runtime.evaluate', { expression: GATHER, awaitPromise: true, returnByValue: true });
+    c.close();
+    if (exceptionDetails) die(`Could not read the frame ${f.url}: ${exceptionDetails.text}`);
+    result.value.forEach((v, i) => files.push({ ...v, body: Buffer.from(v.b64, 'base64'), doc: i === 0 }));
+  }
+
+  const want = opt('--file');
+  if (want) {
+    const hit = files.find((s) => s.url.includes(want));
+    if (!hit) die(`No loaded file's address holds "${want}".`, 4);
+    if (isText(hit.type)) return process.stdout.write(hit.body.toString('utf8'));
+    const ext = (hit.type.split('/')[1] || 'bin').split(/[;+]/)[0];
+    const out = path.join(os.tmpdir(), `cross-artifact-${Date.now()}.${ext}`);
+    fs.writeFileSync(out, hit.body);
+    return console.log(out);
+  }
+
+  console.log(`===== ${page.url}\n===== files loaded into the artifact`);
+  for (const s of files) {
+    const what = s.error ? `(not readable: ${s.error})` : `${String(s.body.length).padStart(9)} bytes`;
+    console.log(`${String(s.status).padStart(3)} ${s.type.split(';')[0].padEnd(24)} ${what}  ${s.url}`);
+  }
+  // The page itself is the deepest frame's document: the artifact inside claude.ai's wrapper.
+  const doc = files.filter((s) => s.doc && s.status && s.status < 400).pop();
+  console.log(`\n===== page source${doc ? ` (${doc.url})` : ''}`);
+  console.log(doc ? doc.body.toString('utf8') : '(no document readable; try --dom)');
+}
+
+async function cmdQuit(acct) {
+  if (!(await running(acct))) return console.log(`The Chrome for "${acct.name}" is not running.`);
+  const { webSocketDebuggerUrl } = await devtools(acct, '/json/version');
+  const b = await connect(webSocketDebuggerUrl);
+  await b.send('Browser.close').catch(() => {}); // a clean close: the cookie is written out
+  b.close();
+  console.log(`Closed the Chrome for "${acct.name}".`);
+}
+
+(async () => {
+  if (cmd === 'sign-in') return cmdSignIn(rest[0]);
+  if (cmd === 'accounts') return cmdAccounts();
+  if (cmd === 'visit') return cmdVisit(pick(), rest);
+  if (cmd === 'tabs') return cmdTabs(pick());
+  if (cmd === 'read') return cmdRead(pick(), rest[0]);
+  if (cmd === 'quit') return cmdQuit(pick());
+  die('usage: cross-artifact sign-in <name> | accounts | visit <url>... | tabs | read [<url|id>] [--file <text> | --dom] | quit  [--as <name>]', 64);
+})().catch((e) => die(e.message));

@@ -13,6 +13,7 @@ This project uses Claude Code skills for structured workflows:
 - `/claude-switcher` — Several Claude accounts on one machine, picked by VS Code profile. Checks who is signed in where and which profile uses which account; `add <name>` sets up a new one.
 - `/clear-cache` — Measure and clear machine-wide dev caches (npm, pnpm, uv, pip, Homebrew, stale Puppeteer browsers). `report` measures only; `deep` offers costlier cleanups.
 - `/commit` — Stage all files and commit with auto-generated message.
+- `/cross-artifact` — Read claude.ai artifacts shared with another of the user's Claude accounts, live: page source, loaded files, the running page. `sign-in <name>` once per account.
 - `/cto` — Architecture observatory — scans codebase, maps components into SQLite, generates HTML with Mermaid C4 diagrams.
 - `/kill` — Kill dev processes (servers, watchers, bridge) without touching Claude Code.
 - `/look` — Inspect shared Chrome viewport via Puppeteer (DOM-first to diagnose; a screenshot to confirm a visual change landed).

@@ -109,6 +109,7 @@ Twenty-two skills, grouped by what they do for you. The bigger ones link to thei
 |---|---|
 | `/1password` | Secrets out of your repo and your transcripts. Bootstraps one read-only service account per vault, converts plaintext `.env` files to `op://` references, verifies resolution, and diagnoses failures. [More](#secrets-1password) |
 | `/claude-switcher` | Several Claude accounts on one machine — a personal plan and an employer's, or a second account for when the first runs out — each one a VS Code profile switch away. Shows who is signed in where and what is off; `add <name>` sets up a new one. [More](#claude-switcher-claude-switcher) |
+| `/cross-artifact` | Read claude.ai artifacts that were shared with your *other* Claude account: the page's source, every script, data file and image it loads, live. Sign that account in once in a Chrome of its own; Claude opens and reads the links from then on. Works with a free account. [More](#cross-artifact-cross-artifact) |
 | `/clear-cache` | Win back disk space from the caches every project shares: npm, pnpm, uv, pip, Homebrew, and extra copies of Chrome and Playwright browsers. Shows sizes before and after. `report` changes nothing; `deep` also offers npx packages, Docker build cache, and `node_modules` in projects you haven't touched in a month. |
 | `lidsleep` | A terminal command, not a skill: shows whether closing the lid puts the Mac to sleep, and switches it with the arrow keys. Off means everything keeps running with the lid shut. [More](#lid-sleep-lidsleep) |
 | `/prune` | Review a repo's worktrees and clean up the ones you're done with. Each gets a plain-words verdict: **remove** (merged, or its folder is already gone), **ask** (PR closed without merging, or untouched for two weeks) or **keep** (uncommitted or unpushed work, an open PR, something running in it). Nothing is removed until you pick, never with `--force`, and remote branches are never touched. `report` changes nothing. |
@@ -1688,6 +1689,31 @@ Or run `/claude-switcher add <name>` and Claude walks through it and checks the 
   `claude-switcher run <name>` there.
 - **A profile whose settings file has comments is left alone.** `add` prints the two settings to
   paste in by hand.
+
+## Cross-artifact (`/cross-artifact`)
+
+People share claude.ai artifacts with the address they know, and that is often not the account your
+Claude Code runs as. The Artifact tool only opens what its own account was shared, and for an artifact
+someone else owns it gives a summary, not the code. `/cross-artifact` reads them through the other
+account instead, live, and saves nothing.
+
+```bash
+~/.claude-kit/scripts/cross-artifact sign-in work     # once: sign in in the window that opens
+~/.claude-kit/scripts/cross-artifact visit <link>     # Claude opens the artifact in that account's Chrome
+~/.claude-kit/scripts/cross-artifact read <link>      # its files, then the page's source
+```
+
+- **An account is a Chrome profile**, in `~/.cross-artifact/<name>/`, signed in once by you. The login
+  is that profile's own cookie; nothing else stores it, and it survives a quit.
+- **The Chrome is an ordinary one**, started behind your other windows with a DevTools port on
+  localhost. claude.ai's Cloudflare check refuses automated and headless browsers, so the skill never
+  uses one, and when the check does come up it stops and asks you to click it.
+- **What it reads:** the artifact's page as served, each script, stylesheet, data file and image it
+  loaded (`--file`), and the page after it has run (`--dom`). Not the owner's version history or
+  comment threads.
+- **Quit that Chrome with Cmd-Q or `cross-artifact quit`**, never a kill, or the sign-in may be lost.
+  Its profiles sit outside `~/.claude-chrome`, so `/kill` leaves them alone.
+- Needs Google Chrome and Node 22+. macOS is what it was built on; Linux is untested.
 
 ## Lid Sleep (`lidsleep`)
 
