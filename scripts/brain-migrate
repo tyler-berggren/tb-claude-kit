@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Move a project from the old brain layout to the current one. Run from the project root.
+
+    bash ~/.claude-kit/scripts/brain-migrate [--dry-run] [--mantra-file PATH]
+
+Old layout -> current layout:
+  - mantra in the DB `mantra` table, MANTRA.md and a CLAUDE.md block
+      -> the CLAUDE.md block only (between the whole lines <!-- BEGIN:mantra --> and <!-- END:mantra -->)
+  - cowork/brain/BRAIN.md and MANTRA.md exports -> removed (git rm when tracked)
+  - `journal` table -> its entries become brain notes tagged `journal`, then the table is dropped
+  - `sessions` summary/goals/key_files/pid/agent -> dropped; session_id added
+  - BRAIN.db committed to git -> untracked, ignored, and snapshotted as NDJSON via sqlite_tracking
+
+The mantra written to CLAUDE.md is, in order of preference: --mantra-file, the DB mantra (it was
+the source of truth), the existing CLAUDE.md block. Nothing is committed; review with git status.
+Safe to re-run: every step checks before it acts.
+"""
+import json, os, re, sqlite3, subprocess, sys
+
+DB = "cowork/brain/BRAIN.db"
+BEGIN, END = "<!-- BEGIN:mantra -->", "<!-- END:mantra -->"
+IGNORE_LINE = "/cowork/brain/BRAIN.db*"
+BRAIN_TRACKING = {"db": DB, "tables": ["logs"]}
+
+dry = "--dry-run" in sys.argv
+mantra_file = None
+if "--mantra-file" in sys.argv:
+    mantra_file = sys.argv[sys.argv.index("--mantra-file") + 1]
+
+done = []
+def act(msg, fn=None):
+    done.append(("would " if dry else "") + msg)
+    if fn and not dry:
+        fn()
+
+def git(*args, check=False):
+    return subprocess.run(["git", *args], capture_output=True, text=True, check=check)
+
+def tracked(path):
+    return git("ls-files", "--error-unmatch", "--", path).returncode == 0
+
+def remove(path):
+    if not os.path.exists(path):
+        return
+    if tracked(path):
+        act(f"git rm {path}", lambda: git("rm", "-q", "--", path, check=True))
+    else:
+        act(f"delete {path}", lambda: os.remove(path))
+
+if not os.path.isdir(".claude") or not os.path.exists(DB):
+    sys.exit(f"brain-migrate: run from a kit project root (no {DB} here)")
+
+con = sqlite3.connect(DB)
+tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+# --- 1. Mantra -> CLAUDE.md -------------------------------------------------
+claude = open("CLAUDE.md", encoding="utf-8").read() if os.path.exists("CLAUDE.md") else ""
+lines = claude.split("\n")
+has_block = BEGIN in lines and END in lines and lines.index(BEGIN) < lines.index(END)
+block = "\n".join(lines[lines.index(BEGIN) + 1 : lines.index(END)]).strip() if has_block else ""
+db_mantra = ""
+if "mantra" in tables:
+    row = con.execute("SELECT content FROM mantra WHERE content IS NOT NULL ORDER BY rowid DESC LIMIT 1").fetchone()
+    db_mantra = (row[0] or "").strip() if row else ""
+
+if mantra_file:
+    mantra, source = open(mantra_file, encoding="utf-8").read().strip(), mantra_file
+elif db_mantra:
+    mantra, source = db_mantra, "the DB mantra table"
+else:
+    mantra, source = block, "the existing CLAUDE.md block"
+
+if db_mantra and block and db_mantra != block and not mantra_file:
+    done.append(f"note: the DB mantra and the CLAUDE.md block differed; kept the DB's ({len(db_mantra)} chars)")
+
+if mantra != block or not has_block:
+    def write_mantra():
+        if has_block:
+            i, j = lines.index(BEGIN), lines.index(END)
+            new = lines[: i + 1] + ([mantra] if mantra else []) + lines[j:]
+            text = "\n".join(new)
+        else:
+            text = claude.rstrip("\n") + f"\n\n## Mantra\n\n{BEGIN}\n" + (mantra + "\n" if mantra else "") + f"{END}\n"
+        open("CLAUDE.md", "w", encoding="utf-8").write(text)
+    act(f"write the mantra into CLAUDE.md from {source} ({len(mantra)} chars)", write_mantra)
+if len(mantra) > 5000:
+    done.append(f"note: the mantra is {len(mantra)} chars, over the ~4,000 budget; condense it")
+
+# --- 2. Exports ---------------------------------------------------------------
+remove("cowork/brain/MANTRA.md")
+remove("cowork/brain/BRAIN.md")
+
+# --- 3. Tables ----------------------------------------------------------------
+if "journal" in tables:
+    rows = con.execute("SELECT created_at, content FROM journal ORDER BY id").fetchall()
+    def move_journal():
+        for created, content in rows:
+            if isinstance(content, bytes):
+                content = content.decode("utf-8", "replace")
+            first = content.strip().split("\n")[0][:80]
+            con.execute("INSERT INTO logs (type, title, body, tags, created_at, importance) VALUES ('note', ?, ?, 'journal', ?, 4)",
+                        (f"Journal: {first}", content, created))
+        con.execute("DROP TABLE journal")
+        con.commit()
+    act(f"move {len(rows)} journal entr{'y' if len(rows) == 1 else 'ies'} into logs as notes tagged journal, drop the journal table"
+        if rows else "drop the empty journal table", move_journal)
+if "mantra" in tables:
+    def drop_mantra():
+        con.execute("DROP TABLE mantra"); con.commit()
+    act("drop the mantra table", drop_mantra)
+if "sessions" in tables:
+    cols = [r[1] for r in con.execute("PRAGMA table_info(sessions)")]
+    if cols != ["id", "session_id", "started_at", "ended_at"]:
+        def rebuild_sessions():
+            con.executescript("""
+                CREATE TABLE sessions_new (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  session_id TEXT,
+                  started_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                  ended_at TEXT);
+            """)
+            sid = "session_id" if "session_id" in cols else "NULL"
+            con.execute(f"INSERT INTO sessions_new (id, session_id, started_at, ended_at) SELECT id, {sid}, started_at, ended_at FROM sessions")
+            con.executescript("""
+                DROP TABLE sessions;
+                ALTER TABLE sessions_new RENAME TO sessions;
+                CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);
+            """)
+            con.commit()
+        act("rebuild sessions as (id, session_id, started_at, ended_at), dropping summaries", rebuild_sessions)
+con.close()
+
+# --- 4. BRAIN.db out of git, into NDJSON snapshots ------------------------------
+kit_path = ".claude/kit.json"
+kit = json.load(open(kit_path))
+trk = kit.get("sqlite_tracking") or []
+entry = next((e for e in trk if isinstance(e, dict) and e.get("db") == DB), None)
+stale_snapshots = []
+if entry is None:
+    trk.append(dict(BRAIN_TRACKING))
+    kit["sqlite_tracking"] = trk
+    act("add the brain to sqlite_tracking in .claude/kit.json (logs table)",
+        lambda: open(kit_path, "w").write(json.dumps(kit, indent=2, ensure_ascii=False) + "\n"))
+else:
+    keep = [t for t in entry.get("tables", []) if t not in ("mantra", "journal", "sessions")]
+    if keep != entry.get("tables", []):
+        stale_snapshots = [t for t in entry.get("tables", []) if t not in keep]
+        entry["tables"] = keep or ["logs"]
+        act(f"drop {', '.join(stale_snapshots)} from the brain's sqlite_tracking tables",
+            lambda: open(kit_path, "w").write(json.dumps(kit, indent=2, ensure_ascii=False) + "\n"))
+for t in ("mantra", "journal", "sessions"):
+    remove(f"cowork/brain/BRAIN.airsqlite/{t}.snapshot.ndjson")
+
+gi = open(".gitignore").read() if os.path.exists(".gitignore") else ""
+if IGNORE_LINE not in gi.split("\n"):
+    def add_ignore():
+        text = gi
+        marker = "# END:tb-claude-kit"
+        if marker in text.split("\n"):
+            text = text.replace("\n" + marker, f"\n{IGNORE_LINE}\n{marker}", 1) if not text.startswith(marker) else f"{IGNORE_LINE}\n{text}"
+        else:
+            text = text.rstrip("\n") + ("\n" if text else "") + f"{IGNORE_LINE}\n"
+        open(".gitignore", "w").write(text)
+    act(f"add {IGNORE_LINE} to .gitignore", add_ignore)
+if tracked(DB):
+    act(f"git rm --cached {DB} (the file stays on disk)", lambda: git("rm", "-q", "--cached", "--", DB, check=True))
+
+sidecar = os.path.expanduser("~/.claude-kit/scripts/sqlite-sidecar.sh")
+if os.path.exists(sidecar):
+    act("write the NDJSON snapshots (cowork/brain/BRAIN.airsqlite/)",
+        lambda: subprocess.run(["bash", sidecar], check=True, capture_output=True))
+
+print(("brain-migrate (dry run):" if dry else "brain-migrate:") + (" nothing to do" if not done else ""))
+for d in done:
+    print("  - " + d)

@@ -111,7 +111,7 @@ When the conversation reaches a natural stopping point (or the user signals done
    SELECT type, count(*) FROM logs WHERE parent_id = <brainstorm_id> GROUP BY type;
    ```
 3. Present a brief wrap-up: what was explored, what was decided, what questions remain open, and what tasks were created.
-4. Run the brain digest to update `cowork/brain/BRAIN.md`.
+4. Recalculate tiers (`/brain`, **Recalculate tiers**).
 
 ---
 
@@ -220,7 +220,7 @@ Show all brainstorms with output counts. Usage: `/brainstorm list`
 - **Log as you go** — Capture outputs during the conversation, not after. The brain DB is the record.
 - **Link everything** — Every output entry must have `parent_id` set to the brainstorm entry's id.
 - **Normalize tags** — Split by comma, trim, lowercase, sort alphabetically, deduplicate, rejoin. Check existing tags (shown in dynamic context above) before inventing new ones.
-- **DB is truth** — Never read from `cowork/brain/BRAIN.md` to determine state. Always query the DB.
+- **DB is truth** — The DB is the only copy of the brain. Always query it.
 - **Decisions are permanent** — Don't update a decision entry. If thinking changes, create a new decision that supersedes it (set `supersedes` column, mark old one `superseded`).
 
 ---

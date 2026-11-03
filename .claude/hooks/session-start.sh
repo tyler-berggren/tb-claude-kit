@@ -89,15 +89,14 @@ PY
   [ "$mode" = "outside" ] || return 0
   skips=$(printf '%s\n' "$cfg" | tail -n +2)
 
-  # install.sh publishes its KIT_PATHS here so both sides share one list. Without
-  # it, fall back to skills only — the paths this hook can discover unaided.
+  # The same list install.sh builds: every skill folder, agent and hook in the
+  # kit, plus the fixed paths in kit-manifest.txt (hand-maintained, read by both).
   local candidates
-  if [ -f "$kit/.claude/kit-manifest.txt" ]; then
-    candidates=$(cat "$kit/.claude/kit-manifest.txt")
-  else
-    candidates=$(cd "$kit/.claude/skills" 2>/dev/null && \
-                 for d in */; do [ -d "$d" ] && echo ".claude/skills/${d%/}"; done)
-  fi
+  candidates=$(cd "$kit" 2>/dev/null && {
+    for d in .claude/skills/*/; do [ -d "$d" ] && echo "${d%/}"; done
+    for f in .claude/agents/*.md .claude/hooks/*; do [ -f "$f" ] && echo "$f"; done
+    grep -v '^[[:space:]]*\(#\|$\)' .claude/kit-manifest.txt 2>/dev/null
+  } | sort -u)
 
   # Prefer the portable ~/.claude-kit pointer when it names this same checkout,
   # so new links match the ones install.sh writes.
@@ -130,6 +129,13 @@ PY
     added+=("$rel")
   done <<< "$candidates"
 
+  # The brain DB stays out of git; sqlite_tracking snapshots carry it instead.
+  local db_ignored=0 db_tracked=0
+  if [ -f "cowork/brain/BRAIN.db" ]; then
+    kit_gitignore_add "cowork/brain/BRAIN.db*" && db_ignored=1
+    git ls-files --error-unmatch -- cowork/brain/BRAIN.db >/dev/null 2>&1 && db_tracked=1
+  fi
+
   # Report-only pass: upstream deletions surface as dangling links.
   local stale=() l
   while IFS= read -r l; do
@@ -137,6 +143,8 @@ PY
     [ -L "$l" ] && [ ! -e "$l" ] && stale+=("$l")
   done <<< "$(printf '%s\n%s\n' "$candidates" "$(ls -d .claude/skills/* 2>/dev/null)" | sort -u)"
 
+  [ "$db_ignored" -eq 1 ] && KIT_NOTICE="$KIT_NOTICE 🧰 Kit sync: added cowork/brain/BRAIN.db* to .gitignore (the brain DB stays out of git; see Kit conventions)."
+  [ "$db_tracked" -eq 1 ] && KIT_NOTICE="$KIT_NOTICE 🧰 cowork/brain/BRAIN.db is still tracked in git, so it shows as modified after every session. Tell the user and offer to run: git rm --cached cowork/brain/BRAIN.db (add it to sqlite_tracking in .claude/kit.json first if they want its history in git)."
   [ ${#added[@]} -eq 0 ] && [ ${#stale[@]} -eq 0 ] && [ "$healed" -eq 0 ] && return 0
   if [ ${#added[@]} -gt 0 ]; then
     # Claude Code loads agent definitions before this hook runs, so a newly linked
@@ -145,7 +153,7 @@ PY
     for a in "${added[@]}"; do
       case "$a" in .claude/agents/*) next+=("$a") ;; *) now+=("$a") ;; esac
     done
-    KIT_NOTICE="🧰 Kit sync: linked $(IFS=', '; echo "${added[*]}") and updated .gitignore."
+    KIT_NOTICE="$KIT_NOTICE 🧰 Kit sync: linked $(IFS=', '; echo "${added[*]}") and updated .gitignore."
     [ ${#now[@]} -gt 0 ] && [ ${#next[@]} -eq 0 ] && KIT_NOTICE="$KIT_NOTICE Available this session."
     [ ${#next[@]} -gt 0 ] && [ ${#now[@]} -gt 0 ] && KIT_NOTICE="$KIT_NOTICE Skills and files are available this session."
     [ ${#next[@]} -gt 0 ] && KIT_NOTICE="$KIT_NOTICE The agent definitions load at the next session start, since Claude Code reads agents before this hook runs."
@@ -497,28 +505,88 @@ if [ "${1:-}" = "memory" ]; then
   exit 0
 fi
 
+# --- Hook input: Claude Code passes JSON on stdin (session_id, source) ---
+# source is startup | resume | clear | compact. The session_id is the only stable
+# key a SessionStart and its SessionEnd share: each hook runs in its own shell, so
+# a shell PID never matches across them.
+HOOK_INPUT=""
+[ -t 0 ] || HOOK_INPUT=$(cat)
+read -r SESSION_ID SOURCE <<< "$(printf '%s' "$HOOK_INPUT" | python3 -c '
+import json, re, sys
+try: d = json.load(sys.stdin)
+except Exception: d = {}
+sid = re.sub(r"[^A-Za-z0-9-]", "", str(d.get("session_id") or ""))
+src = re.sub(r"[^a-z]", "", str(d.get("source") or "startup"))
+print(sid or "-", src or "startup")' 2>/dev/null)"
+[ "${SESSION_ID:-}" = "-" ] && SESSION_ID=""
+SOURCE="${SOURCE:-startup}"
+
 kit_sync_locked
+KIT_NOTICE="${KIT_NOTICE# }"
 kit_memory
 [ "$MEM_TELL" = "yes" ] && MEMORY_NOTICE="🧠 Memory: $MEM_MSG"
 
-# --- Standing rule: long background jobs get a /pbar display, unprompted ---
-# Why: /pbar used to fire only when the user asked for a progress bar, which they
-# never do at launch time — so they ended up asking "status?" instead. Emitted in
-# every project, brain DB or not.
-PBAR_RULE="### Long-running jobs
-Whenever you start a background job you expect to run 5+ minutes (Bash run_in_background, nohup, a long script or batch), invoke the /pbar skill immediately after launching it, without being asked. Hand back its command as a single absolute path in its own fenced code block, as the last thing in your reply. Re-print that same block whenever the user might need to restart the display: every status update, restart, crash, resume, or turn that ends with the job still running."
+# --- Kit conventions: .claude/KIT.md, injected here rather than @-imported ---
+# CLAUDE.md @imports do not follow a symlink, and in outside mode KIT.md is one.
+# Injecting it keeps every linked project on the kit's current wording.
+KIT_RULES=""
+[ -f .claude/KIT.md ] && KIT_RULES=$(cat .claude/KIT.md)
+
+# --- Mantra: a block in CLAUDE.md, loaded with it. Here only its health is checked. ---
+MANTRA_BUDGET=4000
+MANTRA_NOTICE=""
+if [ -f CLAUDE.md ]; then
+  if grep -qx '<!-- BEGIN:mantra -->' CLAUDE.md && grep -qx '<!-- END:mantra -->' CLAUDE.md; then
+    MANTRA_LEN=$(awk '/^<!-- BEGIN:mantra -->$/{f=1;next} /^<!-- END:mantra -->$/{f=0} f' CLAUDE.md | wc -c | tr -d ' ')
+    if [ "$MANTRA_LEN" -gt $((MANTRA_BUDGET + MANTRA_BUDGET / 4)) ]; then
+      MANTRA_NOTICE="✂️ The mantra in CLAUDE.md is $MANTRA_LEN characters, over its ~$MANTRA_BUDGET budget. Condense it this session (rewrite, keep what a fresh session needs most)."
+    fi
+  else
+    MANTRA_NOTICE="✂️ CLAUDE.md has no mantra block. Add a '## Mantra' section at the end holding the line <!-- BEGIN:mantra --> and the line <!-- END:mantra -->, and keep the mantra between them."
+  fi
+fi
+
+# --- Legacy brain files: the mantra used to live in the DB and MANTRA.md ---
+LEGACY_NOTICE=""
+legacy=()
+[ -f cowork/brain/MANTRA.md ] && legacy+=("cowork/brain/MANTRA.md")
+[ -f cowork/brain/BRAIN.md ] && legacy+=("cowork/brain/BRAIN.md")
+if [ -f "$DB" ]; then
+  for t in mantra journal; do
+    [ -n "$(sqlite3 "$DB" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='$t';" 2>/dev/null)" ] && legacy+=("the $t table")
+  done
+fi
+if [ ${#legacy[@]} -gt 0 ]; then
+  LEGACY_NOTICE="🧹 Old brain layout found ($(IFS=', '; echo "${legacy[*]}")). Tell the user, and offer to run: bash ~/.claude-kit/scripts/brain-migrate (it moves the DB mantra into CLAUDE.md, removes the exports, and drops the old tables; --dry-run shows the plan)."
+fi
+
+# --- Restore a missing brain from its NDJSON snapshots (fresh clone) ---
+# Never in a linked worktree: the brain has one copy, in the main checkout.
+RESTORE_NOTICE=""
+if [ ! -f "$DB" ] && [ -f cowork/brain/BRAIN.airsqlite/logs.snapshot.ndjson ] && [ -f cowork/brain/schema.sql ] &&
+   [ "$(git rev-parse --git-dir 2>/dev/null)" = "$(git rev-parse --git-common-dir 2>/dev/null)" ] &&
+   [ -x "$HOME/.claude-kit/scripts/sqlite-sidecar.sh" ]; then
+  if "$HOME/.claude-kit/scripts/sqlite-sidecar.sh" restore "$DB" cowork/brain/schema.sql >/dev/null 2>&1; then
+    RESTORE_NOTICE="♻️ BRAIN.db was missing and was rebuilt from cowork/brain/BRAIN.airsqlite."
+  fi
+fi
+
+join_notices() {
+  local out="" n
+  for n in "$@"; do [ -n "$n" ] && out="$out${out:+
+
+}$n"; done
+  printf '%s' "$out"
+}
+
+emit() {
+  printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":%s}}\n' \
+    "$(printf '%s' "$1" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+}
 
 if [ ! -f "$DB" ]; then
-  # Still surface the notice and standing rules in a project with no brain DB.
-  NODB_CTX="$PBAR_RULE"
-  [ -n "$MEMORY_NOTICE" ] && NODB_CTX="$MEMORY_NOTICE
-
-$NODB_CTX"
-  [ -n "$KIT_NOTICE" ] && NODB_CTX="$KIT_NOTICE
-
-$NODB_CTX"
-  printf '{"hookSpecificOutput":{"additionalContext":%s}}\n' \
-    "$(printf '%s' "$NODB_CTX" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+  # Still surface the notices and kit conventions in a project with no brain DB.
+  emit "$(join_notices "$KIT_NOTICE" "$MEMORY_NOTICE" "$MANTRA_NOTICE" "$LEGACY_NOTICE" "$KIT_RULES")"
   exit 0
 fi
 
@@ -530,40 +598,47 @@ SCHEMA_NOTICE=""
 SCHEMA_FILE="cowork/brain/schema.sql"
 if [ -f "$SCHEMA_FILE" ]; then
   HEALED=""
-  COLS=$(sqlite3 "$DB" "PRAGMA table_info(logs);" 2>/dev/null | awk -F'|' '{print $2}')
   ensure_col() {
-    printf '%s\n' "$COLS" | grep -qx "$1" || {
-      if sqlite3 "$DB" "ALTER TABLE logs ADD COLUMN $2;" 2>/dev/null; then HEALED="$HEALED $1"; fi
-    }
+    local table="$1" col="$2" def="$3" cols
+    cols=$(sqlite3 "$DB" "PRAGMA table_info($table);" 2>/dev/null | awk -F'|' '{print $2}')
+    [ -n "$cols" ] || return 0   # table absent: the schema below creates it whole
+    printf '%s\n' "$cols" | grep -qx "$col" && return 0
+    sqlite3 "$DB" "ALTER TABLE $table ADD COLUMN $def;" 2>/dev/null && HEALED="$HEALED $table.$col"
   }
-  # logs columns that a CREATE TABLE IF NOT EXISTS re-apply cannot backfill:
-  ensure_col priority      "priority INTEGER"
-  ensure_col tier          "tier TEXT NOT NULL DEFAULT 'warm' CHECK (tier IN ('hot','warm','cold','archived'))"
-  ensure_col completed_at  "completed_at TEXT"
-  ensure_col superseded_by "superseded_by INTEGER REFERENCES logs(id)"
-  # (re)apply schema to create any missing tables (sessions/journal/mantra) + indexes.
-  # Columns are ensured first so index creation (e.g. idx_logs_tier) can't fail.
+  # Columns that a CREATE TABLE IF NOT EXISTS re-apply cannot backfill:
+  ensure_col logs     priority      "priority INTEGER"
+  ensure_col logs     tier          "tier TEXT NOT NULL DEFAULT 'warm' CHECK (tier IN ('hot','warm','cold','archived'))"
+  ensure_col logs     completed_at  "completed_at TEXT"
+  ensure_col logs     superseded_by "superseded_by INTEGER REFERENCES logs(id)"
+  ensure_col sessions session_id    "session_id TEXT"
+  # (re)apply schema to create any missing tables + indexes. Columns are ensured
+  # first so index creation (e.g. idx_logs_tier) can't fail.
   SCHEMA_ERR=$(sqlite3 "$DB" < "$SCHEMA_FILE" 2>&1 >/dev/null)
   if [ -n "$HEALED" ] || [ -n "$SCHEMA_ERR" ]; then
     SCHEMA_NOTICE="⚠️ BRAIN.db schema was out of date and auto-migrated at session start."
-    [ -n "$HEALED" ] && SCHEMA_NOTICE="$SCHEMA_NOTICE Added missing logs columns:$HEALED."
+    [ -n "$HEALED" ] && SCHEMA_NOTICE="$SCHEMA_NOTICE Added missing columns:$HEALED."
     [ -n "$SCHEMA_ERR" ] && SCHEMA_NOTICE="$SCHEMA_NOTICE Remaining errors: $SCHEMA_ERR"
-    SCHEMA_NOTICE="$SCHEMA_NOTICE Prior sessions may have run against a degraded schema — tier/journal/mantra state may be incomplete; consider re-running /brain digest."
   fi
 fi
 
-# Close any stale sessions (crashed/killed without SessionEnd hook firing)
-sqlite3 "$DB" "UPDATE sessions SET ended_at = started_at WHERE ended_at IS NULL AND pid IS NOT NULL AND pid != $$;"
-
-# Find the last closed session before inserting a new one
-LAST_SESSION_ID=$(sqlite3 "$DB" "SELECT id FROM sessions WHERE ended_at IS NOT NULL ORDER BY ended_at DESC LIMIT 1;")
-LAST_SESSION_START=""
-if [ -n "$LAST_SESSION_ID" ]; then
-  LAST_SESSION_START=$(sqlite3 "$DB" "SELECT started_at FROM sessions WHERE id = $LAST_SESSION_ID;")
+# --- Session row, keyed by Claude Code's session_id ---
+# A resume, /compact or second start of the same session reuses its row. Other
+# sessions running in parallel are left alone: nothing here closes them.
+NEW_SESSION="no"
+PREV_START=""
+EXISTING=""
+[ -n "$SESSION_ID" ] && EXISTING=$(sqlite3 "$DB" "SELECT id FROM sessions WHERE session_id = '$SESSION_ID' LIMIT 1;")
+if [ -n "$EXISTING" ]; then
+  sqlite3 "$DB" "UPDATE sessions SET ended_at = NULL WHERE id = $EXISTING;"
+else
+  PREV_START=$(sqlite3 "$DB" "SELECT started_at FROM sessions ORDER BY id DESC LIMIT 1;")
+  if [ -n "$SESSION_ID" ]; then
+    sqlite3 "$DB" "INSERT INTO sessions (session_id) VALUES ('$SESSION_ID');"
+  else
+    sqlite3 "$DB" "INSERT INTO sessions DEFAULT VALUES;"
+  fi
+  NEW_SESSION="yes"
 fi
-
-# Insert session row with PID for concurrent session safety
-sqlite3 "$DB" "INSERT INTO sessions (agent, goals, pid) VALUES ('claude-code', 'auto-started', $$);"
 
 # Recalculate tiers — Phase 1 (SQL)
 sqlite3 "$DB" "
@@ -586,6 +661,7 @@ WHERE status IN ('active', 'blocked') AND focus = 1;
 # Recalculate tiers — Phase 2 (plan momentum)
 PLAN_IDS=$(sqlite3 "$DB" "SELECT DISTINCT json_extract(meta, '\$.plan_id') FROM logs WHERE type='task' AND status='active' AND json_extract(meta, '\$.plan_id') IS NOT NULL;")
 for PLAN_ID in $PLAN_IDS; do
+  case "$PLAN_ID" in *[!A-Za-z0-9_-]*) continue ;; esac
   HAS_COMPLETION=$(sqlite3 "$DB" "SELECT count(*) FROM logs WHERE json_extract(meta, '\$.plan_id') = '$PLAN_ID' AND completed_at >= datetime('now', '-14 days', 'localtime');")
   # Unix seconds straight from git: %aI's offset has a colon ("-07:00") that BSD date's %z cannot
   # parse, which left every plan without file momentum. Plain arithmetic works on macOS and Linux.
@@ -605,111 +681,53 @@ for PLAN_ID in $PLAN_IDS; do
 done
 
 # Query brain state
-MANTRA=$(sqlite3 "$DB" "SELECT content FROM mantra LIMIT 1;")
 FOCUS=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, title, pillar FROM logs WHERE focus = 1 AND status = 'active';")
 RECENT=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, type, title FROM logs ORDER BY created_at DESC LIMIT 8;")
 TASKS=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, title, pillar FROM logs WHERE type = 'task' AND status = 'active' ORDER BY pillar, priority;")
 QUESTIONS=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, title FROM logs WHERE type = 'question' AND status = 'active';")
 
-# Query last session's work for mantra review
-LAST_SESSION_LOGS=""
-LAST_SESSION_JOURNAL=""
-if [ -n "$LAST_SESSION_START" ]; then
-  LAST_SESSION_LOGS=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, type, title FROM logs WHERE created_at >= '$LAST_SESSION_START' ORDER BY created_at DESC LIMIT 15;")
-  LAST_SESSION_JOURNAL=$(sqlite3 "$DB" "SELECT content FROM journal WHERE session_id = '$LAST_SESSION_ID' ORDER BY created_at DESC LIMIT 1;")
-fi
-LAST_SESSION_SUMMARY=""
-if [ -n "$LAST_SESSION_ID" ]; then
-  LAST_SESSION_SUMMARY=$(sqlite3 "$DB" "SELECT summary FROM sessions WHERE id = $LAST_SESSION_ID;")
+# What the previous session added: the input to the mantra review. Only on a
+# genuinely new session — a resume or /compact has already had its review.
+SINCE=""
+if [ "$NEW_SESSION" = "yes" ] && [ -n "$PREV_START" ] && { [ "$SOURCE" = "startup" ] || [ "$SOURCE" = "clear" ]; }; then
+  SINCE=$(sqlite3 -separator ' | ' "$DB" "SELECT '#' || id, type, title FROM logs WHERE created_at >= '$PREV_START' ORDER BY created_at DESC LIMIT 15;")
 fi
 
 CTX="## Brain State (auto-loaded at session start)"
+NOTICES=$(join_notices "$SCHEMA_NOTICE" "$RESTORE_NOTICE" "$KIT_NOTICE" "$MEMORY_NOTICE" "$LEGACY_NOTICE" "$MANTRA_NOTICE")
+[ -n "$NOTICES" ] && CTX="$CTX
 
-if [ -n "$SCHEMA_NOTICE" ]; then
-  CTX="$CTX
-
-$SCHEMA_NOTICE"
-fi
-
-if [ -n "$KIT_NOTICE" ]; then
-  CTX="$CTX
-
-$KIT_NOTICE"
-fi
-
-if [ -n "$MEMORY_NOTICE" ]; then
-  CTX="$CTX
-
-$MEMORY_NOTICE"
-fi
-
-if [ -n "$MANTRA" ]; then
-  CTX="$CTX
-### Mantra
-$MANTRA"
-fi
+$NOTICES"
 
 CTX="$CTX
-### Focus Items"
-if [ -n "$FOCUS" ]; then
-  CTX="$CTX
-$FOCUS"
-else
-  CTX="$CTX
-No focus items set."
-fi
 
-CTX="$CTX
-### Active Tasks"
-if [ -n "$TASKS" ]; then
-  CTX="$CTX
-$TASKS"
-else
-  CTX="$CTX
-No active tasks."
-fi
+### Focus Items
+${FOCUS:-No focus items set.}
 
-if [ -n "$QUESTIONS" ]; then
-  CTX="$CTX
+### Active Tasks
+${TASKS:-No active tasks.}"
+
+[ -n "$QUESTIONS" ] && CTX="$CTX
+
 ### Open Questions
 $QUESTIONS"
-fi
 
 CTX="$CTX
-### Recent Entries
-$RECENT"
 
-# Append last session context for mantra review
-if [ -n "$LAST_SESSION_LOGS" ] || [ -n "$LAST_SESSION_JOURNAL" ] || [ -n "$LAST_SESSION_SUMMARY" ]; then
+### Recent Entries
+${RECENT:-None yet.}"
+
+if [ -n "$SINCE" ]; then
   CTX="$CTX
 
-### Last Session (#$LAST_SESSION_ID)"
-  if [ -n "$LAST_SESSION_SUMMARY" ]; then
-    CTX="$CTX
-Summary: $LAST_SESSION_SUMMARY"
-  fi
-  if [ -n "$LAST_SESSION_JOURNAL" ]; then
-    CTX="$CTX
-Journal: $LAST_SESSION_JOURNAL"
-  fi
-  if [ -n "$LAST_SESSION_LOGS" ]; then
-    CTX="$CTX
-Entries created:
-$LAST_SESSION_LOGS"
-  fi
+### Since the last session (started $PREV_START)
+$SINCE
+
+Mantra review: check these against the mantra in CLAUDE.md, per Kit conventions below. Update it or skip, without asking."
 fi
 
-CTX="$CTX
+[ -n "$KIT_RULES" ] && CTX="$CTX
 
-### Mantra Review
-Review the last session's work above and the current mantra. If the last session surfaced patterns, non-obvious knowledge, shifted assumptions, or tricky areas that a fresh session would benefit from — update the mantra silently (DB + MANTRA.md + CLAUDE.md block) before starting your work. Skip if the last session was routine or the mantra already captures it. Do not ask the user — just update or skip.
+$KIT_RULES"
 
-$PBAR_RULE
-
-### Compound Lesson
-Before wrapping up a substantive session, consider: did a reusable lesson or pattern emerge? If yes, write it as a brain insight tagged 'lesson' — one sentence stating the rule, then Why and How to apply. If nothing novel was learned, skip this entirely."
-
-# Escape for JSON
-CTX_ESCAPED=$(printf '%s' "$CTX" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
-
-echo "{\"hookSpecificOutput\":{\"additionalContext\":$CTX_ESCAPED}}"
+emit "$CTX"

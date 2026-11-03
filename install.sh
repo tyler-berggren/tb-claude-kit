@@ -229,29 +229,17 @@ for agent_file in "$KIT_DIR/.claude/agents"/*.md; do
   [ -f "$agent_file" ] || continue
   KIT_PATHS+=(".claude/agents/$(basename "$agent_file")")
 done
-KIT_PATHS+=(
-  ".claude/hooks/session-start.sh"
-  ".claude/hooks/background-pbar.sh"
-  ".vscode/extensions.json"
-  ".vscode/settings.json"
-  "cowork/brain/schema.sql"
-  "cowork/brain/USAGE.md"
-  "cowork/vibe-audit/PROCEDURE.md"
-  "cowork/vibe-audit/schema.sql"
-  "cowork/architecture/PROCEDURE.md"
-  "cowork/architecture/schema.sql"
-  "scripts/puppeteer-server.cjs"
-  "scripts/artifact-bridge.cjs"
-  "scripts/wiki-build"
-)
-
-# Publish KIT_PATHS into the kit checkout so the session-start hook can adopt new
-# kit files without re-running this script. The hook globs skills on its own, but
-# has no way to know about the fixed paths above — this is that list, shared.
-# Best-effort: a read-only or otherwise unwritable kit checkout is not an error.
-if [ "$DRY_RUN" = "no" ] && [ -w "$KIT_DIR/.claude" ]; then
-  printf '%s\n' "${KIT_PATHS[@]}" > "$KIT_DIR/.claude/kit-manifest.txt" 2>/dev/null || true
-fi
+# Hooks too, file by file, for the same reason.
+for hook_file in "$KIT_DIR/.claude/hooks"/*; do
+  [ -f "$hook_file" ] || continue
+  KIT_PATHS+=(".claude/hooks/$(basename "$hook_file")")
+done
+# The fixed paths. kit-manifest.txt is hand-maintained and shared with the
+# session-start hook, which adopts new kit paths without re-running this script.
+while IFS= read -r rel; do
+  case "$rel" in ''|'#'*) continue ;; esac
+  KIT_PATHS+=("$rel")
+done < "$KIT_DIR/.claude/kit-manifest.txt"
 
 # Project-owned scaffolding: copied once if absent, never updated, never linked.
 SCAFFOLD_PATHS=(
@@ -476,7 +464,10 @@ report_gitignore_procedure() {
 
   if [ "$MODE" = "inside" ]; then
     echo "  inside mode — kit files are real files and are MEANT to be tracked."
-    echo "  Commit them with the rest of the repo. Nothing to ignore."
+    echo "  Commit them with the rest of the repo. Ignore only the brain DB, which"
+    echo "  travels as NDJSON snapshots (sqlite_tracking):"
+    echo ""
+    echo "      /cowork/brain/BRAIN.db*"
     return 0
   fi
 
@@ -492,6 +483,7 @@ report_gitignore_procedure() {
       [ -e "$KIT_DIR/$rel" ] || continue
       echo "      /$rel"
     done
+    echo "      /cowork/brain/BRAIN.db*      (the brain travels as NDJSON snapshots instead)"
     echo ""
     echo "  Or track them deliberately — the symlinks carry an absolute path to"
     echo "  this machine's kit checkout, which is fine for a private single-machine"
@@ -528,6 +520,10 @@ except Exception:
 d['mode'] = mode
 d.setdefault('kitVersion', 1)
 d.setdefault('fork', [])
+# The brain DB is git-ignored; its logs travel as NDJSON snapshots instead.
+t = d.setdefault('sqlite_tracking', [])
+if isinstance(t, list) and not any(isinstance(e, dict) and e.get('db') == 'cowork/brain/BRAIN.db' for e in t):
+    t.append({'db': 'cowork/brain/BRAIN.db', 'tables': ['logs']})
 json.dump(d, open(path, 'w'), indent=2, ensure_ascii=False)
 open(path, 'a').write('\n')
 " "$KIT_JSON" "$MODE"
@@ -739,10 +735,32 @@ init_db "cowork/brain/BRAIN.db"            "cowork/brain/schema.sql"        ""  
 init_db "cowork/vibe-audit/VIBE-AUDIT.db"  "cowork/vibe-audit/schema.sql"   "cowork/vibe-audit/seed.sql"    "VIBE-AUDIT.db"
 init_db "cowork/architecture/CTO.db"       "cowork/architecture/schema.sql" "cowork/architecture/seed.sql"  "CTO.db"
 
-[ "$DRY_RUN" = "no" ] && chmod +x "$TARGET_DIR/.claude/hooks/session-start.sh" "$TARGET_DIR/.claude/hooks/background-pbar.sh" 2>/dev/null || true
+[ "$DRY_RUN" = "no" ] && chmod +x "$TARGET_DIR"/.claude/hooks/*.sh 2>/dev/null || true
 
 # Nudge toward /pbar after every background Bash call (see the hook's header).
 add_hook "PostToolUse" "Bash" ".claude/hooks/background-pbar.sh"
+
+# SessionEnd is a script now. The inline sqlite3 command it replaces matched on
+# $$, a different shell for every hook, so it never closed a session.
+fix_session_end() {
+  local settings="$TARGET_DIR/.claude/settings.json"
+  [ -f "$settings" ] || return 0
+  grep -qF '.claude/hooks/session-end.sh' "$settings" && ! grep -qF 'WHERE pid = $$' "$settings" && return 0
+  [ "$DRY_RUN" = "yes" ] && { echo "  [hook] SessionEnd .claude/hooks/session-end.sh (would set)"; return 0; }
+  python3 -c "
+import json,sys
+p=sys.argv[1]; s=json.load(open(p))
+groups=s.setdefault('hooks',{}).setdefault('SessionEnd',[])
+for g in groups:
+    g['hooks']=[h for h in g.get('hooks',[]) if 'WHERE pid = \$\$' not in h.get('command','')]
+groups[:]=[g for g in groups if g.get('hooks')]
+if not any('.claude/hooks/session-end.sh' in h.get('command','') for g in groups for h in g['hooks']):
+    groups.append({'hooks':[{'type':'command','command':'.claude/hooks/session-end.sh','async':True}]})
+json.dump(s,open(p,'w'),indent=2,ensure_ascii=False); open(p,'a').write('\n')
+" "$settings"
+  echo "  [hook] SessionEnd .claude/hooks/session-end.sh"
+}
+fix_session_end
 
 # ============================================================
 # OPTIONAL INTEGRATIONS

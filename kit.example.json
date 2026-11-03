@@ -139,8 +139,10 @@
     }
   },
 
-  "_note_sqlite_tracking": "SQLite databases that get NDJSON snapshot files on /commit, using the AirSQLite sidecar layout: {dbname}.airsqlite/{table}.snapshot.ndjson. Each entry is { \"db\": \"path/to/file.db\", \"tables\": [...], \"exclude\": [...] }: db is the .db file, tables is which tables to track (default: all non-internal tables), and exclude is table-name globs to leave out, such as logs_fts*. One JSON line per row (including _rowid), sorted by rowid. Regenerated before staging, not as a git hook.",
-  "sqlite_tracking": [],
+  "_note_sqlite_tracking": "SQLite databases that get NDJSON snapshot files on /commit, using the AirSQLite sidecar layout: {dbname}.airsqlite/{table}.snapshot.ndjson. Each entry is { \"db\": \"path/to/file.db\", \"tables\": [...], \"exclude\": [...] }: db is the .db file, tables is which tables to track (default: all non-internal tables), and exclude is table-name globs to leave out, such as logs_fts*. One JSON line per row (including _rowid), sorted by rowid. Regenerated before staging, not as a git hook. The brain entry below is what install.sh writes: BRAIN.db itself is git-ignored, and the session-start hook rebuilds a missing one from its snapshots (scripts/sqlite-sidecar.sh restore).",
+  "sqlite_tracking": [
+    { "db": "cowork/brain/BRAIN.db", "tables": ["logs"] }
+  ],
 
   "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Skills that read one: 1password, brain, brainstorm, bridge, claude-switcher, clear-cache, commit, cto, kill, look, parse, pbar, plan, prune, push, report, research, swarm, vibe-audit, video-editor, web, wiki. rules.plan is where a team repo's ship command and policy, branch conventions, priority tiers and CI path map go; rules.look names the base URL and how a fresh headless profile signs in. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
   "rules": {

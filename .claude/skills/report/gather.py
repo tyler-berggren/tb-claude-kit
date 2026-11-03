@@ -109,9 +109,6 @@ def brain(db, s, e):
         out[t] = c.execute(
             f"SELECT id, title, substr(coalesce(body,''),1,240) FROM logs WHERE type=? AND {created} ORDER BY created_at",
             (t, a, b)).fetchall()
-    out["sessions"] = c.execute(
-        "SELECT started_at, summary FROM sessions WHERE replace(started_at,' ','T') >= ? AND replace(started_at,' ','T') < ? AND coalesce(summary,'') != ''",
-        (a, b)).fetchall()
     out["session_count"] = c.execute(
         "SELECT count(*) FROM sessions WHERE replace(started_at,' ','T') >= ? AND replace(started_at,' ','T') < ?",
         (a, b)).fetchone()[0]
@@ -299,11 +296,6 @@ def main():
             w(f"## {name}\n")
             for row in b_cur[k]:
                 w(f"- #{row[0]} {row[1]}" + (f" — {re.sub(chr(10), ' ', row[2])}" if row[2] and k != "tasks_done" else ""))
-            w("")
-        if b_cur["sessions"]:
-            w("## Session summaries\n")
-            for st, summ in b_cur["sessions"]:
-                w(f"- {st[:10]}: {summ}")
             w("")
         w("## Open now (for What's next)\n")
         for row in focus:

@@ -381,7 +381,7 @@ WHERE id = <run_id>;
 
 ### Step 8 — Housekeeping
 
-Recalculate tiers and regenerate `cowork/brain/BRAIN.md` digest.
+Recalculate brain tiers (`/brain`, **Recalculate tiers**).
 
 Print final summary:
 

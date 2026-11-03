@@ -26,43 +26,16 @@ logs:
 
 sessions:
   id              INTEGER PRIMARY KEY AUTOINCREMENT
+  session_id      TEXT (Claude Code's session id, from the hook input)
   started_at      TEXT (ISO 8601, local time)
-  ended_at        TEXT
-  agent           TEXT
-  goals           TEXT
-  summary         TEXT
-  key_files       TEXT (comma-separated)
-  pid             INTEGER (shell PID for concurrent session safety)
-
-journal:
-  id              INTEGER PRIMARY KEY AUTOINCREMENT
-  created_at      TEXT (ISO 8601, local time)
-  session_id      TEXT
-  content         TEXT NOT NULL
-
-mantra:
-  content         TEXT (single row — the project's self-authored narrative)
-  updated_at      TEXT (ISO 8601, local time)
+  ended_at        TEXT (set by the SessionEnd hook; NULL while running or after a crash)
 ```
 
-## Mantra System
+The `logs` table is the knowledge store (decisions, tasks, questions, insights, notes, milestones). `sessions` records when each Claude Code session started and ended; the hooks manage it, and the session-start hook uses the previous session's start to list what it added, for the mantra review.
 
-The mantra is Claude's self-authored context — what Claude thinks is important that CLAUDE.md doesn't say. Not a project status summary or changelog. It's the complement to CLAUDE.md: CLAUDE.md is human-authored project instructions, the mantra is Claude's own evolving understanding of what matters. Patterns learned across sessions, non-obvious codebase knowledge, current momentum, things that keep coming up, tricky areas, working assumptions.
+**The mantra is not in the DB.** It lives in the project's CLAUDE.md, between the line `<!-- BEGIN:mantra -->` and the line `<!-- END:mantra -->`, so it loads with CLAUDE.md and its history is git's. See `/brain mantra`.
 
-**Three sync points** (kept in sync by `/brain audit`):
-1. `mantra` table in BRAIN.db — source of truth
-2. `cowork/brain/MANTRA.md` — readable export
-3. `<!-- BEGIN:mantra -->` block in CLAUDE.md — inline for fresh sessions (optional)
-
-```bash
-# Read current mantra
-sqlite3 cowork/brain/BRAIN.db "SELECT content FROM mantra LIMIT 1;"
-
-# Update mantra
-sqlite3 cowork/brain/BRAIN.db "UPDATE mantra SET content = '...', updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime');"
-```
-
-The `logs` table is the main knowledge store (decisions, tasks, questions, insights, notes, milestones). `journal` captures per-session reflections written during `/brain done`. `mantra` holds Claude's self-authored context (complement to CLAUDE.md). `sessions` tracks session lifecycle (auto-managed by hooks).
+**The DB is git-ignored.** To keep the brain in git, list it under `sqlite_tracking` in `.claude/kit.json` (install.sh does by default); `/commit` writes `cowork/brain/BRAIN.airsqlite/logs.snapshot.ndjson`, and the session-start hook rebuilds a missing DB from it (`scripts/sqlite-sidecar.sh restore`).
 
 ## Common Queries
 
@@ -98,7 +71,7 @@ sqlite3 cowork/brain/BRAIN.db "SELECT id, type, title FROM logs WHERE json_extra
 sqlite3 cowork/brain/BRAIN.db "SELECT id, title, status, supersedes, superseded_by FROM logs WHERE id = ID OR supersedes = ID OR superseded_by = ID;"
 
 # Recent sessions
-sqlite3 cowork/brain/BRAIN.db "SELECT id, started_at, ended_at, goals, summary FROM sessions ORDER BY started_at DESC LIMIT 10;"
+sqlite3 cowork/brain/BRAIN.db "SELECT id, started_at, ended_at FROM sessions ORDER BY id DESC LIMIT 10;"
 ```
 
 ## Entry Types
@@ -107,7 +80,7 @@ sqlite3 cowork/brain/BRAIN.db "SELECT id, started_at, ended_at, goals, summary F
 - `decision` — choices made with rationale in body
 - `question` — open questions to resolve (resolve via `/brain resolve`)
 - `insight` — patterns or realizations worth preserving
-- `task` — work items (managed via `/brain add task` and `/brain done`)
+- `task` — work items (managed via `/brain add task` and `/brain update`)
 - `milestone` — significant project events, weekly review snapshots
 
 ## Tag Conventions
@@ -124,7 +97,7 @@ sqlite3 cowork/brain/BRAIN.db "SELECT id, type, title FROM logs WHERE ',' || tag
 
 ## Tier System
 
-Tiers control what gets loaded at session start and what appears in digests. They are **computed, not manually set** — recalculated during digest and audit.
+Tiers control what gets loaded at session start and what `/brain` shows. They are **computed, not manually set** — recalculated at every session start and by `/brain` after any change.
 
 Temperature reflects **work completed**, not metadata touches. No per-entry access tracking.
 
@@ -140,7 +113,7 @@ Temperature reflects **work completed**, not metadata touches. No per-entry acce
 A plan-linked task is hot if its plan has momentum — meaning real work is completing:
 
 1. **Sibling completion**: another task with the same `meta.plan_id` has `completed_at` within 14 days
-2. **Plan file activity**: `git log -1 --format=%aI -- cowork/plans/*<NNN>*.md` shows modification within 14 days
+2. **Plan file activity**: `git log -1 --format=%at -- cowork/plans/*<NNN>*.md` shows modification within 14 days
 
 Either signal counts. The skill checks both during tier recalculation.
 
@@ -199,7 +172,7 @@ fi
 
 ### Visibility by Tier
 
-- **hot**: loaded at session start, shown in digests
-- **warm**: shown in digests, searchable
-- **cold**: searchable, hidden from digests
+- **hot**: loaded at session start, shown by `/brain`
+- **warm**: shown by `/brain`, searchable
+- **cold**: searchable, hidden from `/brain`
 - **archived**: direct search only

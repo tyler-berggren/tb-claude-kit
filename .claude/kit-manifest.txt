@@ -1,31 +1,7 @@
-.claude/skills/1password
-.claude/skills/brain
-.claude/skills/brainstorm
-.claude/skills/bridge
-.claude/skills/claude-switcher
-.claude/skills/clear-cache
-.claude/skills/commit
-.claude/skills/cto
-.claude/skills/kill
-.claude/skills/look
-.claude/skills/parse
-.claude/skills/pbar
-.claude/skills/plan
-.claude/skills/prune
-.claude/skills/push
-.claude/skills/research
-.claude/skills/swarm
-.claude/skills/vibe-audit
-.claude/skills/video-editor
-.claude/skills/web
-.claude/skills/wiki
-.claude/agents/swarm-opus-high.md
-.claude/agents/swarm-opus-medium.md
-.claude/agents/swarm-sonnet-high.md
-.claude/agents/swarm-sonnet-low.md
-.claude/agents/swarm-sonnet-medium.md
-.claude/hooks/session-start.sh
-.claude/hooks/background-pbar.sh
+# Fixed kit paths, beyond the ones found by folder: every .claude/skills/<name>/,
+# .claude/agents/*.md and .claude/hooks/* in the kit is included automatically.
+# install.sh and the session-start hook both read this list. Edit it by hand.
+.claude/KIT.md
 .vscode/extensions.json
 .vscode/settings.json
 cowork/brain/schema.sql

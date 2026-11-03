@@ -1,61 +1,13 @@
 # Project
 
-<!-- Replace this section with your project description -->
+<!-- What this project is, its stack, how to run and test it, its conventions and its traps.
+     Write it for a capable engineer on their first day. Keep it short: every line loads into
+     every session. -->
 
-## Skills
+The kit's conventions (brain, mantra, standing rules) load at session start from `.claude/KIT.md`
+via the session-start hook. Skills are listed by Claude Code itself.
 
-This project uses Claude Code skills for structured workflows:
-
-- `/1password` — Set up, check, or migrate 1Password secret management — bootstrap service accounts, convert plaintext .env to op:// references.
-- `/brain` — Project knowledge management (decisions, tasks, questions, insights). Single source of truth in `cowork/brain/BRAIN.db`.
-- `/brainstorm` — Conversational idea development. All outputs logged to brain DB with parent linking.
-- `/bridge` — Start artifact bridge server (port 4444) for HTML artifacts to read/write project files.
-- `/claude-switcher` — Several Claude accounts on one machine, picked by VS Code profile. Checks who is signed in where and which profile uses which account; `add <name>` sets up a new one.
-- `/clear-cache` — Measure and clear machine-wide dev caches (npm, pnpm, uv, pip, Homebrew, stale Puppeteer browsers). `report` measures only; `deep` offers costlier cleanups.
-- `/commit` — Stage all files and commit with auto-generated message.
-- `/cross-artifact` — Read claude.ai artifacts shared with another of the user's Claude accounts, live: page source, loaded files, the running page. `sign-in <name>` once per account.
-- `/cto` — Architecture observatory — scans codebase, maps components into SQLite, generates HTML with Mermaid C4 diagrams.
-- `/kill` — Kill dev processes (servers, watchers, bridge) without touching Claude Code.
-- `/look` — Inspect shared Chrome viewport via Puppeteer (DOM-first to diagnose; a screenshot to confirm a visual change landed).
-- `/parse` — Convert local documents (docx, pdf, xlsx, pptx…) to markdown via Firecrawl. Takes a file, a glob, or a directory.
-- `/pbar` — Live terminal progress display for a background job expected to run 5+ minutes. Claude starts it unprompted.
-- `/plan` — Multi-phased project planning with fresh-eyes reconciliation on every resume.
-- `/prune` — Review a repo's worktrees and recommend which to remove (merged, abandoned, stale); removes only what you pick. `report` changes nothing.
-- `/push` — Commit and push to remote.
-- `/report` — Plain-language progress report on the last N days (`month`, `quarter`, `2026-09`, `q3`, `since <date>`) for managers, stakeholders and peers, in `cowork/reports/`. Outcomes and measured results only; momentum only from a comparison with the period before.
-- `/research` — Web and project research with numbered reports in `cowork/research/`.
-- `/swarm` — Autonomous parallel plan execution. Setup phase resolves every human question and registers a unit graph in the brain; run phase dispatches worktree-isolated agents, reviews, merges, and reports.
-- `/vibe-audit` — Codebase health and security audit with self-learning pattern database.
-- `/video-editor` — Transcript-based video editing via Palmier Pro MCP. Transcribe, script, cut, caption.
-- `/web` — Audit a static site's SEO/AEO assets (metadata, structured data, sitemap, robots, llms.txt, markdown mirrors) for being present, correct and current.
-- `/wiki` — Maintain an organic project wiki; `deploy` publishes it to Cloudflare Pages.
-
-## Brain System
-
-All project knowledge lives in `cowork/brain/BRAIN.db` — a SQLite database with FTS5 search.
-
-- **DB is truth, markdown is view.** Never read from `BRAIN.md` to determine state — always query the DB.
-- **Entry types:** note, decision, question, insight, task, milestone
-- **Tier system:** hot (focus/momentum) > warm (important/recent) > cold (active) > archived (done)
-- **Tags:** always normalized (comma-split, trimmed, lowercase, alpha-sorted, deduped)
-- **Plans:** numbered files in `cowork/plans/` linked via `meta.plan_id`
-- **Research:** numbered reports in `cowork/research/` indexed in brain DB
-
-### Session hooks
-
-- **SessionStart:** Loads brain state (focus, tasks, questions, mantra) and last session's work into context. Recalculates tiers. Instructs Claude to review the last session and update the mantra if warranted.
-- **SessionEnd:** Records session end timestamp.
-- **PostToolUse (Bash):** After a background Bash call, reminds Claude to hand over a `/pbar` progress display.
-
-### Mantra
-The mantra is Claude's self-authored evolving context — patterns, non-obvious knowledge, tricky areas, current momentum, and working assumptions that CLAUDE.md doesn't cover. It lives in three synced locations:
-1. `mantra` table in BRAIN.db (source of truth)
-2. `cowork/brain/MANTRA.md` (readable export for Obsidian)
-3. The mantra block at the end of this file, between the `BEGIN:mantra` and `END:mantra` comment lines (inline for fresh sessions)
-
-**Automatic review-on-start:** The session-start hook loads the last session's logs, journal, and summary. At the start of each session, review this context against the current mantra. If the last session surfaced something a fresh session would need — update the mantra silently (all three locations). If it was routine, skip. No user action required.
-
-**How to update:** `UPDATE mantra SET content = '...', updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime');` (or INSERT if empty). Then write `cowork/brain/MANTRA.md` and replace the lines between the BEGIN:mantra and END:mantra comment lines at the end of this file — matching whole marker lines, never the first place the marker's text appears.
+## Mantra
 
 <!-- BEGIN:mantra -->
 <!-- END:mantra -->

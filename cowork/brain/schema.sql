@@ -1,6 +1,7 @@
 -- BRAIN.db schema
 -- Project knowledge database for the brain skill system.
--- Stores decisions, tasks, questions, insights, notes, milestones, session logs, and mantra.
+-- Stores decisions, tasks, questions, insights, notes, milestones, and session start/end times.
+-- The mantra is not here: it lives in the project's CLAUDE.md, between the mantra marker lines.
 
 CREATE TABLE IF NOT EXISTS logs (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,28 +47,15 @@ CREATE TRIGGER IF NOT EXISTS logs_au AFTER UPDATE ON logs BEGIN
   INSERT INTO logs_fts(rowid, title, body, tags) VALUES (new.id, new.title, new.body, new.tags);
 END;
 
+-- One row per Claude Code session, keyed by the session_id Claude Code hands
+-- both hooks. Written by .claude/hooks/session-start.sh and session-end.sh.
 CREATE TABLE IF NOT EXISTS sessions (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  started_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-  ended_at        TEXT,
-  agent           TEXT,
-  goals           TEXT,
-  summary         TEXT,
-  key_files       TEXT,
-  pid             INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS journal (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  created_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
   session_id      TEXT,
-  content         TEXT NOT NULL
+  started_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+  ended_at        TEXT
 );
-
-CREATE TABLE IF NOT EXISTS mantra (
-  content         TEXT,
-  updated_at      TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
-);
+CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);
 
 -- Swarm: autonomous parallel plan execution (see the swarm skill).
 -- swarm_runs.status drives /swarm phase inference: no row -> setup,

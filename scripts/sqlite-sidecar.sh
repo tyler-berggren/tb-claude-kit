@@ -18,6 +18,49 @@
 
 set -euo pipefail
 
+# restore <db> [schema.sql] — rebuild a MISSING database from its sidecar folder
+# (a fresh clone, or a new machine). Applies the schema first when given, so
+# triggers, indexes and FTS tables come back too, then inserts every snapshot
+# row with its original rowid. Refuses to touch a database that already exists.
+if [ "${1:-}" = "restore" ]; then
+  DB="${2:?usage: sqlite-sidecar.sh restore <db> [schema.sql]}"
+  SCHEMA="${3:-}"
+  SIDECAR_DIR="$(dirname "$DB")/$(basename "${DB%.*}").airsqlite"
+  [ -e "$DB" ] && { echo "sqlite-sidecar: $DB already exists, not restoring" >&2; exit 1; }
+  [ -d "$SIDECAR_DIR" ] || { echo "sqlite-sidecar: no $SIDECAR_DIR to restore from" >&2; exit 1; }
+  TMP="$DB.restoring"
+  rm -f "$TMP"
+  [ -n "$SCHEMA" ] && sqlite3 "$TMP" < "$SCHEMA"
+  python3 - "$TMP" "$SIDECAR_DIR" <<'PY'
+import glob, json, os, sqlite3, sys
+db, folder = sys.argv[1], sys.argv[2]
+c = sqlite3.connect(db)
+c.execute("PRAGMA ignore_check_constraints = ON")   # restore the data as it was, not as today's schema would accept it
+total = 0
+for path in sorted(glob.glob(os.path.join(folder, "*.snapshot.ndjson"))):
+    table = os.path.basename(path)[: -len(".snapshot.ndjson")]
+    cols = {r[1] for r in c.execute(f'PRAGMA table_info("{table}")')}
+    for line in open(path, encoding="utf-8"):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        rowid = row.pop("_rowid", None)
+        if not cols:   # no schema for this table: create it from the first row
+            c.execute(f'CREATE TABLE "{table}" ({", ".join(chr(34) + k + chr(34) for k in row)})')
+            cols = set(row)
+        row = {k: v for k, v in row.items() if k in cols}
+        keys = ["rowid"] + list(row) if rowid is not None else list(row)
+        vals = ([rowid] if rowid is not None else []) + list(row.values())
+        c.execute(f'INSERT INTO "{table}" ({", ".join(k if k == "rowid" else chr(34) + k + chr(34) for k in keys)}) '
+                  f'VALUES ({", ".join("?" for _ in keys)})', vals)
+        total += 1
+c.commit()
+print(f"sqlite-sidecar: restored {total} row(s)")
+PY
+  mv "$TMP" "$DB"
+  exit 0
+fi
+
 KIT_JSON=".claude/kit.json"
 
 if [ ! -f "$KIT_JSON" ]; then

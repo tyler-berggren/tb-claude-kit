@@ -1,7 +1,7 @@
 ---
 name: brain
 description: Read, write, and search the project brain (notes, decisions, questions, insights, tasks, milestones). The single interface for all project knowledge and task management.
-argument-hint: "[update|audit|focus|add|done|journal|mantra|search|resolve|depends|tag|digest|<pillar>] [args]"
+argument-hint: "[update|audit|focus|add|done|mantra|search|resolve|depends|tag|<pillar>] [args]"
 ---
 
 ## Focus Items
@@ -36,14 +36,12 @@ Dispatch on the first word:
 - `audit` — **Audit**: deep health check since last audit
 - `focus` — **Focus**: set 2-3 focus items
 - `add <type>` — **Add**: create a new entry (note, decision, question, insight, task, milestone)
-- `done` — **Done**: close the session — summarize, journal, update mantra
-- `journal` — **Journal**: consider writing a journal entry based on recent work
+- `done` — **Done**: close the session — sync the brain, consider the mantra and a lesson
 - `mantra` — **Mantra**: consider updating the mantra based on recent work
 - `search <query>` — **Search**: full-text search across title, body, and tags
 - `resolve <question_id>` — **Resolve**: answer a question by creating a linked decision
 - `depends <id> <depends_on_id>` — **Depends**: mark that an entry depends on a decision
 - `tag <id> <tags>` — **Tag**: update tags on an existing entry
-- `digest` — **Digest**: regenerate `cowork/brain/BRAIN.md`
 - A bare pillar name (e.g. `platform`, `backend`) — **Review** filtered to that pillar's tasks
 
 ---
@@ -72,7 +70,7 @@ The daily "what's going on" view. Shows focus, tasks, questions, and recent deci
    - Blocked items highlighted with why
    - Open questions that need resolution
    - Recent decisions that set direction
-4. Run **Digest** at the end.
+4. Run **Recalculate tiers** at the end.
 
 ---
 
@@ -126,7 +124,7 @@ This is lighter than an audit. An audit looks back over days/weeks and asks stra
 
 6. **Present changes.** Summarize what was updated: tasks marked done, decisions logged, state fixed. Don't silently modify — show the user what changed.
 
-7. **Recalculate tiers** (without regenerating `BRAIN.md`). Run the full two-phase tier recalculation from USAGE.md (SQL phase + plan momentum shell phase).
+7. Run **Recalculate tiers**.
 
 ---
 
@@ -267,9 +265,8 @@ VALUES ('milestone',
 
 The mantra is Claude's self-authored context — what matters that CLAUDE.md doesn't say. Not a changelog or status summary. Think: what would a fresh Claude session need to know that isn't in CLAUDE.md? Patterns, non-obvious knowledge, tricky areas, current momentum, working assumptions.
 
-1. Read the current mantra and recent high-signal entries:
+1. Read the current mantra (the block between the mantra marker lines in CLAUDE.md, already in your context) and recent high-signal entries:
    ```sql
-   SELECT content FROM mantra LIMIT 1;
    SELECT id, type, title, substr(body, 1, 300), created_at FROM logs
    WHERE created_at > '<last_audit_date>'
    AND type IN ('decision', 'milestone', 'insight')
@@ -277,17 +274,17 @@ The mantra is Claude's self-authored context — what matters that CLAUDE.md doe
    ORDER BY created_at DESC;
    ```
 2. Rewrite the mantra. Ask: what did I learn this period that a fresh session would benefit from? What's non-obvious about where the project is right now? What keeps tripping me up or coming up repeatedly? What assumptions am I working under?
-3. Update via the **Mantra subcommand** procedure (DB update + MANTRA.md export + CLAUDE.md mantra block).
+3. Write it via the **Mantra subcommand** procedure.
 
-### Step 11 — Recalculate tiers and regenerate digest
+### Step 11 — Recalculate tiers
 
-Run **Digest** (which includes tier recalculation).
+Run **Recalculate tiers**.
 
 ---
 
 ## Focus subcommand
 
-Set 2-3 focus items. These appear at the top of every session start and in the brain digest.
+Set 2-3 focus items. These appear at the top of every session start.
 
 Usage: `focus`
 
@@ -307,7 +304,7 @@ Usage: `focus`
    ```sql
    UPDATE logs SET focus = 1 WHERE id IN (<id1>, <id2>, <id3>);
    ```
-6. Run **Digest**.
+6. Run **Recalculate tiers**.
 
 ---
 
@@ -338,43 +335,20 @@ Create a new entry. Usage: `add <type>` where type is one of: `note`, `decision`
    VALUES ('task', '<title>', '<body>', '<normalized_tags>', '<pillar>', <priority>, <importance>);
    ```
 5. Confirm the entry was created (show id and created_at).
-6. Run **Digest**.
+6. Run **Recalculate tiers**.
 
 ---
 
 ## Done subcommand
 
-Close the session — summarize what happened, write a journal entry, and consider updating the mantra. Usage: `done`
+Close the session: make the brain match what happened, then consider the mantra and a lesson. Usage: `done`
 
 ### Procedure
 
-1. **Gather session context.** Find the current session and recent work:
-   ```sql
-   SELECT id, started_at, goals FROM sessions WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1;
-   ```
-   ```bash
-   git log --oneline --since='<started_at>'
-   ```
-   Also review conversation context for what was accomplished.
-
-2. **Write session summary.** Summarize what was attempted, accomplished, and what's left:
-   ```sql
-   UPDATE sessions SET summary = '<summary>', key_files = '<files>' WHERE id = <session_id>;
-   ```
-
-3. **Journal entry.** Write a short journal entry — what happened, what was learned, what surprised you. This is Claude's perspective, not a changelog. Write it conversationally, like a brief note to the next session. Insert it directly, then share it inline with the user.
-   ```sql
-   INSERT INTO journal (session_id, content)
-   VALUES ('<session_id>', '<journal_entry>');
-   ```
-
-4. **Mantra check.** Read the current mantra:
-   ```sql
-   SELECT content FROM mantra LIMIT 1;
-   ```
-   Did this session surface anything a fresh Claude session would need to know that isn't in CLAUDE.md? New patterns, non-obvious gotchas, shifted assumptions, tricky areas discovered? If yes, update via the **Mantra subcommand** procedure. If it was routine work, skip. Either way, share the current mantra inline with the user so they can see what future sessions will start with.
-
-5. Run **Digest**.
+1. Run the **Update** procedure (tasks done, decisions logged, plan progress, stale state).
+2. **Mantra check.** Did this session surface anything a fresh session would need that CLAUDE.md doesn't say — a new pattern, a non-obvious gotcha, a shifted assumption, a tricky area? If yes, rewrite the mantra via the **Mantra subcommand** procedure. If the work was routine, skip.
+3. **Compound lesson.** If a reusable lesson emerged, write it as an insight tagged `lesson`: one sentence stating the rule, then Why and How to apply.
+4. Tell the user in two or three lines what changed in the brain and the mantra.
 
 ---
 
@@ -428,7 +402,7 @@ Answer an open question by creating a linked decision. Usage: `resolve <question
      body = body || char(10) || '--- Resolved by decision #' || <new_decision_id>
    WHERE id = <question_id>;
    ```
-5. Confirm both entries. Run **Digest**.
+5. Confirm both entries. Run **Recalculate tiers**.
 
 ---
 
@@ -469,144 +443,38 @@ Update tags on an entry. Usage: `tag <id> <tags>`
 
 ---
 
-## Journal subcommand
-
-Reflect on recent work and consider writing a journal entry. Same as the journal step in `/brain done`, just standalone.
-
-### Procedure
-
-1. Review conversation context and recent commits for what just happened.
-2. Write a short journal entry — what happened, what was learned, what surprised you. This is Claude's perspective, not a changelog. Write it conversationally, like a brief note to the next session.
-3. Find the current session, insert directly, then share the entry inline with the user:
-   ```sql
-   SELECT id FROM sessions WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1;
-   INSERT INTO journal (session_id, content) VALUES ('<session_id>', '<content>');
-   ```
-
----
-
 ## Mantra subcommand
 
-Reflect on recent work and consider updating the mantra. Same as the mantra check in `/brain done`, just standalone. The mantra is Claude's self-authored context — what matters that CLAUDE.md doesn't say. Patterns, non-obvious knowledge, tricky areas, current momentum, working assumptions.
+Reflect on recent work and consider updating the mantra. The mantra is Claude's self-authored context — what matters that the rest of CLAUDE.md doesn't say: patterns, non-obvious knowledge, tricky areas, current momentum, working assumptions. It is not a changelog or a status report.
+
+It lives in one place: CLAUDE.md, between the line that is exactly `<!-- BEGIN:mantra -->` and the line that is exactly `<!-- END:mantra -->`. It is already in your context. There is no copy in the DB or anywhere else.
 
 ### Procedure
 
-1. Read the current mantra:
-   ```sql
-   SELECT content, updated_at FROM mantra LIMIT 1;
-   ```
-2. Review conversation context and recent work. Ask: did this session surface anything a fresh Claude session would need to know that isn't in CLAUDE.md? New patterns, non-obvious gotchas, shifted assumptions, tricky areas discovered?
-3. If nothing meaningful to add, say so and skip. Don't update for routine work.
-4. If updating, show the proposed new mantra to the user first.
-3. Update:
-   ```sql
-   UPDATE mantra SET content = '<narrative>', updated_at = strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime');
-   ```
-   If no row exists: `INSERT INTO mantra (content, updated_at) VALUES ('<narrative>', strftime('%Y-%m-%dT%H:%M:%S', 'now', 'localtime'));`
-4. Export to `cowork/brain/MANTRA.md`:
-   ```markdown
-   <!-- Auto-generated from BRAIN.db mantra table. Do not edit directly — use /brain mantra to update. -->
-   # Mantra
-
-   {narrative}
-   ```
-5. Update the mantra block in CLAUDE.md with the same content: replace the lines between the line that is exactly
-   `<!-- BEGIN:mantra -->` and the next line that is exactly `<!-- END:mantra -->`. Match WHOLE LINES — never the
-   first occurrence of the marker text, which prose elsewhere in the file may quote; a first-match edit once
-   swallowed the file's own explanation of the mantra. If the block doesn't exist yet, append it after the Brain section.
-6. Confirm.
+1. Review conversation context and recent work. Ask: did this session surface anything a fresh session would need that isn't already written down?
+2. If nothing meaningful, say so and skip. Don't update for routine work.
+3. Rewrite the block with the Edit tool. Match the WHOLE marker lines — never the first place the marker text appears, since prose elsewhere may quote it. If the block doesn't exist, add a `## Mantra` section at the end of CLAUDE.md holding both marker lines.
+4. **Stay within about 4,000 characters.** Rewrite rather than append: merge, cut what is stale, cut what CLAUDE.md or the code now says. The session-start hook flags a mantra over budget.
+5. Show the user the lines that changed. No confirmation needed — git history is the mantra's history, and the user can revert.
 
 ---
 
-## Digest subcommand
+## Recalculate tiers
 
-Regenerate `cowork/brain/BRAIN.md` — a single read-only markdown snapshot combining knowledge and tasks for browsing.
-
-### Procedure
-
-1. **Recalculate tiers** — run the full two-phase tier recalculation from USAGE.md (SQL phase for archived/cold/warm/focus-hot, then shell phase for plan momentum).
-
-2. Query all data for the digest:
-   - Mantra (`SELECT content FROM mantra LIMIT 1`)
-   - Focus items
-   - Active/blocked tasks by pillar
-   - Open questions
-   - Recent decisions (hot/warm, last 15)
-   - Insights (hot/warm)
-   - Recent notes (hot/warm, last 10)
-   - Milestones (all, chronological)
-   - Tier stats
-
-3. Write `cowork/brain/BRAIN.md`:
-
-```markdown
-# Brain
-
-> Auto-generated from `cowork/brain/BRAIN.db`. Do not edit — use `/brain` commands.
-> Last updated: {YYYY-MM-DD HH:MM}
-
-## Mantra
-
-{content from mantra table, or "No mantra set — run /brain audit to generate."}
-
-## Focus
-
-{focus items with pillar — or "No focus items set"}
-
-## Active Tasks
-
-### {Pillar Name}
-
-- #{id} **{title}** — {body truncated to ~120 chars} `#{tag1}` `#{tag2}`
-  {if blocked: Blocked: {reason}}
-  {if plan-linked: -> plan NNN}
-
-### {Next Pillar}
-...
-
-## Open Questions
-
-{active questions, newest first}
-
-## Recent Decisions
-
-{last 15 decisions with rationale}
-
-## Insights
-
-{hot/warm insights}
-
-## Recent Notes
-
-{last 10 hot/warm notes, truncated}
-
-## Milestones
-
-{all milestones, chronological}
-
----
-
-{hot} hot / {warm} warm / {cold} cold / {archived} archived
-```
-
-4. Each entry renders as:
-   ```
-   - **{title}** ({date}) — {body truncated to ~150 chars} `#{tag1}` `#{tag2}`
-   ```
+Tiers are computed, never set by hand. Run the full two-phase recalculation from USAGE.md: the SQL phase (archived, cold, warm, focus-hot), then the plan-momentum shell phase. The session-start hook runs the same thing on every start.
 
 ---
 
 ## Shared conventions
 
-- **DB is truth, markdown is view.** Never read from `cowork/brain/BRAIN.md` to determine state — always query the DB.
-- **Auto-digest.** Run Digest at the end of any subcommand that modifies data.
+- **The DB is the only copy.** There is no markdown export. Query the DB; `/brain` with no argument is the readable view.
+- **Recalculate tiers** at the end of any subcommand that changes status, focus or importance.
 - **Normalize tags on every write.** Split by comma, trim, lowercase, sort alphabetically, deduplicate, rejoin. Check existing tags (shown in dynamic context above) before inventing new ones.
 - **Set completed_at when marking tasks done.** Always set `completed_at = datetime('now', 'localtime')` — this drives plan momentum detection.
-- **Recalculate tiers during Digest.** See the Digest procedure and USAGE.md for the two-phase recalculation (SQL + plan momentum shell).
 - **Decisions are permanent.** Don't update a decision — create a new one that supersedes it (`supersedes` column) and mark the old one `superseded` (`superseded_by` column).
 - **Questions resolve into decisions.** Use `resolve <id>` to create the linked decision.
 - **Decision dependencies.** Use `depends` to track what builds on what.
-- **Sessions are auto-logged.** Hooks create/close session rows. Use `/brain done` to close with journal + summary.
+- **Sessions are auto-logged.** The hooks record each session's start and end by Claude Code's session id. Nothing else is stored per session.
 - **Pillar consistency.** Check existing pillars before creating new ones. Pillars are broad areas, not fine-grained categories.
 - **Priority is relative per pillar.** Priority 1 in one pillar has no relation to priority 1 in another.
 - **Meta is structured.** Use `json_set` / `json_extract`. Common keys: `plan_id`, `from_plan`, `blocked_by`, `depends_on`.
