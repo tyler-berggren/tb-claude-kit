@@ -34,6 +34,10 @@ entries to `.mcp.json` and `.claude/settings.json`. With `--yes`, or when no one
 keyboard (an agent running it), all three are enabled without asking and drifted files are
 reported with their diffs, not updated.
 
+**Writing rules (once a machine).** An interactive run on a machine with no writing rules set up asks
+for the folder holding your own writing sets and links it as `~/.claude/writing`; Enter for none is
+remembered and never asked again. See [Writing rules](customization.md#writing-rules).
+
 Conversion is lossless in both directions.
 
 **Adopting an existing project.** Paths already holding real files are reported as `[occupied]`
@@ -241,7 +245,9 @@ In order of preference — reach for the first one that fits:
    project-owned subagent in `.claude/agents/` that a kit skill's rule points at (for example,
    the prior-art sweep `/plan`'s PR mode runs before a body is written). The installer never
    touches your own skills or agents.
-4. **`fork`** → last resort, when the kit's own behavior has to change
+4. **How Claude writes for a context** (client messages, a wiki) → a writing set: `.claude/writing/<name>.md`,
+   or `kit.json` `writing.<name>` to adjust one of yours ([Writing rules](customization.md#writing-rules))
+5. **`fork`** → last resort, when the kit's own behavior has to change
 
 The ordering matters: JSON keeps overrides deliberately small, and a rule that won't fit
 comfortably in a string is usually a sign it belongs in its own skill — or upstream in the kit.

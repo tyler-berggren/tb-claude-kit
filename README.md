@@ -158,7 +158,8 @@ automatically at session start. If a repo has to work on a machine without the k
 - heals schema drift in the brain;
 - loads focus, tasks, open questions and recent entries;
 - lists what the previous session added, so Claude can check it against the mantra;
-- injects the kit's conventions from [`.claude/KIT.md`](.claude/KIT.md).
+- injects the kit's conventions from [`.claude/KIT.md`](.claude/KIT.md), and your writing rules: named
+  sets for how Claude writes in each context, kept in a repo of yours ([docs/customization.md](docs/customization.md#writing-rules)).
 
 That last step is why kit-wide rules don't have to be copied into each project's CLAUDE.md.
 
@@ -190,7 +191,7 @@ opt in.
 | [docs/install.md](docs/install.md) | Modes, automatic adoption, `.gitignore`, memory, every `kit.json` key, the brain DB, a project's layout after install |
 | [docs/plan-and-swarm.md](docs/plan-and-swarm.md) | `/plan` and `/swarm` in full: PR mode, epics, model tiers, machine budget, reviews mid-run |
 | [docs/skills.md](docs/skills.md) | Research, parse, look, cto, wiki, video, 1Password, Claude switcher, cross-artifact, lidsleep |
-| [docs/customization.md](docs/customization.md) | Extra MCP servers and per-project skills worth adding |
+| [docs/customization.md](docs/customization.md) | Writing rules, extra MCP servers, and per-project skills worth adding |
 
 ---
 
