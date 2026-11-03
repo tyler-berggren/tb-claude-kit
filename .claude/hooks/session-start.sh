@@ -532,6 +532,15 @@ kit_memory
 KIT_RULES=""
 [ -f .claude/KIT.md ] && KIT_RULES=$(cat .claude/KIT.md)
 
+# --- Writing rules: the owner's named sets and the project's (scripts/writing-rules has the rules) ---
+# Injected with the conventions, so both emit paths below carry them.
+if [ -x "$HOME/.claude-kit/scripts/writing-rules" ]; then
+  WRITING_RULES=$("$HOME/.claude-kit/scripts/writing-rules" . 2>/dev/null)
+  [ -n "$WRITING_RULES" ] && KIT_RULES="${KIT_RULES:+$KIT_RULES
+
+}$WRITING_RULES"
+fi
+
 # --- Mantra: a block in CLAUDE.md, loaded with it. Here only its health is checked. ---
 MANTRA_BUDGET=4000
 MANTRA_NOTICE=""

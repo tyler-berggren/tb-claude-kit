@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Writing rules: named sets of rules for what Claude writes, each scoped to where it applies.
+
+The kit ships this mechanism only, never anyone's rules. A set is one Markdown file:
+
+    ---
+    name: client-messages
+    applies: Slack messages, emails, support replies and issue comments a client reads
+    ---
+    - One main point per message, stated first.
+
+Sets come from two places, read in this order:
+  1. The owner's: $TB_CLAUDE_KIT_WRITING, else ~/.claude/writing (a folder, or a link to one in a repo
+     you own). Personal, so it lives outside the kit and outside every project.
+  2. The project's: .claude/writing/*.md. A project set with an owner set's name replaces it; any other
+     name is a set of its own.
+Then .claude/kit.json "writing" adjusts a set by name without a file: {"<name>": {"add": "...",
+"applies": "...", "off": true}}.
+
+Prints the section the session-start hook injects, or nothing when no set is active.
+  writing-rules [project-root]          the section
+  writing-rules --list [project-root]   one line a set: name, where it came from, what it applies to
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def parse(path):
+    """A set from its file: name (frontmatter, else the file's stem), applies, body."""
+    text = path.read_text(encoding="utf-8")
+    meta, body = {}, text
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        if end != -1:
+            for line in text[4:end].splitlines():
+                key, sep, value = line.partition(":")
+                if sep:
+                    meta[key.strip()] = value.strip()
+            body = text[end + 4:].lstrip("\n")
+    return {"name": meta.get("name") or path.stem, "applies": meta.get("applies", ""), "body": body.rstrip()}
+
+
+def sets_in(folder, source):
+    if not folder.is_dir():
+        return []
+    out = []
+    for f in sorted(folder.glob("*.md")):
+        try:
+            s = parse(f)
+        except OSError:
+            continue
+        s["source"] = source
+        out.append(s)
+    return out
+
+
+def active(root):
+    owner_dir = Path(os.path.expanduser(os.environ.get("TB_CLAUDE_KIT_WRITING") or "~/.claude/writing"))
+    project_dir = root / ".claude" / "writing"
+    # A project whose own folder IS the owner's (the owner's repo itself) reads it once, as the owner's.
+    same = owner_dir.is_dir() and project_dir.is_dir() and owner_dir.resolve() == project_dir.resolve()
+    by_name = {}
+    for s in sets_in(owner_dir, "owner") + ([] if same else sets_in(project_dir, "project")):
+        by_name[s["name"]] = s  # the project's replaces the owner's
+    try:
+        tweaks = json.loads((root / ".claude" / "kit.json").read_text()).get("writing") or {}
+    except (OSError, ValueError):
+        tweaks = {}
+    out = []
+    for name, s in by_name.items():
+        t = tweaks.get(name) or {}
+        if t.get("off"):
+            continue
+        if t.get("applies"):
+            s["applies"] = t["applies"]
+        if t.get("add"):
+            add = t["add"] if isinstance(t["add"], str) else "\n".join(t["add"])
+            s["body"] = f"{s['body']}\n\nFor this project:\n{add}"
+            s["source"] += " + kit.json"
+        out.append(s)
+    return out
+
+
+def main(argv):
+    listing = "--list" in argv
+    rest = [a for a in argv if a != "--list"]
+    root = Path(rest[0] if rest else ".").resolve()
+    sets = active(root)
+    if listing:
+        for s in sets:
+            print(f"{s['name']}\t{s['source']}\t{s['applies'] or '(no applies line)'}")
+        return
+    if not sets:
+        return
+    parts = [
+        "# Writing rules",
+        "",
+        "Apply a set whenever you write what it names, including drafts for the user to send. A set covers"
+        " what it names and nothing else; where two could apply, the more specific wins.",
+    ]
+    for s in sets:
+        parts += ["", f"## {s['name']}", f"Applies to: {s['applies'] or 'everything this set describes'}.", "", s["body"]]
+    print("\n".join(parts))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

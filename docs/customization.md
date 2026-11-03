@@ -1,6 +1,44 @@
 # Customizing
 
-Extra MCP servers, and per-project skills worth adding on top of the kit.
+Writing rules, extra MCP servers, and per-project skills worth adding on top of the kit.
+
+### Writing rules
+
+Named sets of rules for what Claude writes, each scoped to where it applies: one for client Slack messages
+and emails, another for wiki pages, and so on. The kit ships the mechanism, never anyone's rules. The
+session-start hook adds every active set to the session beside `KIT.md` (`scripts/writing-rules`).
+
+A set is one Markdown file:
+
+```markdown
+---
+name: client-messages
+applies: Slack messages, emails, support replies and issue comments a client reads
+---
+- One main point per message, stated first.
+- No thanks, greetings or pleasantries.
+```
+
+Sets come from two places:
+
+- **Yours**, across every project: a folder at `~/.claude/writing`, or wherever `$TB_CLAUDE_KIT_WRITING`
+  points. Make it a link to a folder in a repo you own, so your rules are versioned without shipping
+  with the kit: `ln -s ~/dev/<your-repo>/.claude/writing ~/.claude/writing`.
+- **The project's**: `.claude/writing/*.md`. A set with one of your sets' names replaces it here; any
+  other name is a set for this project alone.
+
+Small changes need no file: `writing` in `.claude/kit.json` adjusts a set by name.
+
+```json
+"writing": {
+  "client-messages": { "add": "- This client prefers bullets to paragraphs." },
+  "wiki": { "applies": "the engagement wiki only" },
+  "release-notes": { "off": true }
+}
+```
+
+`~/.claude-kit/scripts/writing-rules --list` prints the sets active in the current project, where each
+came from and what it applies to.
 
 ### Additional MCP Servers
 
