@@ -158,6 +158,8 @@ async function signedIn(acct) {
   }
 }
 
+// claude.ai first loads a placeholder frame (…/_warmup), then swaps in the artifact's own.
+const warmup = (t) => /\/_warmup\b/.test(t.url);
 const blocked = (t) => /challenge/.test(t.url) || /just a moment/i.test(t.title);
 
 // ---- commands ----
@@ -195,7 +197,7 @@ async function cmdVisit(acct, urls) {
       const list = await devtools(acct, '/json/list');
       t = list.find((x) => x.id === tab.id) || t;
       if (blocked(t)) die(`Cloudflare's check came up on ${url}: a person clicks it in that Chrome, then visit again.`, 5);
-      frames = list.filter((x) => x.type === 'iframe' && x.parentId === tab.id);
+      frames = list.filter((x) => x.type === 'iframe' && x.parentId === tab.id && !warmup(x));
       if (frames.length && t.title && !/^claude$/i.test(t.title)) break;
     }
     console.log(`${unescape(t.title).slice(0, 60).padEnd(60)}  frames ${frames.length}  ${t.url}`);
@@ -242,7 +244,7 @@ async function cmdRead(acct, target) {
   const frames = [];
   for (let grew = true; grew; ) {
     grew = false;
-    for (const t of list) if (t.type === 'iframe' && ids.has(t.parentId) && !ids.has(t.id)) ids.add(t.id), frames.push(t), (grew = true);
+    for (const t of list) if (t.type === 'iframe' && ids.has(t.parentId) && !ids.has(t.id)) ids.add(t.id), warmup(t) || frames.push(t), (grew = true);
   }
   if (!frames.length) die(`The tab (${page.url}) holds no artifact frame yet: it may still be loading.`, 4);
 
