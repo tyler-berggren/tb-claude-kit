@@ -824,6 +824,37 @@ else
 fi
 
 # ============================================================
+# WRITING RULES (per machine, not per project: docs/customization.md)
+# ============================================================
+# Your own writing sets live in a repo you own, linked as ~/.claude/writing. Asked once a machine, and
+# only in an interactive install: Enter for none is remembered (~/.claude/writing.none).
+
+WRITING_LINK="$HOME/.claude/writing"
+echo ""
+if [ -n "${TB_CLAUDE_KIT_WRITING:-}" ]; then
+  echo "Writing rules: [ok] \$TB_CLAUDE_KIT_WRITING ($TB_CLAUDE_KIT_WRITING)"
+elif [ -d "$WRITING_LINK" ]; then
+  echo "Writing rules: [ok] ~/.claude/writing"
+elif [ -L "$WRITING_LINK" ]; then
+  echo "Writing rules: [missing] ~/.claude/writing points at $(readlink "$WRITING_LINK"), which is not on this machine: clone it there."
+elif [ -f "$HOME/.claude/writing.none" ] || [ "$INTEGRATION_MODE" != "prompt" ]; then
+  :
+else
+  printf "Writing rules: the folder of your own writing sets (e.g. ~/dev/<your-repo>/.claude/writing), or Enter for none: "
+  read -r wdir
+  wdir="${wdir/#\~/$HOME}"
+  if [ -z "$wdir" ]; then
+    [ "$DRY_RUN" = "no" ] && { mkdir -p "$HOME/.claude"; : > "$HOME/.claude/writing.none"; }
+    echo "  [skip] none on this machine (delete ~/.claude/writing.none to be asked again)"
+  elif [ -d "$wdir" ]; then
+    [ "$DRY_RUN" = "no" ] && { mkdir -p "$HOME/.claude"; ln -s "$wdir" "$WRITING_LINK"; }
+    echo "  [add]  ~/.claude/writing -> $wdir"
+  else
+    echo "  [skip] $wdir is not a folder: nothing linked, and the next install asks again"
+  fi
+fi
+
+# ============================================================
 # SUMMARY
 # ============================================================
 

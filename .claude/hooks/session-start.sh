@@ -534,6 +534,13 @@ KIT_RULES=""
 
 # --- Writing rules: the owner's named sets and the project's (scripts/writing-rules has the rules) ---
 # Injected with the conventions, so both emit paths below carry them.
+# A folder that was set up and is gone (a new machine before its repo is cloned) says so, never silently.
+WRITING_DIR="${TB_CLAUDE_KIT_WRITING:-$HOME/.claude/writing}"
+WRITING_DIR="${WRITING_DIR/#\~/$HOME}"
+if { [ -n "${TB_CLAUDE_KIT_WRITING:-}" ] || [ -L "$WRITING_DIR" ]; } && [ ! -d "$WRITING_DIR" ]; then
+  KIT_NOTICE="${KIT_NOTICE:+$KIT_NOTICE
+}✍️ Writing rules are off: $WRITING_DIR$([ -L "$WRITING_DIR" ] && printf ' (a link to %s)' "$(readlink "$WRITING_DIR")") is missing on this machine. Tell the user: clone the repo that holds them, or fix the link."
+fi
 if [ -x "$HOME/.claude-kit/scripts/writing-rules" ]; then
   WRITING_RULES=$("$HOME/.claude-kit/scripts/writing-rules" . 2>/dev/null)
   [ -n "$WRITING_RULES" ] && KIT_RULES="${KIT_RULES:+$KIT_RULES

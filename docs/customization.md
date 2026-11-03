@@ -23,7 +23,10 @@ Sets come from two places:
 
 - **Yours**, across every project: a folder at `~/.claude/writing`, or wherever `$TB_CLAUDE_KIT_WRITING`
   points. Make it a link to a folder in a repo you own, so your rules are versioned without shipping
-  with the kit: `ln -s ~/dev/<your-repo>/.claude/writing ~/.claude/writing`.
+  with the kit. `install.sh` asks for that folder once a machine and makes the link (Enter for none is
+  remembered in `~/.claude/writing.none`); by hand it is `ln -s ~/dev/<your-repo>/.claude/writing
+  ~/.claude/writing`. On a new machine, a link whose folder is not cloned yet is named at every session
+  start until it is.
 - **The project's**: `.claude/writing/*.md`. A set with one of your sets' names replaces it here; any
   other name is a set for this project alone.
 
