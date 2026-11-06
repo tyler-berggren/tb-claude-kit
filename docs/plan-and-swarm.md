@@ -44,6 +44,17 @@ is un-built if you overrule it. Only a critical issue parks. Every call, and any
 checks could not verify, goes into one numbered `## Review` block you read and overrule when you
 choose. See [Recommended workflow](workflow.md) for the full rule.
 
+### Autopilot
+
+On by default. Your one confirmation when a plan resumes approves its whole build order, not just
+the batch. Each plan keeps a short ranked `## Work ahead` queue. While a long job runs (a load, a
+deploy, a batch of agents), Claude starts the next item that doesn't touch it, and when only waits
+remain, a background heartbeat keeps the session awake. A swarm fills idle slots from the same
+queue and carries on into the plan when its run ends. Turns end with status, never "what should we
+work on next?". It stops, and notifies you, only when everything left is yours. To turn it off for
+a project, put `autopilot: off` (or `autopilot: ask`) in `rules."plan"` in `.claude/kit.json`. The
+rules are in `.claude/skills/plan/autopilot.md`.
+
 ### PR mode
 
 For work that lands in a team repository. The plan is cut into **slices** — one concern, one

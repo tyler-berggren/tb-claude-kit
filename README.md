@@ -25,6 +25,7 @@ wrong.
 | Each session starts cold. | A **brain** (SQLite) loads focus, tasks, open questions and recent decisions into every session. A **mantra** in CLAUDE.md carries Claude's own notes to the next session: the traps, the momentum, the things nobody wrote down. |
 | Long work dies when the session does. | **Plans** are numbered files in the repo. Resuming one re-reads it against the code and reports drift, instead of trusting what the last session claimed. |
 | You babysit every step. | **Batches run without you.** Questions are asked once, up front. During the run Claude decides as a senior engineer would and records each call for you to overrule. Only critical issues stop it: irreversible actions, security, money, or reversing your decisions. |
+| You keep asking "what next?" while a long job runs. | **Autopilot** keeps the plan moving. Each plan has a ranked `## Work ahead` queue; while a load, deploy or agent batch runs, Claude starts the next item that doesn't touch it, wakes itself every half hour when only waits remain, and stops only when everything left needs you. |
 | One agent, one thing at a time. | **`/swarm`** finishes a whole plan with parallel agents in isolated worktrees. Each runs on a model tier matched to its task, and every unit is reviewed before it merges. |
 | "Done" means "it compiled". | **Claude checks its own work.** It inspects a real browser through the DOM, each agent gets a private headless browser, and audits cover code health, architecture drift and SEO. |
 | Research means plausible-sounding guesses. | **`/research`** runs parallel agents under an anti-fabrication contract. Each one writes down what it could *not* verify. |
@@ -78,6 +79,18 @@ at the top, and you answer them in one round.
 **Build.** `/plan N` works through the plan, re-checking it against the code first. `/swarm N`
 does the same with parallel agents, and you can leave. Either way, your calls are written into a
 `## Review` block in the plan file, with each item linked to its file and line.
+
+**Autopilot.** On by default. Your one confirmation when a plan resumes approves its whole build
+order, not just the next batch. The plan keeps a short ranked `## Work ahead` queue of what can run
+now. While something long runs, Claude takes the top item that doesn't touch it, fanning out to
+background agents in worktrees within the agent cap. When only waits remain, a background
+heartbeat wakes the session every 30 minutes (or `/loop`'s own wake-ups) to advance whatever
+finished. A swarm fills idle slots from the same queue and carries on into the plan when its run
+ends. Turns end with a status, never "what should we work on next?". It stops, and sends a push
+notification, only when everything left is yours: a critical item, an open question, a spend or
+release the plan reserves for you. Turn it off per project with `autopilot: off` (or
+`autopilot: ask`, which asks before each new item) in `rules."plan"` in `.claude/kit.json`. The
+rules are in [`.claude/skills/plan/autopilot.md`](.claude/skills/plan/autopilot.md).
 
 **Ship.** `/commit` and `/push`. In someone else's repo, `/plan pr` cuts the work into small
 pull requests that merge the same day. Each PR body is a decision record that credits prior work

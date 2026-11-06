@@ -22,7 +22,7 @@ Take a `/plan`-style plan file and complete it end-to-end without stopping — o
 | Row with `status = 'ready'` | **Run** — dispatch agents, review, merge, report |
 | Row with `status = 'running'` | **Resume** — reconcile live state, continue the run |
 | Row with `status = 'done'`, PR-mode, units still `shipped` or stacked | **Landing** — follow the open pull requests to merged (**Landing**); holds no builder slots |
-| Row with `status = 'done'` / `'aborted'`, unfinished units remain | Report the outcome, then offer **Remainder setup** — a new, smaller run over what's left |
+| Row with `status = 'done'` / `'aborted'`, unfinished units remain | Report the outcome, then run **Remainder setup** — a new, smaller run over what's left — under **Autopilot** (asked first only when a project sets `autopilot: ask` or `off`, or the run was aborted by the owner) |
 | Row with `status = 'done'`, everything merged | Report the outcome; a re-swarm requires the user to say so explicitly |
 
 **Parallelism is an optimization, not the point.** The skill's promise is that the plan gets completed end-to-end without stopping. A plan that decomposes into a single serial chain still swarms — as a sequence of autonomous units — and setup reports that profile honestly rather than manufacturing fake parallelism.
@@ -76,7 +76,7 @@ Each phase's steps live in their own file in this skill's folder. Once the phase
 |---|---|
 | **Setup** (no `swarm_runs` row) | `<this skill's folder>/setup.md`, `<this skill's folder>/run-rules.md` (S4 copies it into SWARM.md), `<this skill's folder>/machine-budget.md`; plus `<this skill's folder>/pr-mode.md` when the plan carries `**Mode:** pr` |
 | **Remainder setup** (`done` / `aborted` with unfinished units, once the owner says yes) | `<this skill's folder>/setup.md` (its **Remainder Setup** section runs S1–S5 again), plus the other Setup files |
-| **Run** (`ready`) and **Resume** (`running`) | `<this skill's folder>/run.md`, `<this skill's folder>/run-rules.md`, `<this skill's folder>/machine-budget.md`; plus `<this skill's folder>/pr-mode.md` for a PR-mode plan, or when a review is announced or its handoff arrives; plus `<this skill's folder>/land.md` before a PR-mode run enters **Landing** after R4 |
+| **Run** (`ready`) and **Resume** (`running`) | `<this skill's folder>/run.md`, `<this skill's folder>/run-rules.md`, `<this skill's folder>/machine-budget.md`, the plan skill's `autopilot.md` (`../plan/autopilot.md`); plus `<this skill's folder>/pr-mode.md` for a PR-mode plan, or when a review is announced or its handoff arrives; plus `<this skill's folder>/land.md` before a PR-mode run enters **Landing** after R4 |
 | **Landing** (`land`, or a `done` PR-mode row with units still `shipped` or stacked) | `<this skill's folder>/land.md`, `<this skill's folder>/pr-mode.md`, `<this skill's folder>/machine-budget.md` |
 | `review` | `<this skill's folder>/review.md` |
 | `status`, `abort` | `<this skill's folder>/status.md`; `abort` also `<this skill's folder>/machine-budget.md` |

@@ -23,6 +23,7 @@ Check every claim against the code and `git`, not against your memory of the ses
 - On the item in progress, write what is done and what is left.
 - Work that happened but was never an item goes in as a new, ticked item (see **New items**).
 - Place exactly one RESUME WORK HERE banner, on the first open item.
+- Bring `## Work ahead` current (the plan skill's `autopilot.md`): the next runnable items, ranked, each with its line and what it waits on.
 
 ### Step H3 — Capture what only this conversation knows
 

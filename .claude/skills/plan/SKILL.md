@@ -346,7 +346,7 @@ Present findings to the user. Do NOT make any file edits yet.
 <2-3 sentences on how to tackle the batch, informed by the reconciliation>
 ```
 
-Then ask the batch's open questions in the same message (see **Batches**) and write the answers into the plan. Critical review items that hold work come first: settle them with the owner now. Uncleared calls and unverified items are only mentioned (a count and the block's line range) and carry into this session's block. Wait for approval or redirection before any implementation. This is the batch's one confirmation: once approved, the work runs without stopping.
+Then ask the batch's open questions in the same message (see **Batches**) and write the answers into the plan. Critical review items that hold work come first: settle them with the owner now. Uncleared calls and unverified items are only mentioned (a count and the block's line range) and carry into this session's block. Wait for approval or redirection before any implementation. This is the session's one confirmation: once approved, the work runs without stopping, and under **Autopilot** (on by default) it carries on past the batch through the plan's build order and its `## Work ahead` queue.
 
 ### Step R4 — Announce in replies
 
@@ -492,6 +492,17 @@ are the only items that hold work:
 
 ---
 
+## Autopilot: keep working ahead
+
+On by default for every resumed plan and every swarm run; a project turns it off in `kit.json`. The
+R3 confirmation approves the plan's whole build order. The plan keeps a short ranked `## Work ahead`
+queue; while a long job runs, the session starts the top item that does not touch it; when only waits
+remain, a background heartbeat keeps it awake; a turn ends with status, never "what next?". It stops
+only when everything left is the owner's. The full rules are in `<this skill's folder>/autopilot.md`:
+read it at Resume's R3, before the batch starts.
+
+---
+
 ## During the session
 
 While working on a plan, follow these rules:
@@ -508,6 +519,7 @@ While working on a plan, follow these rules:
 ### Behavioral rules
 
 - **Confirm the approach once, before the batch.** Resume's R3 is that confirmation, together with the batch's open questions. After it, work runs as a batch (see **Batches**): no further stops, calls flagged in the review block.
+- **Never ask what to work on next.** Under **Autopilot**, the next item comes from `## Work ahead` and the build order; a wait is filled with the top runnable item; a turn ends with status. Keep `## Work ahead` current in every plan commit.
 - **Update the plan file before every commit.** Before staging and committing, update the plan file to reflect current progress:
   1. Mark completed items `- [x]` with progress notes.
   2. Add `**Status:** done — <short note>` to completed phases.
