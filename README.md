@@ -84,7 +84,9 @@ does the same with parallel agents, and you can leave. Either way, your calls ar
 **Autopilot.** On by default. Your one confirmation when a plan resumes approves its whole build
 order, not just the next batch. The plan keeps a short ranked `## Work ahead` queue of what can run
 now. While something long runs, Claude takes the top item that doesn't touch it, fanning out to
-background agents in worktrees within the agent cap. When only waits remain, a background
+background agents in worktrees within the agent cap. For repeated pipelines (a county, a city, a
+release after another) it keeps two batches of prep ahead of the cloud run, so a long run never
+leaves agent slots idle. When only waits remain, a background
 heartbeat wakes the session every 30 minutes (or `/loop`'s own wake-ups) to advance whatever
 finished. A swarm fills idle slots from the same queue and carries on into the plan when its run
 ends. Turns end with a status, never "what should we work on next?". It stops, and sends a push

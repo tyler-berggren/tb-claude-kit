@@ -46,7 +46,12 @@ A long job (a load, a deploy, a CI run, a batch of agents) is never a reason to 
 3. **Fan out within the session's size guideline.** Independent items may run as background agents
    in worktrees, together with the job: up to the project's agent cap (the swarm's concurrency cap, or
    eight when none is set). A whole swarm's worth of work is a `/swarm` run, not ad-hoc agents.
-4. **When everything runnable is done and only waits remain,** keep the session awake: a background
+4. **Keep the pipeline two batches deep.** When the plan's work is a repeated pipeline (counties,
+   cities, releases: prep, then a long cloud run, then follow-up), the cloud run is never the only
+   thing moving: while batch N runs, batch N+1's prep is done or running and batch N+2's has started,
+   filling every free agent slot. A free slot while the queue holds preppable units is a fault the
+   goal check names.
+5. **When everything runnable is done and only waits remain,** keep the session awake: a background
    heartbeat (`sleep 1800`, `run_in_background`; restarted on each wake) or, inside `/loop`, a
    `ScheduleWakeup` of 1200 to 1800 s. Each wake reads the jobs, advances whatever they unblocked,
    refills the queue, and runs the goal check when one is due.
