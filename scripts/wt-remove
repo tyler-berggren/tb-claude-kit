@@ -1,0 +1,29 @@
+#!/bin/bash
+# wt-remove — Claude Code WorktreeRemove hook, the partner of wt-create.
+#
+# Claude passes {"worktree_path": ...} on stdin. With a hook in place Claude Code does no cleanup
+# of its own, so this removes the worktree and its branch, but only when that loses nothing:
+#   - uncommitted changes: keep the worktree (exit 1), say why on stderr;
+#   - a branch with commits not on the main checkout's branch: remove the folder, keep the branch.
+# Subagent and workflow worktrees never fire this hook; scripts/worktree-sweep covers those.
+set -uo pipefail
+
+WT=$(jq -r '.worktree_path // empty')
+[ -n "$WT" ] && [ -d "$WT" ] || exit 0
+
+if [ -n "$(git -C "$WT" status --porcelain 2>/dev/null)" ]; then
+  echo "wt-remove: $WT has uncommitted changes; kept." >&2
+  exit 1
+fi
+
+MAIN=$(git -C "$WT" worktree list --porcelain | awk 'NR==1{print $2}')
+BRANCH=$(git -C "$WT" branch --show-current)
+git -C "$MAIN" worktree remove "$WT" >&2 || exit 1
+rmdir "$(dirname "$WT")" 2>/dev/null || true   # the per-repo folder, once empty
+
+if [ -n "$BRANCH" ]; then
+  # -d (not -D) refuses a branch that isn't merged, which is exactly the rule.
+  git -C "$MAIN" branch -d "$BRANCH" >&2 2>/dev/null ||
+    echo "wt-remove: kept branch $BRANCH (it has commits that aren't merged)." >&2
+fi
+exit 0

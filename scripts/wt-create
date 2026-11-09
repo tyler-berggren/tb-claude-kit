@@ -1,0 +1,71 @@
+#!/bin/bash
+# wt-create — Claude Code WorktreeCreate hook: put worktrees on an always-attached external drive.
+#
+# Claude Code creates worktrees inside the repo (.claude/worktrees/<name>) and has no setting to
+# move them; it also refuses a symlinked .claude/worktrees. A WorktreeCreate hook replaces its
+# creation logic: Claude passes JSON on stdin ({"name": ..., "cwd": ...}) and uses the absolute
+# path printed as the LAST stdout line. Everything else goes to stderr.
+#
+# Where: $worktreeDir from ~/.config/claude-kit/disk.json (/disk setup), else worktrees/ on the
+# first always-attached warm drive, as <dir>/<repo>-<hash>/<name>. When no such drive is configured
+# or it isn't mounted, the worktree goes where Claude Code would put it, so nothing ever breaks.
+#
+# Registered by /disk setup in ~/.claude/settings.json, with wt-remove as WorktreeRemove.
+set -euo pipefail
+
+INPUT=$(cat)
+NAME=$(jq -r '.name // empty' <<<"$INPUT")
+CWD=$(jq -r '.cwd // empty' <<<"$INPUT")
+[ -n "$NAME" ] || { echo "wt-create: no name in hook input" >&2; exit 1; }
+REPO=$(git -C "${CWD:-$PWD}" rev-parse --show-toplevel)
+# A worktree session's cwd may itself be a worktree: anchor on the main checkout.
+REPO=$(git -C "$REPO" worktree list --porcelain | awk 'NR==1{print $2}')
+CONFIG="${CLAUDE_KIT_DISK_CONFIG:-$HOME/.config/claude-kit/disk.json}"
+
+is_mounted() { mount | grep -q " on $1 ("; }
+
+base=""
+if [ -f "$CONFIG" ]; then
+  base=$(jq -r '.worktreeDir // empty' "$CONFIG")
+  if [ -z "$base" ]; then
+    drive=$(jq -r '[.drives[] | select(.role=="warm" and .alwaysAttached==true and .lastMount!=null)][0].lastMount // empty' "$CONFIG")
+    [ -n "$drive" ] && base="$drive/worktrees"
+  fi
+fi
+base="${base/#\~/$HOME}"
+
+if [ -n "$base" ]; then
+  # Never create anything under /Volumes/<x> unless <x> is really mounted: the folder would land
+  # on the internal drive, where the missing drive should be.
+  case "$base" in
+    /Volumes/*) vol="/Volumes/$(cut -d/ -f3 <<<"$base")"; is_mounted "$vol" || { echo "wt-create: $vol not mounted, using the repo" >&2; base=""; } ;;
+  esac
+fi
+
+if [ -n "$base" ]; then
+  # repo name + a short hash of its path, so two repos named "app" don't collide.
+  slug="$(basename "$REPO")-$(printf %s "$REPO" | shasum | cut -c1-8)"
+  DIR="$base/$slug/$NAME"
+else
+  DIR="$REPO/.claude/worktrees/$NAME"
+fi
+
+BRANCH="worktree-$NAME"
+if git -C "$REPO" worktree list --porcelain | grep -qx "worktree $DIR"; then
+  echo "wt-create: reusing $DIR" >&2
+else
+  mkdir -p "$(dirname "$DIR")"
+  if git -C "$REPO" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+    git -C "$REPO" worktree add "$DIR" "$BRANCH" >&2
+  else
+    git -C "$REPO" worktree add -b "$BRANCH" "$DIR" HEAD >&2
+  fi
+  # A hook replaces Claude Code's own logic, so .worktreeinclude (gitignored files to copy into
+  # new worktrees, such as .env) is ours to honour.
+  if [ -f "$REPO/.worktreeinclude" ]; then
+    git -C "$REPO" ls-files -o -i --exclude-from=.worktreeinclude -z 2>/dev/null |
+      (cd "$REPO" && xargs -0 -I{} rsync -R "{}" "$DIR/") >&2 || true
+  fi
+fi
+
+echo "$DIR"

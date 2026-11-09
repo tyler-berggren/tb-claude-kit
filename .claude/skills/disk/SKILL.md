@@ -92,8 +92,35 @@ and writes it. Edit it through that script, not by hand.
    ~/.claude-kit/scripts/disk set projectRoots '["~/dev", "/Volumes/External/dev"]'
    ```
 
-4. Show `~/.claude-kit/scripts/disk status` as a short table: each drive's role, free space and
-   floor. Then say what the setup turned on: the session-start warning below each floor.
+4. **Worktrees off the internal drive.** Skip this step unless a `warm` drive is always attached.
+   Each git worktree Claude Code makes (`--worktree`, `EnterWorktree`, subagents with worktree
+   isolation) is a full checkout, often with its own `node_modules`. They pile up inside the repo.
+   Claude Code has no setting that moves them, and it refuses a symlinked `.claude/worktrees`, so
+   moving them takes a `WorktreeCreate`/`WorktreeRemove` hook pair.
+   - Offer to register the pair in `~/.claude/settings.json`:
+     - `wt-create` puts each worktree at `<worktreeDir>/<repo>-<hash>/<name>`. It copies
+       `.worktreeinclude` files such as `.env`, and falls back to the repo when the drive isn't
+       mounted.
+     - `wt-remove` keeps a worktree that has uncommitted changes, and keeps a branch that isn't
+       merged.
+   - On yes, register them, then check the result with `jq '.hooks' ~/.claude/settings.json`:
+   ```bash
+   bash <<'SH'
+   f=~/.claude/settings.json; [ -f "$f" ] || echo '{}' > "$f"
+   cp "$f" "$f.bak-disk-$(date +%Y%m%d%H%M%S)"
+   tmp=$(mktemp)
+   jq --arg c "$HOME/.claude-kit/scripts/wt-create" --arg r "$HOME/.claude-kit/scripts/wt-remove" \
+     '.hooks = ((.hooks // {}) + {WorktreeCreate: [{hooks: [{type: "command", command: $c}]}],
+                                  WorktreeRemove: [{hooks: [{type: "command", command: $r}]}]})' \
+     "$f" > "$tmp" && jq empty "$tmp" && mv "$tmp" "$f"
+   SH
+   ```
+   If a `WorktreeCreate` hook is already there and isn't the kit's, don't replace it. Say so and
+   leave it.
+
+5. Show `~/.claude-kit/scripts/disk status` as a short table: each drive's role, free space and
+   floor. Then say what the setup turned on: the session-start warning below each floor, and the
+   worktree hooks when registered.
 
 ## Rules
 
