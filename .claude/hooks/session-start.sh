@@ -526,6 +526,15 @@ KIT_NOTICE="${KIT_NOTICE# }"
 kit_memory
 [ "$MEM_TELL" = "yes" ] && MEMORY_NOTICE="🧠 Memory: $MEM_MSG"
 
+# --- Disk: a drive below its free-space floor (/disk setup). ---
+# `disk check` reads the per-machine config and each drive's last mount point, with no diskutil
+# call, so it costs ~30 ms. It prints nothing when every drive is above its floor or no config exists.
+DISK_NOTICE=""
+if [ -x "$HOME/.claude-kit/scripts/disk" ]; then
+  DISK_NOTICE=$("$HOME/.claude-kit/scripts/disk" check 2>/dev/null)
+  [ -n "$DISK_NOTICE" ] && DISK_NOTICE="💾 $DISK_NOTICE Tell the user once, in one line, at the start of your first reply."
+fi
+
 # --- Kit conventions: .claude/KIT.md, injected here rather than @-imported ---
 # CLAUDE.md @imports do not follow a symlink, and in outside mode KIT.md is one.
 # Injecting it keeps every linked project on the kit's current wording.
@@ -602,7 +611,7 @@ emit() {
 
 if [ ! -f "$DB" ]; then
   # Still surface the notices and kit conventions in a project with no brain DB.
-  emit "$(join_notices "$KIT_NOTICE" "$MEMORY_NOTICE" "$MANTRA_NOTICE" "$LEGACY_NOTICE" "$KIT_RULES")"
+  emit "$(join_notices "$DISK_NOTICE" "$KIT_NOTICE" "$MEMORY_NOTICE" "$MANTRA_NOTICE" "$LEGACY_NOTICE" "$KIT_RULES")"
   exit 0
 fi
 
@@ -710,7 +719,7 @@ if [ "$NEW_SESSION" = "yes" ] && [ -n "$PREV_START" ] && { [ "$SOURCE" = "startu
 fi
 
 CTX="## Brain State (auto-loaded at session start)"
-NOTICES=$(join_notices "$SCHEMA_NOTICE" "$RESTORE_NOTICE" "$KIT_NOTICE" "$MEMORY_NOTICE" "$LEGACY_NOTICE" "$MANTRA_NOTICE")
+NOTICES=$(join_notices "$DISK_NOTICE" "$SCHEMA_NOTICE" "$RESTORE_NOTICE" "$KIT_NOTICE" "$MEMORY_NOTICE" "$LEGACY_NOTICE" "$MANTRA_NOTICE")
 [ -n "$NOTICES" ] && CTX="$CTX
 
 $NOTICES"
