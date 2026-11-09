@@ -22,7 +22,7 @@ REPO=$(git -C "${CWD:-$PWD}" rev-parse --show-toplevel)
 REPO=$(git -C "$REPO" worktree list --porcelain | awk 'NR==1{print $2}')
 CONFIG="${CLAUDE_KIT_DISK_CONFIG:-$HOME/.config/claude-kit/disk.json}"
 
-is_mounted() { mount | grep -q " on $1 ("; }
+is_mounted() { /sbin/mount | grep -q " on $1 ("; }
 
 base=""
 if [ -f "$CONFIG" ]; then

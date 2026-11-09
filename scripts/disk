@@ -58,7 +58,7 @@ def save_config(cfg):
 
 def mounts():
     """Mount points a user would store files on: the internal data volume and /Volumes/*."""
-    out = subprocess.run(["mount"], capture_output=True, text=True).stdout
+    out = subprocess.run(["/sbin/mount"], capture_output=True, text=True).stdout
     found = []
     for line in out.splitlines():
         if " on " not in line or "(" not in line:
@@ -74,7 +74,7 @@ def mounts():
 
 
 def info(point):
-    raw = subprocess.run(["diskutil", "info", "-plist", point], capture_output=True).stdout
+    raw = subprocess.run(["/usr/sbin/diskutil", "info", "-plist", point], capture_output=True).stdout
     try:
         return plistlib.loads(raw)
     except Exception:
