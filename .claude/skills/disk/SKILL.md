@@ -122,6 +122,73 @@ and writes it. Edit it through that script, not by hand.
    floor. Then say what the setup turned on: the session-start warning below each floor, and the
    worktree hooks when registered.
 
+## Report
+
+```bash
+~/.claude-kit/scripts/disk report          # readable; --json for the full data
+```
+
+It measures every drive and changes nothing. It takes a few minutes on a full disk, so run it in
+the background and say so. It reports:
+
+- **Each drive:** free space against its floor.
+- **Known items:** `known-items.json` in this skill's folder, plus the user's `knownItems` in
+  `disk.json`, where a user entry replaces one with the same id. Each item shows its size per
+  drive, what creates it, whether it comes back on its own, and the best action. An item whose
+  folder is already a symlink to another drive shows under **Already moved off**.
+- **Unknown big folders:** anything of 1 GB or more directly under `~/Library/Caches`,
+  `Application Support`, `Containers`, `Group Containers`, `~/.cache` or `~/Library/Developer`
+  that no known item claims. Name the app from the folder or bundle id, look inside
+  (`du -d 3 -h <path> | sort -rh | head`) to see what it holds, and suggest an entry for the
+  user's `knownItems`.
+- **Worktrees** in every repo under `projectRoots`, through `worktree-sweep`. Names matching
+  `worktreeKeep` (default `slot-*`, `pool-*`: pools a project's own tooling reuses) are never
+  removed.
+- **Recommendations,** grouped by drive. The drive under the most pressure comes first: the
+  internal drive, then the least free space. Within a drive, largest first.
+
+The report is cached in `~/.cache/claude-kit/disk-report.json`. The session-start warning names its
+biggest item for 7 days.
+
+Present it in this order:
+1. One line per drive.
+2. The numbered recommendations, each with size, action and cost.
+3. "Yours to judge": reported, never acted on.
+4. Unknown folders, each with what it most likely is.
+5. Worktrees.
+
+## Act (no argument)
+
+After the report, ask in **one round** which numbered recommendations to carry out. Recommend the
+ones on drives below their floor, plus anything that regenerates and costs nothing. Then, for each
+pick:
+
+- **Delete:**
+  - Check that the app that owns the item isn't running (`pgrep -x "Slack"`, `pgrep -f "Visual
+    Studio Code"`). If it is, ask the user to quit it, or skip the item.
+  - Use the item's own command where there is one (`npm cache clean --force`, `brew cleanup`).
+    Otherwise use `rm -rf` on exactly the measured path.
+  - **npx:** first check `ListAgents` for other Claude sessions, since their MCP servers run from
+    that folder.
+- **Redirect:**
+  - Run the `how` line, with `{warm}` already filled in by the report.
+  - Move the existing folder to the new place, or delete it when the item regenerates and the new
+    place is empty.
+  - Run the item's `check` and show that it prints the new path.
+  - An env var goes in `~/.zshenv` inside a marked block (`# >>> claude-kit disk >>>` …
+    `# <<< claude-kit disk <<<`), one line per variable. Never edit outside that block.
+- **Move** (no redirect exists):
+  1. `rsync -a` the folder to `<warm>/moved/<path relative to ~>`.
+  2. Compare file counts and sizes.
+  3. Replace the original with a symlink.
+
+  Never do this for anything an app holds open (quit it first), or for anything the item's `cost`
+  warns against.
+- **Worktrees:** `~/.claude-kit/scripts/worktree-sweep --apply <repos>`. Offer `--apply-ask` only
+  when the user picks the "finished agent still locked by a live session" ones.
+
+When the picks are done, run `disk report` again and show free space before and after for each drive.
+
 ## Rules
 
 - **Nothing is deleted or moved without the user picking it.** `report` changes nothing.

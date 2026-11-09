@@ -8,6 +8,8 @@
   disk set-drive <uuid> [--label L] [--role hot|warm|archive] [--floor GB] [--attached yes|no]
   disk unset-drive <uuid>
   disk set <key> <json-value> set a top-level config key (projectRoots, warmAfterDays, ...)
+  disk report [--json]        measure every drive: known items with what made them, unknown big folders,
+                              worktrees; ranked recommendations. Changes nothing. Cached for `check`.
 
 Drives are keyed by volume UUID, never by name: names change and collide ("Untitled", "Backup").
 The config is per machine and lives outside any repo:
@@ -33,6 +35,7 @@ DEFAULTS = {
     "archiveDir": None,      # default: <first archive drive, else first warm drive>/disk-archive
     "worktreeDir": None,     # default: <first always-attached warm drive>/worktrees
     "knownItems": [],        # user additions to the skill's known-items.json
+    "worktreeKeep": ["slot-*", "pool-*"],  # worktree names never swept (reusable pools)
 }
 
 
@@ -48,12 +51,15 @@ def load_config():
 
 
 def save_config(cfg):
-    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
-    tmp = CONFIG + ".tmp"
+    # Write through a symlink, never over it: the config is often linked in from a private config
+    # repo (scripts/kit-config), and replacing the link would cut it off from that repo.
+    target = os.path.realpath(CONFIG)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    tmp = target + ".tmp"
     with open(tmp, "w") as f:
         json.dump(cfg, f, indent=2)
         f.write("\n")
-    os.replace(tmp, CONFIG)
+    os.replace(tmp, target)
 
 
 def mounts():
@@ -147,7 +153,9 @@ def cmd_check():
         except OSError:
             continue
         if free < floor:
-            print(f"Disk: {c.get('label', mount)} has {free:.1f} GB free, under its {floor} GB floor. Run /disk to see what to clear or move.")
+            top = top_consumer() if c.get("internal") else None
+            hint = f" Biggest win from the last report: {top['name']}, {top['gb']:.0f} GB." if top else ""
+            print(f"Disk: {c.get('label', mount)} has {free:.1f} GB free, under its {floor:.0f} GB floor.{hint} Run /disk to see what to clear or move.")
 
 
 def cmd_set_drive(args):
@@ -203,6 +211,235 @@ def cmd_set(args):
     save_config(cfg)
 
 
+# ---------------------------------------------------------------- report
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+KNOWN = os.path.join(HERE, "..", ".claude", "skills", "disk", "known-items.json")
+REPORT_CACHE = os.path.expanduser("~/.cache/claude-kit/disk-report.json")
+MIN_UNKNOWN_GB = 1.0
+# Folders whose children are listed one by one, so an unknown big item is still named.
+SCAN_PARENTS = ["~/Library/Caches", "~/Library/Application Support", "~/Library/Containers",
+                "~/Library/Group Containers", "~/.cache", "~/Library/Developer"]
+
+
+def du_kb(path, timeout=300):
+    """(kb, error). du counts hard links once per call and never follows symlinks."""
+    try:
+        r = subprocess.run(["/usr/bin/du", "-sk", path], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None, "timed out"
+    kb = int(r.stdout.split()[0]) if r.stdout.strip() else None
+    err = None
+    if "Operation not permitted" in r.stderr:
+        err = "partly unreadable: give your terminal Full Disk Access to measure it"
+    return kb, err
+
+
+def drive_of(path, drives):
+    try:
+        dev = os.stat(path).st_dev
+    except OSError:
+        return None
+    for d in drives:
+        try:
+            if os.stat(d["mount"]).st_dev == dev:
+                return d
+        except OSError:
+            pass
+    return None
+
+
+def load_known(cfg):
+    items = {i["id"]: i for i in json.load(open(KNOWN))["items"]}
+    for i in (cfg or {}).get("knownItems", []):
+        items[i["id"]] = i
+    return list(items.values())
+
+
+def warm_mount(cfg, drives):
+    live = {d["uuid"]: d for d in drives}
+    for c in (cfg or {}).get("drives", []):
+        if c.get("role") == "warm" and c.get("alwaysAttached") and c["uuid"] in live:
+            return live[c["uuid"]]["mount"]
+    return None
+
+
+def cmd_report(args):
+    from concurrent.futures import ThreadPoolExecutor
+    import glob
+    import time
+
+    as_text = "--json" not in args
+    cfg = load_config()
+    drives = all_drives()
+    conf = {c["uuid"]: c for c in (cfg or {}).get("drives", [])}
+    for d in drives:
+        c = conf.get(d["uuid"], {})
+        d.update(role=c.get("role"), floorGB=c.get("floorGB"), alwaysAttached=c.get("alwaysAttached"))
+    warm = warm_mount(cfg, drives)
+    known = load_known(cfg)
+
+    # Expand every known path; remember which real paths are claimed, so the unknown scan skips them.
+    jobs, claimed = [], set()
+    for item in known:
+        for pat in item.get("paths", []):
+            for p in glob.glob(os.path.expanduser(pat)):
+                claimed.add(os.path.realpath(p))
+                jobs.append((item, p))
+
+    unknown_jobs = []
+    for parent in SCAN_PARENTS:
+        parent = os.path.expanduser(parent)
+        try:
+            names = os.listdir(parent)
+        except OSError:
+            continue
+        for n in names:
+            p = os.path.join(parent, n)
+            rp = os.path.realpath(p)
+            if os.path.islink(p) or rp in claimed or any(c.startswith(rp + "/") for c in claimed):
+                continue
+            unknown_jobs.append(p)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sizes = list(pool.map(lambda j: du_kb(j[1]), jobs))
+        usizes = list(pool.map(du_kb, unknown_jobs))
+
+    found = {}
+    for (item, p), (kb, err) in zip(jobs, sizes):
+        if os.path.islink(p):
+            target = os.path.realpath(p)
+            d = drive_of(target, drives)
+            f = found.setdefault(item["id"], dict(item, gb=0.0, places=[]))
+            f["places"].append({"path": p, "movedTo": target, "drive": d["label"] if d else None})
+            continue
+        if not kb:
+            continue
+        d = drive_of(p, drives)
+        f = found.setdefault(item["id"], dict(item, gb=0.0, places=[]))
+        f["gb"] += kb / 1024 / 1024
+        f["places"].append({"path": p, "gb": round(kb / 1024 / 1024, 2), "drive": d["label"] if d else None, **({"note": err} if err else {})})
+
+    unknown = []
+    for p, (kb, err) in zip(unknown_jobs, usizes):
+        if kb and kb / 1024 / 1024 >= MIN_UNKNOWN_GB:
+            d = drive_of(p, drives)
+            unknown.append({"path": p, "gb": round(kb / 1024 / 1024, 2), "drive": d["label"] if d else None,
+                            "creator": os.path.basename(p), **({"note": err} if err else {})})
+
+    # Worktrees, through the shared sweep rules.
+    sweep = os.path.join(HERE, "worktree-sweep")
+    wt = []
+    if os.access(sweep, os.X_OK):
+        r = subprocess.run([sweep, "--json"], capture_output=True, text=True, timeout=600)
+        try:
+            wt = json.loads(r.stdout or "[]")
+        except ValueError:
+            wt = []
+    wt_summary = {}
+    for w in wt:
+        s = wt_summary.setdefault(w["verdict"], {"count": 0, "gb": 0.0})
+        s["count"] += 1
+        s["gb"] = round(s["gb"] + w.get("gb", 0.0), 2)
+
+    # Recommendations: what to do with each measured item, largest first.
+    recs = []
+    for f in found.values():
+        gb = round(f["gb"], 2)
+        if gb < 0.25:
+            continue
+        action = f.get("action", "report")
+        how = None
+        if action == "redirect":
+            if warm and f.get("redirect", {}).get("how"):
+                how = f["redirect"]["how"].replace("{warm}", warm)
+            elif f.get("delete"):
+                action, how = "delete", f["delete"]
+            else:
+                action = "report"
+        elif action == "delete":
+            how = f.get("delete")
+        elif action == "move":
+            how = (f.get("redirect") or {}).get("how", "move it to the warm drive" if warm else None)
+        dlabels = sorted({p.get("drive") for p in f["places"] if p.get("drive")})
+        recs.append({"id": f["id"], "name": f["name"], "gb": gb, "action": action, "how": how,
+                     "drive": dlabels[0] if len(dlabels) == 1 else ", ".join(dlabels) or None,
+                     "creator": f.get("creator"), "regenerates": f.get("regenerates"), "cost": f.get("cost"),
+                     "places": f["places"]})
+    by_drive = {}
+    for w in wt:
+        if w["verdict"] != "remove":
+            continue
+        d = drive_of(w["path"], drives) if os.path.exists(w["path"]) else None
+        key = d["label"] if d else None
+        b = by_drive.setdefault(key, {"count": 0, "gb": 0.0, "repos": set()})
+        b["count"] += 1
+        b["gb"] += w.get("gb", 0.0)
+        b["repos"].add(w["repo"])
+    for label, b in by_drive.items():
+        if b["gb"] >= 0.25:
+            recs.append({"id": "agent-worktrees", "name": f"{b['count']} finished worktree(s)", "gb": round(b["gb"], 2),
+                         "drive": label, "action": "delete",
+                         "how": "~/.claude-kit/scripts/worktree-sweep --apply " + " ".join(sorted(b["repos"])),
+                         "creator": "Claude agents, /swarm, /plan, git worktree add", "regenerates": True})
+    # The drive under the most pressure first (hot drives, then the least free space), then size.
+    pressure = {d["label"]: (0 if d.get("role") == "hot" or d.get("internal") else 1, d["freeGB"]) for d in drives}
+    recs.sort(key=lambda r: (pressure.get(r.get("drive"), (2, 0)), -r["gb"]))
+    moved = [dict(id=f["id"], name=f["name"], places=f["places"]) for f in found.values()
+             if any("movedTo" in p for p in f["places"])]
+
+    report = {"generated": time.strftime("%Y-%m-%d %H:%M"), "drives": drives, "warmDrive": warm,
+              "recommendations": recs, "unknown": sorted(unknown, key=lambda u: -u["gb"]),
+              "alreadyMoved": moved, "worktrees": {"summary": wt_summary, "items": wt}}
+    os.makedirs(os.path.dirname(REPORT_CACHE), exist_ok=True)
+    with open(REPORT_CACHE, "w") as fh:
+        json.dump(report, fh, indent=2)
+
+    if not as_text:
+        print(json.dumps(report, indent=2))
+        return
+    print(f"Disk report {report['generated']}")
+    for d in drives:
+        floor = f", floor {d['floorGB']:.0f} GB" if d.get("floorGB") is not None else ""
+        flag = "  ← below floor" if d.get("floorGB") is not None and d["freeGB"] < d["floorGB"] else ""
+        print(f"  {d['label']:<16} {d.get('role') or 'unconfigured':<12} {d['freeGB']:>7.1f} GB free of {d['totalGB']:.0f}{floor}{flag}")
+    n, last = 0, object()
+    for r in [r for r in recs if r["action"] != "report"]:
+        if r.get("drive") != last:
+            last = r.get("drive")
+            print(f"\nOn {last or 'another drive'}, largest first:")
+        n += 1
+        print(f"  {n:>2}. {r['gb']:6.1f} GB  {r['name']} — {r['action']}: {r['how'] or '(by hand)'}")
+        if r.get("cost"):
+            print(f"               cost: {r['cost']}")
+    rep = [r for r in recs if r["action"] == "report"]
+    if rep:
+        print("\nYours to judge (not touched):")
+        for r in rep:
+            print(f"      {r['gb']:6.1f} GB  {r['name']}" + (f" — {r['cost']}" if r.get("cost") else ""))
+    if unknown:
+        print("\nNot in the known list (≥ 1 GB):")
+        for u in report["unknown"][:15]:
+            print(f"      {u['gb']:6.1f} GB  {u['path']}" + (f"  ({u['note']})" if u.get("note") else ""))
+    if wt_summary:
+        print("\nWorktrees: " + ", ".join(f"{v['count']} {k} ({v['gb']:.1f} GB)" for k, v in wt_summary.items()))
+    if moved:
+        print("\nAlready moved off: " + ", ".join(m["name"] for m in moved))
+
+
+def top_consumer():
+    """The biggest recommendation in a report from the last 7 days, for the session-start line."""
+    try:
+        st = os.stat(REPORT_CACHE)
+        import time
+        if time.time() - st.st_mtime > 7 * 86400:
+            return None
+        recs = [r for r in json.load(open(REPORT_CACHE))["recommendations"] if r["action"] != "report"]
+        return recs[0] if recs else None
+    except (OSError, ValueError, KeyError):
+        return None
+
+
 def main():
     cmd, args = (sys.argv[1] if len(sys.argv) > 1 else "status"), sys.argv[2:]
     if cmd == "drives":
@@ -221,6 +458,8 @@ def main():
         cmd_unset_drive(args)
     elif cmd == "set":
         cmd_set(args)
+    elif cmd == "report":
+        cmd_report(args)
     else:
         print(__doc__)
         sys.exit(0 if cmd in ("-h", "--help", "help") else 1)

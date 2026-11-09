@@ -14,12 +14,15 @@ nothing would be lost and nothing is using it:
   - no process has its working directory inside it;
   - it isn't locked, or its lock belongs to a session that is gone (pid dead, or the pid now
     belongs to a different process).
+  - its folder or branch doesn't match a keep pattern (worktreeKeep in disk.json, default slot-* and
+    pool-*, for pools a project's tooling reuses; plus the repo's prune.keep);
   - nothing in it has changed for IDLE_HOURS (default 2): a worktree an agent just created is
     landed and clean too.
 A worktree locked by a LIVE Claude session, landed, clean and idle for IDLE_HOURS is a finished
 agent the session never released: it is marked "ask", not "remove".
 Branches are deleted with `git branch -d`, which refuses anything unmerged.
 """
+import fnmatch
 import json
 import os
 import re
@@ -30,6 +33,7 @@ from datetime import datetime
 
 IDLE_HOURS = float(os.environ.get("WORKTREE_SWEEP_IDLE_HOURS", "2"))
 CONFIG = os.environ.get("CLAUDE_KIT_DISK_CONFIG") or os.path.expanduser("~/.config/claude-kit/disk.json")
+DEFAULT_KEEP = ["slot-*", "pool-*"]  # reusable pools a project's own tooling manages
 LOCK_RE = re.compile(r"\(pid (\d+) start (.+?)\)")
 
 
@@ -61,6 +65,21 @@ def repos_from_config():
             if depth >= 2:
                 dirnames[:] = []
     return found
+
+
+def keep_patterns(main):
+    """Name globs never removed: worktreeKeep in disk.json (default slot-*, pool-*), plus the repo's
+    prune.keep from .claude/kit.json. Matched against the worktree folder's name and its branch."""
+    pats = list(DEFAULT_KEEP)
+    try:
+        pats = json.load(open(CONFIG)).get("worktreeKeep", DEFAULT_KEEP)
+    except (OSError, ValueError):
+        pass
+    try:
+        pats += json.load(open(os.path.join(main, ".claude", "kit.json"))).get("prune", {}).get("keep", [])
+    except (OSError, ValueError):
+        pass
+    return pats
 
 
 def worktrees(repo):
@@ -160,6 +179,7 @@ def assess(repo, running):
         return []
     main = wts[0]["worktree"]
     bases = base_refs(main)
+    keep = keep_patterns(main)
     rows = []
     for wt in wts[1:]:
         path = wt["worktree"]
@@ -170,6 +190,11 @@ def assess(repo, running):
             rows.append(row)
             continue
         row["gb"] = size_gb(path)
+        hit = next((k for k in keep if fnmatch.fnmatch(os.path.basename(path), k) or (branch and fnmatch.fnmatch(branch, k))), None)
+        if hit:
+            row.update(verdict="keep", why=f"matches keep pattern {hit} (a reusable pool, or kept on purpose)")
+            rows.append(row)
+            continue
         reasons_keep = []
         if git(path, "status", "--porcelain").stdout.strip():
             reasons_keep.append("uncommitted changes")

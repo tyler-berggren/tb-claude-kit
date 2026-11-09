@@ -1,0 +1,584 @@
+{
+ "_note": "What fills a Mac's disk, what made it, and the best way to win the space back. paths: globs, ~ is home. regenerates: true when deleting it costs only a re-download or rebuild. action: delete | redirect | move | archive | report. redirect: how to point the tool somewhere else for good ({warm} is the warm drive's mount). Users add their own entries under knownItems in ~/.config/claude-kit/disk.json; an entry there with the same id replaces this one.",
+ "items": [
+  {
+   "id": "npm-cache",
+   "name": "npm download cache",
+   "paths": [
+    "~/.npm/_cacache"
+   ],
+   "creator": "npm install",
+   "regenerates": true,
+   "action": "redirect",
+   "delete": "npm cache clean --force",
+   "redirect": {
+    "how": "npm config set cache {warm}/caches/npm",
+    "check": "npm config get cache"
+   }
+  },
+  {
+   "id": "npx",
+   "name": "npx packages",
+   "paths": [
+    "~/.npm/_npx"
+   ],
+   "creator": "npx, including MCP servers started with npx",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "rm -rf ~/.npm/_npx",
+   "cost": "MCP servers started with npx download again; close other Claude sessions first, since their servers run from here"
+  },
+  {
+   "id": "pnpm-store",
+   "name": "pnpm store",
+   "paths": [
+    "~/Library/pnpm/store",
+    "~/.local/share/pnpm/store"
+   ],
+   "creator": "pnpm install",
+   "regenerates": true,
+   "action": "redirect",
+   "delete": "pnpm store prune",
+   "redirect": {
+    "how": "pnpm config set store-dir {warm}/caches/pnpm-store --global",
+    "check": "pnpm store path"
+   },
+   "cost": "pnpm hard-links from the store, which only works on the same drive: projects on another drive copy instead"
+  },
+  {
+   "id": "pnpm-meta",
+   "name": "pnpm metadata cache",
+   "paths": [
+    "~/Library/Caches/pnpm"
+   ],
+   "creator": "pnpm",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "rm -rf ~/Library/Caches/pnpm"
+  },
+  {
+   "id": "yarn",
+   "name": "Yarn cache",
+   "paths": [
+    "~/Library/Caches/Yarn"
+   ],
+   "creator": "yarn install",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "yarn cache clean"
+  },
+  {
+   "id": "bun",
+   "name": "Bun install cache",
+   "paths": [
+    "~/.bun/install/cache"
+   ],
+   "creator": "bun install",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "bun pm cache rm"
+  },
+  {
+   "id": "uv",
+   "name": "uv cache",
+   "paths": [
+    "~/.cache/uv"
+   ],
+   "creator": "uv / uvx",
+   "regenerates": true,
+   "action": "redirect",
+   "delete": "uv cache prune",
+   "redirect": {
+    "how": "export UV_CACHE_DIR={warm}/caches/uv  (in ~/.zshenv)",
+    "check": "uv cache dir"
+   }
+  },
+  {
+   "id": "pip",
+   "name": "pip cache",
+   "paths": [
+    "~/Library/Caches/pip"
+   ],
+   "creator": "pip install",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "pip3 cache purge"
+  },
+  {
+   "id": "homebrew",
+   "name": "Homebrew downloads",
+   "paths": [
+    "~/Library/Caches/Homebrew"
+   ],
+   "creator": "brew install / upgrade",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "brew cleanup --prune=all"
+  },
+  {
+   "id": "playwright",
+   "name": "Playwright browsers",
+   "paths": [
+    "~/Library/Caches/ms-playwright"
+   ],
+   "creator": "playwright install",
+   "regenerates": true,
+   "action": "redirect",
+   "delete": "/clear-cache (keeps every build a project pins)",
+   "redirect": {
+    "how": "export PLAYWRIGHT_BROWSERS_PATH={warm}/caches/ms-playwright  (in ~/.zshenv), then npx playwright install in each project",
+    "check": "echo $PLAYWRIGHT_BROWSERS_PATH"
+   },
+   "cost": "each Playwright version needs its exact build; never delete mcp-chrome-* profiles"
+  },
+  {
+   "id": "puppeteer",
+   "name": "Puppeteer Chrome copies",
+   "paths": [
+    "~/.cache/puppeteer"
+   ],
+   "creator": "npm install of puppeteer",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "~/.claude-kit/scripts/kit-chrome prune"
+  },
+  {
+   "id": "huggingface",
+   "name": "Hugging Face models",
+   "paths": [
+    "~/.cache/huggingface"
+   ],
+   "creator": "transformers, diffusers, mlx and hf downloads",
+   "regenerates": true,
+   "action": "redirect",
+   "redirect": {
+    "how": "export HF_HOME={warm}/caches/huggingface  (in ~/.zshenv), then move the folder there",
+    "check": "echo $HF_HOME"
+   },
+   "cost": "models are large and slow to download again: move, don't delete"
+  },
+  {
+   "id": "ollama",
+   "name": "Ollama models",
+   "paths": [
+    "~/.ollama/models"
+   ],
+   "creator": "ollama pull",
+   "regenerates": true,
+   "action": "redirect",
+   "redirect": {
+    "how": "launchctl setenv OLLAMA_MODELS {warm}/models/ollama, restart Ollama, move the folder there",
+    "check": "launchctl getenv OLLAMA_MODELS"
+   }
+  },
+  {
+   "id": "lmstudio",
+   "name": "LM Studio models",
+   "paths": [
+    "~/.lmstudio/models",
+    "~/.cache/lm-studio/models"
+   ],
+   "creator": "LM Studio downloads",
+   "regenerates": true,
+   "action": "move",
+   "redirect": {
+    "how": "LM Studio \u2192 My Models \u2192 change the models folder"
+   }
+  },
+  {
+   "id": "whisper",
+   "name": "Whisper / MLX models",
+   "paths": [
+    "~/.cache/whisper",
+    "~/.cache/mlx"
+   ],
+   "creator": "whisper and mlx model downloads",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "rm -rf the folder; models download again on next use"
+  },
+  {
+   "id": "gradle",
+   "name": "Gradle caches",
+   "paths": [
+    "~/.gradle/caches",
+    "~/.gradle/wrapper"
+   ],
+   "creator": "Gradle and Android builds",
+   "regenerates": true,
+   "action": "redirect",
+   "redirect": {
+    "how": "export GRADLE_USER_HOME={warm}/caches/gradle  (in ~/.zshenv)",
+    "check": "echo $GRADLE_USER_HOME"
+   }
+  },
+  {
+   "id": "cargo",
+   "name": "Cargo registry and git checkouts",
+   "paths": [
+    "~/.cargo/registry",
+    "~/.cargo/git"
+   ],
+   "creator": "cargo build",
+   "regenerates": true,
+   "action": "redirect",
+   "redirect": {
+    "how": "export CARGO_HOME={warm}/cargo  (in ~/.zshenv), then move ~/.cargo there",
+    "check": "echo $CARGO_HOME"
+   }
+  },
+  {
+   "id": "rustup",
+   "name": "Rust toolchains",
+   "paths": [
+    "~/.rustup/toolchains"
+   ],
+   "creator": "rustup",
+   "regenerates": true,
+   "action": "redirect",
+   "redirect": {
+    "how": "export RUSTUP_HOME={warm}/rustup  (in ~/.zshenv), then move ~/.rustup there",
+    "check": "rustup show home"
+   }
+  },
+  {
+   "id": "go-mod",
+   "name": "Go module cache",
+   "paths": [
+    "~/go/pkg/mod"
+   ],
+   "creator": "go build / go get",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "go clean -modcache",
+   "redirect": {
+    "how": "go env -w GOMODCACHE={warm}/caches/go-mod",
+    "check": "go env GOMODCACHE"
+   }
+  },
+  {
+   "id": "cocoapods",
+   "name": "CocoaPods cache",
+   "paths": [
+    "~/Library/Caches/CocoaPods"
+   ],
+   "creator": "pod install",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "pod cache clean --all"
+  },
+  {
+   "id": "xcode-deriveddata",
+   "name": "Xcode DerivedData",
+   "paths": [
+    "~/Library/Developer/Xcode/DerivedData"
+   ],
+   "creator": "Xcode builds",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "rm -rf ~/Library/Developer/Xcode/DerivedData/*",
+   "cost": "the next Xcode build of each project is a full one"
+  },
+  {
+   "id": "xcode-archives",
+   "name": "Xcode archives",
+   "paths": [
+    "~/Library/Developer/Xcode/Archives"
+   ],
+   "creator": "Xcode \u2192 Product \u2192 Archive",
+   "regenerates": false,
+   "action": "move",
+   "cost": "old archives hold the dSYMs that symbolicate crash reports for shipped builds"
+  },
+  {
+   "id": "ios-devicesupport",
+   "name": "iOS device support files",
+   "paths": [
+    "~/Library/Developer/Xcode/iOS DeviceSupport",
+    "~/Library/Developer/Xcode/watchOS DeviceSupport"
+   ],
+   "creator": "Xcode, each time a device on a new OS connects",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "delete the folders for OS versions you no longer debug on"
+  },
+  {
+   "id": "simulators",
+   "name": "iOS simulators",
+   "paths": [
+    "~/Library/Developer/CoreSimulator/Devices",
+    "~/Library/Developer/CoreSimulator/Caches"
+   ],
+   "creator": "Xcode simulators",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "xcrun simctl delete unavailable"
+  },
+  {
+   "id": "docker-desktop",
+   "name": "Docker Desktop disk image",
+   "paths": [
+    "~/Library/Containers/com.docker.docker/Data/vms"
+   ],
+   "creator": "Docker Desktop",
+   "regenerates": false,
+   "action": "move",
+   "redirect": {
+    "how": "Docker Desktop \u2192 Settings \u2192 Resources \u2192 Disk image location"
+   },
+   "cost": "holds images, containers and VOLUMES (databases): prune build cache and images, never volumes"
+  },
+  {
+   "id": "colima",
+   "name": "Colima VM disks",
+   "paths": [
+    "~/.colima",
+    "~/.lima"
+   ],
+   "creator": "colima / lima",
+   "regenerates": false,
+   "action": "redirect",
+   "redirect": {
+    "how": "export COLIMA_HOME={warm}/colima and LIMA_HOME={warm}/lima (in ~/.zshenv), stop colima, move the folders",
+    "check": "echo $COLIMA_HOME"
+   },
+   "cost": "holds container volumes: move, don't delete"
+  },
+  {
+   "id": "android-sdk",
+   "name": "Android SDK",
+   "paths": [
+    "~/Library/Android/sdk"
+   ],
+   "creator": "Android Studio",
+   "regenerates": true,
+   "action": "move",
+   "redirect": {
+    "how": "move it, then set ANDROID_HOME and the SDK path in Android Studio"
+   }
+  },
+  {
+   "id": "android-avd",
+   "name": "Android emulators",
+   "paths": [
+    "~/.android/avd"
+   ],
+   "creator": "Android Studio emulators",
+   "regenerates": true,
+   "action": "redirect",
+   "redirect": {
+    "how": "export ANDROID_AVD_HOME={warm}/android-avd (in ~/.zshenv), then move the folder"
+   }
+  },
+  {
+   "id": "vscode-cache",
+   "name": "VS Code caches",
+   "paths": [
+    "~/Library/Application Support/Code/Cache",
+    "~/Library/Application Support/Code/CachedData",
+    "~/Library/Application Support/Code/CachedExtensionVSIXs",
+    "~/Library/Application Support/Code/Service Worker"
+   ],
+   "creator": "VS Code",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "quit VS Code, then delete these folders"
+  },
+  {
+   "id": "vscode-workspace",
+   "name": "VS Code workspace storage",
+   "paths": [
+    "~/Library/Application Support/Code/User/workspaceStorage"
+   ],
+   "creator": "VS Code, one folder per workspace ever opened",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "delete subfolders not modified in 90 days",
+   "cost": "per-workspace UI state (open editors, extension state) for those workspaces"
+  },
+  {
+   "id": "chrome-cache",
+   "name": "Chrome cache",
+   "paths": [
+    "~/Library/Caches/Google"
+   ],
+   "creator": "Google Chrome",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "quit Chrome, then delete the folder"
+  },
+  {
+   "id": "chrome-profile",
+   "name": "Chrome profiles",
+   "paths": [
+    "~/Library/Application Support/Google"
+   ],
+   "creator": "Google Chrome (history, extensions, service workers, offline data)",
+   "regenerates": false,
+   "action": "report",
+   "cost": "holds sign-ins and history; clear site data inside Chrome instead"
+  },
+  {
+   "id": "slack-cache",
+   "name": "Slack caches",
+   "paths": [
+    "~/Library/Application Support/Slack/Cache",
+    "~/Library/Application Support/Slack/Service Worker",
+    "~/Library/Containers/com.tinyspeck.slackmacgap/Data/Library/Application Support/Slack/Service Worker"
+   ],
+   "creator": "Slack",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "quit Slack, then delete these folders"
+  },
+  {
+   "id": "claude-desktop",
+   "name": "Claude desktop app data",
+   "paths": [
+    "~/Library/Application Support/Claude"
+   ],
+   "creator": "Claude desktop app (VM bundles, caches)",
+   "regenerates": false,
+   "action": "report"
+  },
+  {
+   "id": "claude-code-transcripts",
+   "name": "Claude Code session transcripts",
+   "paths": [
+    "~/.claude/projects"
+   ],
+   "creator": "Claude Code, one JSONL per session",
+   "regenerates": false,
+   "action": "report",
+   "cost": "session history and project memory; cleanupPeriodDays in settings trims old transcripts"
+  },
+  {
+   "id": "agent-worktrees",
+   "name": "Git worktrees",
+   "paths": [],
+   "creator": "Claude agents, /swarm, /plan, git worktree add",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "~/.claude-kit/scripts/worktree-sweep --apply (see the worktrees section of the report)"
+  },
+  {
+   "id": "ios-backups",
+   "name": "iPhone and iPad backups",
+   "paths": [
+    "~/Library/Application Support/MobileSync/Backup"
+   ],
+   "creator": "Finder device backups",
+   "regenerates": false,
+   "action": "move",
+   "cost": "the only copy of a device's backup; delete old ones in Finder \u2192 device \u2192 Manage Backups"
+  },
+  {
+   "id": "mail",
+   "name": "Mail",
+   "paths": [
+    "~/Library/Mail"
+   ],
+   "creator": "Apple Mail",
+   "regenerates": false,
+   "action": "report"
+  },
+  {
+   "id": "messages",
+   "name": "Messages attachments",
+   "paths": [
+    "~/Library/Messages/Attachments"
+   ],
+   "creator": "Messages",
+   "regenerates": false,
+   "action": "report",
+   "cost": "turn on Messages in iCloud, or delete large conversations in Messages"
+  },
+  {
+   "id": "photos",
+   "name": "Photos library",
+   "paths": [
+    "~/Pictures/*.photoslibrary"
+   ],
+   "creator": "Photos",
+   "regenerates": false,
+   "action": "report",
+   "cost": "Photos \u2192 Settings \u2192 iCloud \u2192 Optimize Mac Storage, or move the library in Photos"
+  },
+  {
+   "id": "downloads",
+   "name": "Downloads",
+   "paths": [
+    "~/Downloads"
+   ],
+   "creator": "you",
+   "regenerates": false,
+   "action": "report"
+  },
+  {
+   "id": "trash",
+   "name": "Trash",
+   "paths": [
+    "~/.Trash"
+   ],
+   "creator": "you",
+   "regenerates": false,
+   "action": "report",
+   "cost": "empty it in Finder"
+  },
+  {
+   "id": "movies",
+   "name": "Movies",
+   "paths": [
+    "~/Movies"
+   ],
+   "creator": "you, screen recordings, video editors",
+   "regenerates": false,
+   "action": "move"
+  },
+  {
+   "id": "device-restore-temp",
+   "name": "Leftover iPhone/iPad restore files",
+   "paths": [
+    "~/Library/Containers/com.apple.configurator.xpc.DeviceService/Data/tmp"
+   ],
+   "creator": "Finder or Apple Configurator updating or restoring a device (the firmware download is left behind)",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "rm -rf ~/Library/Containers/com.apple.configurator.xpc.DeviceService/Data/tmp/TemporaryItems/*",
+   "cost": "only while no device is being updated or restored"
+  },
+  {
+   "id": "vscode-shipit",
+   "name": "VS Code update downloads",
+   "paths": [
+    "~/Library/Caches/com.microsoft.VSCode.ShipIt",
+    "~/Library/Caches/com.microsoft.VSCodeInsiders.ShipIt"
+   ],
+   "creator": "VS Code's updater",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "rm -rf ~/Library/Caches/com.microsoft.VSCode.ShipIt"
+  },
+  {
+   "id": "codex-runtime-installs",
+   "name": "Codex runtime partial installs",
+   "paths": [
+    "~/.cache/codex-runtimes/codex-runtime-install-*"
+   ],
+   "creator": "Codex runtime installs that never cleaned up",
+   "regenerates": true,
+   "action": "delete",
+   "delete": "rm -rf ~/.cache/codex-runtimes/codex-runtime-install-*"
+  },
+  {
+   "id": "codex-runtime",
+   "name": "Codex runtime",
+   "paths": [
+    "~/.cache/codex-runtimes/codex-primary-runtime"
+   ],
+   "creator": "Codex",
+   "regenerates": true,
+   "action": "report"
+  }
+ ]
+}
