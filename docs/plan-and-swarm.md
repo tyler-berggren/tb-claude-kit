@@ -210,6 +210,10 @@ you can keep working on main throughout. Every swarm branch lives in its own wor
 - each unit in the worktree the Agent tool creates there, branched from the integration tip;
 - any branch a review needs to serve.
 
+On a machine where `/disk setup` moved worktrees to an always-attached external drive, every one of
+these lives there instead, at `<drive>/worktrees/<repo>-<hash>/<slug>`. `scripts/wt-path` gives the
+location for the kit's own worktrees, and the `WorktreeCreate` hook gives it for Claude Code's.
+
 The plan, `SWARM.md` and `REPORT.md` stay in your main checkout. The orchestrator edits them there,
 next to your own edits, so the plan it updates is the one you mark, and every `path:line` it gives
 you opens in your IDE. It doesn't commit mid-run. At the end it commits only those files, leaving

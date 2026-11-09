@@ -46,6 +46,12 @@ The intended workflow: `/plan` generates the plan → `/swarm <ref>` (setup) →
   - a branch the review serves that has no worktree yet at `.claude/worktrees/review-<slug>`.
 
   A PR-mode plan whose code lives in another repository follows the same layout inside that repository (**Where the code lives**).
+- **Where `.claude/worktrees/<slug>` really is.** In this skill that path is shorthand for
+  `$(~/.claude-kit/scripts/wt-path <slug>)`. It is the repo's `.claude/worktrees/<slug>` unless
+  `/disk` moved worktrees to an always-attached external drive. Resolve it once when you create a
+  worktree, and use the absolute path from then on. Claude Code's own agent worktrees follow the
+  same rule through the `WorktreeCreate` hook, so take a unit's path from what the Agent tool
+  returns.
 - **Address a worktree by its path.** Git work goes through `git -C <worktree>`, and files are read and written at the worktree's absolute path. The orchestrator's own working directory stays at the primary checkout. Switching branches is allowed only inside a worktree the session or agent created itself.
 - **Point other agents only at the integration worktree.** A path given to another agent (a tool to run, a dossier to read, research to build on) names `.claude/worktrees/swarm-<plan_id>`, never a unit's own worktree: unit worktrees are removed at merge, and an agent still holding that path then fails or reads nothing. When an agent must read a unit's work before it merges, record which agent holds that path, and repoint it to the integration worktree before removing the unit's worktree. (Swarm 051 removed a worktree three times while a running agent was reading from it: a tool, two county dossiers, the final reviewer's input.)
 - **Branch without checking out.** Use `git worktree add -b <branch> <path> <base>` or `git branch <branch> <base>`. Git refuses to check out one branch in two worktrees, so when a branch is needed, use the worktree that already has it (`git worktree list`). Never move that branch out of its worktree.

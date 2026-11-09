@@ -10,6 +10,11 @@
   disk set <key> <json-value> set a top-level config key (projectRoots, warmAfterDays, ...)
   disk report [--json]        measure every drive: known items with what made them, unknown big folders,
                               worktrees; ranked recommendations. Changes nothing. Cached for `check`.
+  disk env [VAR VALUE | --unset VAR]
+                              list, set or remove an env var in the marked /disk block of ~/.zshenv
+  disk move <path> [--to <dir>] [--dry-run]
+                              copy a folder to the warm drive (<warm>/moved/<path under ~>), verify
+                              file count and bytes, then replace it with a symlink
 
 Drives are keyed by volume UUID, never by name: names change and collide ("Untitled", "Backup").
 The config is per machine and lives outside any repo:
@@ -19,6 +24,7 @@ A drive in the config that isn't mounted is reported as such and skipped, never 
 import json
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 import sys
@@ -440,6 +446,122 @@ def top_consumer():
         return None
 
 
+# ---------------------------------------------------------------- act
+
+ZSHENV = os.path.expanduser("~/.zshenv")
+ENV_BEGIN, ENV_END = "# >>> claude-kit disk >>>", "# <<< claude-kit disk <<<"
+
+
+def cmd_env(args):
+    """disk env VAR VALUE | disk env --unset VAR | disk env (list). Only the marked block is touched."""
+    try:
+        text = open(ZSHENV).read()
+    except FileNotFoundError:
+        text = ""
+    if ENV_BEGIN in text and ENV_END in text:
+        head, rest = text.split(ENV_BEGIN, 1)
+        block, tail = rest.split(ENV_END, 1)
+    else:
+        head, block, tail = text, "", ""
+        if head and not head.endswith("\n"):
+            head += "\n"
+    lines = [l for l in block.strip("\n").splitlines() if l.strip()]
+    entries = {}
+    for l in lines:
+        if l.startswith("export ") and "=" in l:
+            k, v = l[len("export "):].split("=", 1)
+            entries[k] = v
+    if not args:
+        for k, v in entries.items():
+            print(f"{k}={v}")
+        return
+    if args[0] == "--unset":
+        if len(args) != 2:
+            sys.exit("usage: disk env --unset VAR")
+        entries.pop(args[1], None)
+    else:
+        if len(args) != 2 or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", args[0]):
+            sys.exit("usage: disk env VAR VALUE")
+        entries[args[0]] = '"' + args[1].replace('"', '\\"') + '"'
+    body = "".join(f"export {k}={v}\n" for k, v in entries.items())
+    new_block = f"{ENV_BEGIN}\n# Written by /disk: tools redirected to another drive. Edit with `disk env`.\n{body}{ENV_END}" if entries else ""
+    new = head + new_block + (tail if new_block else tail.lstrip("\n"))
+    if new_block and not new.endswith("\n"):
+        new += "\n"
+    if os.path.exists(ZSHENV):
+        shutil.copy2(ZSHENV, ZSHENV + ".bak-disk")
+    with open(ZSHENV, "w") as f:
+        f.write(new)
+    print(f"~/.zshenv: {'set ' + args[0] if args[0] != '--unset' else 'removed ' + args[1]}. New shells pick it up; apps started from the Dock need a log-out or `launchctl setenv`.")
+
+
+def count_and_size(path):
+    files, size = 0, 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        for f in filenames:
+            try:
+                st = os.lstat(os.path.join(dirpath, f))
+            except OSError:
+                continue
+            files += 1
+            size += st.st_size
+    return files, size
+
+
+def cmd_move(args):
+    """disk move <path> [--to <dir>] [--dry-run]: copy to the warm drive, verify, swap in a symlink."""
+    dry = "--dry-run" in args
+    args = [a for a in args if a != "--dry-run"]
+    dest_root = None
+    if "--to" in args:
+        i = args.index("--to")
+        dest_root = os.path.expanduser(args[i + 1])
+        args = args[:i] + args[i + 2:]
+    if len(args) != 1:
+        sys.exit("usage: disk move <path> [--to <dir>] [--dry-run]")
+    src = os.path.abspath(os.path.expanduser(args[0]))
+    if os.path.islink(src):
+        sys.exit(f"{src} is already a link (→ {os.readlink(src)})")
+    if not os.path.isdir(src):
+        sys.exit(f"{src} is not a folder")
+    if src.startswith("/Volumes/"):
+        sys.exit("only folders on the internal drive are moved")
+    if dest_root is None:
+        warm = warm_mount(load_config(), all_drives())
+        if not warm:
+            sys.exit("no always-attached warm drive is configured and mounted (/disk setup)")
+        rel = os.path.relpath(src, os.path.expanduser("~")) if src.startswith(os.path.expanduser("~") + "/") else src.lstrip("/")
+        dest = os.path.join(warm, "moved", rel)
+    else:
+        dest = os.path.join(dest_root, os.path.basename(src))
+    if os.path.exists(dest) and os.listdir(dest):
+        sys.exit(f"{dest} already exists and isn't empty")
+    held = subprocess.run(["/usr/sbin/lsof", "+D", src], capture_output=True, text=True).stdout.strip()
+    if held:
+        procs = sorted({l.split()[0] for l in held.splitlines()[1:]})
+        sys.exit(f"files in {src} are open in: {', '.join(procs)}. Quit those first.")
+    files, size = count_and_size(src)
+    print(f"{src}: {files} files, {size / GB:.2f} GB → {dest}")
+    if dry:
+        return
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    r = subprocess.run(["/usr/bin/rsync", "-aHE", src + "/", dest + "/"], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit(f"rsync failed; nothing changed at {src}:\n{r.stderr}")
+    f2, s2 = count_and_size(dest)
+    if (f2, s2) != (files, size):
+        sys.exit(f"copy doesn't match ({f2} files, {s2} bytes vs {files}, {size}); {src} left as it was, copy at {dest}")
+    aside = src + ".disk-moving"
+    os.rename(src, aside)
+    try:
+        os.symlink(dest, src)
+    except OSError as e:
+        os.rename(aside, src)
+        sys.exit(f"could not link: {e}; restored {src}")
+    shutil.rmtree(aside)
+    print(f"moved: {src} → {dest} (verified {files} files)")
+
+
 def main():
     cmd, args = (sys.argv[1] if len(sys.argv) > 1 else "status"), sys.argv[2:]
     if cmd == "drives":
@@ -460,6 +582,10 @@ def main():
         cmd_set(args)
     elif cmd == "report":
         cmd_report(args)
+    elif cmd == "env":
+        cmd_env(args)
+    elif cmd == "move":
+        cmd_move(args)
     else:
         print(__doc__)
         sys.exit(0 if cmd in ("-h", "--help", "help") else 1)

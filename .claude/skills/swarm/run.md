@@ -25,7 +25,7 @@ The orchestrator session. It dispatches, reviews, merges, and reports. It writes
      rule under a bold heading, since the written rule is then the only protection.
 
    If commits landed since setup, do a fast delta check. If they invalidate unit briefs, stop and tell the user to re-run setup; don't guess.
-3. Create the integration branch in its own worktree, from the merge target's tip, never from the primary checkout's HEAD: `git worktree add -b swarm/<plan_id> .claude/worktrees/swarm-<plan_id> <merge-target>`. Never check it out in the primary checkout. Record `base_commit`, `integration_branch`, `started_at` and `orchestrator` (this session's name, from `ListAgents`), and note the worktree path in SWARM.md's run config. Set status `running`.
+3. Create the integration branch in its own worktree, from the merge target's tip, never from the primary checkout's HEAD: `git worktree add -b swarm/<plan_id> "$(~/.claude-kit/scripts/wt-path swarm-<plan_id>)" <merge-target>` (the path is `.claude/worktrees/swarm-<plan_id>` unless `/disk` moved worktrees; record the absolute path in SWARM.md). Never check it out in the primary checkout. Record `base_commit`, `integration_branch`, `started_at` and `orchestrator` (this session's name, from `ListAgents`), and note the worktree path in SWARM.md's run config. Set status `running`.
 4. Announce the dispatch order in one short message (this is what `/rc` monitoring sees first).
 5. **Hand the owner a progress display with live time estimates** (`/pbar`), unprompted, as the last
    thing in that message. It shows units merged out of the total, what is in flight, anything parked,

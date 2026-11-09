@@ -6,9 +6,8 @@
 # creation logic: Claude passes JSON on stdin ({"name": ..., "cwd": ...}) and uses the absolute
 # path printed as the LAST stdout line. Everything else goes to stderr.
 #
-# Where: $worktreeDir from ~/.config/claude-kit/disk.json (/disk setup), else worktrees/ on the
-# first always-attached warm drive, as <dir>/<repo>-<hash>/<name>. When no such drive is configured
-# or it isn't mounted, the worktree goes where Claude Code would put it, so nothing ever breaks.
+# Where: scripts/wt-path decides (worktreeDir in disk.json, else the always-attached warm drive,
+# else the repo's .claude/worktrees, where Claude Code would put it), so nothing ever breaks.
 #
 # Registered by /disk setup in ~/.claude/settings.json, with wt-remove as WorktreeRemove.
 set -euo pipefail
@@ -20,35 +19,8 @@ CWD=$(jq -r '.cwd // empty' <<<"$INPUT")
 REPO=$(git -C "${CWD:-$PWD}" rev-parse --show-toplevel)
 # A worktree session's cwd may itself be a worktree: anchor on the main checkout.
 REPO=$(git -C "$REPO" worktree list --porcelain | awk 'NR==1{print $2}')
-CONFIG="${CLAUDE_KIT_DISK_CONFIG:-$HOME/.config/claude-kit/disk.json}"
-
-is_mounted() { /sbin/mount | grep -q " on $1 ("; }
-
-base=""
-if [ -f "$CONFIG" ]; then
-  base=$(jq -r '.worktreeDir // empty' "$CONFIG")
-  if [ -z "$base" ]; then
-    drive=$(jq -r '[.drives[] | select(.role=="warm" and .alwaysAttached==true and .lastMount!=null)][0].lastMount // empty' "$CONFIG")
-    [ -n "$drive" ] && base="$drive/worktrees"
-  fi
-fi
-base="${base/#\~/$HOME}"
-
-if [ -n "$base" ]; then
-  # Never create anything under /Volumes/<x> unless <x> is really mounted: the folder would land
-  # on the internal drive, where the missing drive should be.
-  case "$base" in
-    /Volumes/*) vol="/Volumes/$(cut -d/ -f3 <<<"$base")"; is_mounted "$vol" || { echo "wt-create: $vol not mounted, using the repo" >&2; base=""; } ;;
-  esac
-fi
-
-if [ -n "$base" ]; then
-  # repo name + a short hash of its path, so two repos named "app" don't collide.
-  slug="$(basename "$REPO")-$(printf %s "$REPO" | shasum | cut -c1-8)"
-  DIR="$base/$slug/$NAME"
-else
-  DIR="$REPO/.claude/worktrees/$NAME"
-fi
+# Where it goes is one rule shared with the kit's own worktrees: scripts/wt-path.
+DIR=$("$(dirname "$(realpath "$0")")/wt-path" "$NAME" "$REPO")
 
 BRANCH="worktree-$NAME"
 if git -C "$REPO" worktree list --porcelain | grep -qx "worktree $DIR"; then

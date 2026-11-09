@@ -172,18 +172,25 @@ pick:
     that folder.
 - **Redirect:**
   - Run the `how` line, with `{warm}` already filled in by the report.
-  - Move the existing folder to the new place, or delete it when the item regenerates and the new
-    place is empty.
-  - Run the item's `check` and show that it prints the new path.
-  - An env var goes in `~/.zshenv` inside a marked block (`# >>> claude-kit disk >>>` …
-    `# <<< claude-kit disk <<<`), one line per variable. Never edit outside that block.
-- **Move** (no redirect exists):
-  1. `rsync -a` the folder to `<warm>/moved/<path relative to ~>`.
-  2. Compare file counts and sizes.
-  3. Replace the original with a symlink.
-
-  Never do this for anything an app holds open (quit it first), or for anything the item's `cost`
-  warns against.
+  - An env var always goes through `~/.claude-kit/scripts/disk env VAR VALUE`, never by editing
+    `~/.zshenv` by hand. It keeps one marked block, replaces a variable already set there, and
+    leaves the user's own lines alone. Remove one with `disk env --unset VAR`.
+  - Then deal with the old folder. When the item regenerates, delete it. Otherwise move it with
+    `disk move <old> --to <new parent>`, but only once the tool is quit.
+  - Run the item's `check` in a fresh shell (`zsh -lc '<check>'`) and show that it prints the new
+    path.
+- **Move** (no redirect exists): `~/.claude-kit/scripts/disk move <path>`.
+  - It copies to `<warm>/moved/<path under ~>`, checks file count and bytes, then puts a symlink in
+    the folder's place.
+  - It refuses when any process has files open there, and when the destination isn't empty.
+  - Run it with `--dry-run` first and show the line it prints.
+  - Never use it for anything the item's `cost` warns against.
+- **App data** ("yours to judge", such as Chrome profiles or the Claude desktop app's data):
+  never offered. Move it only when the user asks for that folder by name:
+  1. Quit the app.
+  2. Run `disk move`.
+  3. Warn that an app update can replace the symlink with a fresh empty folder. If it does, the
+     next report shows the folder back on the internal drive.
 - **Worktrees:** `~/.claude-kit/scripts/worktree-sweep --apply <repos>`. Offer `--apply-ask` only
   when the user picks the "finished agent still locked by a live session" ones.
 

@@ -1,0 +1,42 @@
+#!/bin/bash
+# wt-path — where a git worktree named <slug> belongs, for the repo at [dir] (default: the current one).
+#
+#   wt-path <slug> [dir]     print the absolute path; creates nothing
+#
+# One rule for every worktree on the machine: Claude Code's own (through the wt-create hook) and the
+# kit's (/plan's PR slices, /swarm's integration and review worktrees).
+#   - worktreeDir from ~/.config/claude-kit/disk.json (/disk setup), else worktrees/ on the first
+#     always-attached warm drive, as <dir>/<repo>-<hash>/<slug>;
+#   - otherwise, or when that drive isn't mounted, <repo>/.claude/worktrees/<slug>, as before.
+# Always anchored on the main checkout, so a call from inside a worktree gives the same answer.
+set -euo pipefail
+
+SLUG="${1:?usage: wt-path <slug> [repo-dir]}"
+REPO=$(git -C "${2:-$PWD}" rev-parse --show-toplevel)
+REPO=$(git -C "$REPO" worktree list --porcelain | awk 'NR==1{print $2}')
+CONFIG="${CLAUDE_KIT_DISK_CONFIG:-$HOME/.config/claude-kit/disk.json}"
+
+base=""
+if [ -f "$CONFIG" ]; then
+  base=$(jq -r '.worktreeDir // empty' "$CONFIG")
+  if [ -z "$base" ]; then
+    drive=$(jq -r '[.drives[] | select(.role=="warm" and .alwaysAttached==true and .lastMount!=null)][0].lastMount // empty' "$CONFIG")
+    [ -n "$drive" ] && base="$drive/worktrees"
+  fi
+fi
+base="${base/#\~/$HOME}"
+
+# Never place anything under /Volumes/<x> unless <x> is really mounted: the folder would land on the
+# internal drive, where the missing drive should be.
+case "$base" in
+  /Volumes/*)
+    vol="/Volumes/$(cut -d/ -f3 <<<"$base")"
+    /sbin/mount | grep -q " on $vol (" || { echo "wt-path: $vol not mounted, using the repo" >&2; base=""; } ;;
+esac
+
+if [ -n "$base" ]; then
+  # repo name + a short hash of its path, so two repos named "app" don't collide.
+  echo "$base/$(basename "$REPO")-$(printf %s "$REPO" | shasum | cut -c1-8)/$SLUG"
+else
+  echo "$REPO/.claude/worktrees/$SLUG"
+fi
