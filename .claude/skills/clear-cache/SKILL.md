@@ -27,14 +27,15 @@ Optional, in `.claude/kit.json`:
 ```json
 {
   "clearCache": {
-    "projectRoots": ["~/dev", "/Volumes/DockDriveA/dev"],
+    "projectRoots": ["~/dev", "/Volumes/External/dev"],
     "staleDays": 30
   }
 }
 ```
 
 - `projectRoots`: where your projects live. The deep tier looks there for stale `node_modules`.
-  Default is `~/dev`.
+  `/disk setup` keeps one list for the whole machine (`projectRoots` in
+  `~/.config/claude-kit/disk.json`), which wins over this one. Default is `~/dev`.
 - `staleDays`: a project whose files haven't changed in this many days counts as stale. Default 30.
 
 > **The shell is zsh.** It aborts on a glob that matches nothing and doesn't word-split
@@ -122,9 +123,12 @@ each type, and delete only the rest. Playwright MCP servers also keep profiles t
 ```bash
 bash <<'SH'
 shopt -s nullglob
-roots=$(jq -r '(.clearCache.projectRoots // ["~/dev"])[]' .claude/kit.json 2>/dev/null); [ -z "$roots" ] && roots="~/dev"
+# Project roots: the machine config (/disk setup), else this project's kit.json, else ~/dev.
+roots=$(jq -r '.projectRoots[]?' "${CLAUDE_KIT_DISK_CONFIG:-$HOME/.config/claude-kit/disk.json}" 2>/dev/null)
+[ -z "$roots" ] && roots=$(jq -r '.clearCache.projectRoots[]?' .claude/kit.json 2>/dev/null)
+[ -z "$roots" ] && roots="~/dev"
 # Every build a project pins, from each installed playwright-core (npm and pnpm layouts).
-# -L follows links, so a project linked into ~/dev from another drive (ha-platform) is seen too.
+# -L follows links, so a project linked into ~/dev from another drive is seen too.
 pinned=$(echo "$roots" | while IFS= read -r r; do
   r="${r/#\~/$HOME}"; [ -d "$r" ] || continue
   find -L "$r" -maxdepth 8 -path '*playwright-core/browsers.json' -not -path '*/.git/*' 2>/dev/null
@@ -145,7 +149,7 @@ SH
 ```
 
 A project on an external drive that isn't linked into a project root is invisible to this scan,
-so list it in `clearCache.projectRoots`. If a test later reports a missing browser, run
+so list it in `projectRoots` (`/disk setup`, or `clearCache.projectRoots`). If a test later reports a missing browser, run
 `npx playwright install chromium` in that project.
 
 > **Playwright's installer removes browsers too.** After installing, it deletes every build that
@@ -172,7 +176,10 @@ Finding stale dependency folders:
 ```bash
 bash <<'SH'
 days=$(jq -r '.clearCache.staleDays // 30' .claude/kit.json 2>/dev/null); [ -z "$days" ] && days=30
-roots=$(jq -r '(.clearCache.projectRoots // ["~/dev"])[]' .claude/kit.json 2>/dev/null); [ -z "$roots" ] && roots="~/dev"
+# Project roots: the machine config (/disk setup), else this project's kit.json, else ~/dev.
+roots=$(jq -r '.projectRoots[]?' "${CLAUDE_KIT_DISK_CONFIG:-$HOME/.config/claude-kit/disk.json}" 2>/dev/null)
+[ -z "$roots" ] && roots=$(jq -r '.clearCache.projectRoots[]?' .claude/kit.json 2>/dev/null)
+[ -z "$roots" ] && roots="~/dev"
 echo "$roots" | while IFS= read -r r; do
   r="${r/#\~/$HOME}"; [ -d "$r" ] || continue
   find "$r" -maxdepth 4 \( -name node_modules -o -name target \) -type d -prune 2>/dev/null |

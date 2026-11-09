@@ -1,0 +1,230 @@
+#!/usr/bin/env -S python3 -I
+"""disk — this Mac's drives, as /disk sees them.
+
+  disk drives                 every drive a user would put files on (JSON)
+  disk status                 the configured drives: mounted or not, free space against each floor
+  disk check                  one line when a drive with a floor is below it, else nothing (session-start hook)
+  disk config                 print the config path and its contents
+  disk set-drive <uuid> [--label L] [--role hot|warm|archive] [--floor GB] [--attached yes|no]
+  disk unset-drive <uuid>
+  disk set <key> <json-value> set a top-level config key (projectRoots, warmAfterDays, ...)
+
+Drives are keyed by volume UUID, never by name: names change and collide ("Untitled", "Backup").
+The config is per machine and lives outside any repo:
+  $CLAUDE_KIT_DISK_CONFIG, else ~/.config/claude-kit/disk.json
+A drive in the config that isn't mounted is reported as such and skipped, never an error.
+"""
+import json
+import os
+import plistlib
+import shutil
+import subprocess
+import sys
+
+CONFIG = os.environ.get("CLAUDE_KIT_DISK_CONFIG") or os.path.expanduser("~/.config/claude-kit/disk.json")
+DATA_MOUNT = "/System/Volumes/Data"  # the internal volume that holds home folders on macOS 10.15+
+GB = 1024 ** 3
+
+DEFAULTS = {
+    "drives": [],
+    "projectRoots": ["~/dev"],
+    "warmAfterDays": 60,
+    "coldAfterDays": 365,
+    "archiveDir": None,      # default: <first archive drive, else first warm drive>/disk-archive
+    "worktreeDir": None,     # default: <first always-attached warm drive>/worktrees
+    "knownItems": [],        # user additions to the skill's known-items.json
+}
+
+
+def load_config():
+    try:
+        with open(CONFIG) as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        return None
+    for k, v in DEFAULTS.items():
+        cfg.setdefault(k, v)
+    return cfg
+
+
+def save_config(cfg):
+    os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    tmp = CONFIG + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cfg, f, indent=2)
+        f.write("\n")
+    os.replace(tmp, CONFIG)
+
+
+def mounts():
+    """Mount points a user would store files on: the internal data volume and /Volumes/*."""
+    out = subprocess.run(["mount"], capture_output=True, text=True).stdout
+    found = []
+    for line in out.splitlines():
+        if " on " not in line or "(" not in line:
+            continue
+        dev, rest = line.split(" on ", 1)
+        point, opts = rest.rsplit(" (", 1)
+        opts = opts.rstrip(")").split(", ")
+        if not dev.startswith("/dev/"):
+            continue  # network shares, devfs, autofs
+        if point == DATA_MOUNT or (point.startswith("/Volumes/") and "nobrowse" not in opts and "read-only" not in opts):
+            found.append(point)
+    return found
+
+
+def info(point):
+    raw = subprocess.run(["diskutil", "info", "-plist", point], capture_output=True).stdout
+    try:
+        return plistlib.loads(raw)
+    except Exception:
+        return {}
+
+
+def drive(point):
+    d = info(point)
+    usage = shutil.disk_usage(point)
+    # APFS volumes share their container's space, so the container's free space is the real number.
+    free = d.get("APFSContainerFree") or usage.free
+    internal = bool(d.get("Internal"))
+    label = d.get("VolumeName") or os.path.basename(point)
+    if point == DATA_MOUNT:
+        label = "Macintosh HD" if label == "Data" else label
+    return {
+        "uuid": d.get("VolumeUUID") or d.get("DiskUUID"),
+        "label": label,
+        "mount": point,
+        "internal": internal,
+        "filesystem": d.get("FilesystemType"),
+        "bus": d.get("BusProtocol"),
+        "ssd": d.get("SolidState"),
+        "totalGB": round((d.get("TotalSize") or usage.total) / GB, 1),
+        "freeGB": round(free / GB, 1),
+    }
+
+
+def all_drives():
+    return [drive(p) for p in mounts()]
+
+
+def status_rows(cfg):
+    live = {d["uuid"]: d for d in all_drives()}
+    rows = []
+    for c in (cfg or {}).get("drives", []):
+        d = live.pop(c["uuid"], None)
+        row = dict(c)
+        row["mounted"] = d is not None
+        if d:
+            row.update(mount=d["mount"], freeGB=d["freeGB"], totalGB=d["totalGB"], internal=d["internal"])
+            floor = c.get("floorGB")
+            row["belowFloor"] = floor is not None and d["freeGB"] < floor
+        rows.append(row)
+    for d in live.values():
+        d["configured"] = False
+        rows.append(d)
+    return rows
+
+
+def cmd_status():
+    cfg = load_config()
+    if cfg is None:
+        print(f"No config at {CONFIG}. Run /disk setup.", file=sys.stderr)
+    print(json.dumps({"config": CONFIG, "drives": status_rows(cfg)}, indent=2))
+
+
+def cmd_check():
+    """Fast and silent unless something is wrong. No config means nothing to check."""
+    cfg = load_config()
+    if not cfg:
+        return
+    for c in cfg.get("drives", []):
+        floor = c.get("floorGB")
+        mount = c.get("lastMount")
+        if floor is None or not mount or not os.path.isdir(mount):
+            continue
+        try:
+            free = shutil.disk_usage(mount).free / GB
+        except OSError:
+            continue
+        if free < floor:
+            print(f"Disk: {c.get('label', mount)} has {free:.1f} GB free, under its {floor} GB floor. Run /disk to see what to clear or move.")
+
+
+def cmd_set_drive(args):
+    if not args:
+        sys.exit("usage: disk set-drive <uuid> [--label L] [--role hot|warm|archive] [--floor GB] [--attached yes|no]")
+    uuid, opts = args[0], args[1:]
+    cfg = load_config() or dict(DEFAULTS, drives=[])
+    live = {d["uuid"]: d for d in all_drives()}
+    entry = next((c for c in cfg["drives"] if c["uuid"] == uuid), None)
+    if entry is None:
+        if uuid not in live:
+            sys.exit(f"No mounted drive has UUID {uuid}. `disk drives` lists them.")
+        entry = {"uuid": uuid, "label": live[uuid]["label"], "internal": live[uuid]["internal"]}
+        cfg["drives"].append(entry)
+    it = iter(opts)
+    for flag in it:
+        val = next(it, None)
+        if val is None:
+            sys.exit(f"{flag} needs a value")
+        if flag == "--label":
+            entry["label"] = val
+        elif flag == "--role":
+            if val not in ("hot", "warm", "archive"):
+                sys.exit("role is hot, warm or archive")
+            entry["role"] = val
+        elif flag == "--floor":
+            entry["floorGB"] = float(val)
+        elif flag == "--attached":
+            entry["alwaysAttached"] = val.lower() in ("yes", "true", "1")
+        else:
+            sys.exit(f"unknown flag {flag}")
+    if uuid in live:
+        entry["lastMount"] = live[uuid]["mount"]  # lets `check` stay fast: no diskutil call
+    if entry.get("internal"):
+        entry.setdefault("alwaysAttached", True)
+    save_config(cfg)
+    print(json.dumps(entry, indent=2))
+
+
+def cmd_unset_drive(args):
+    cfg = load_config()
+    if not cfg or not args:
+        sys.exit("usage: disk unset-drive <uuid>")
+    cfg["drives"] = [c for c in cfg["drives"] if c["uuid"] != args[0]]
+    save_config(cfg)
+
+
+def cmd_set(args):
+    if len(args) != 2 or args[0] not in DEFAULTS or args[0] == "drives":
+        sys.exit("usage: disk set <key> <json-value>; keys: " + ", ".join(k for k in DEFAULTS if k != "drives"))
+    cfg = load_config() or dict(DEFAULTS, drives=[])
+    cfg[args[0]] = json.loads(args[1])
+    save_config(cfg)
+
+
+def main():
+    cmd, args = (sys.argv[1] if len(sys.argv) > 1 else "status"), sys.argv[2:]
+    if cmd == "drives":
+        print(json.dumps(all_drives(), indent=2))
+    elif cmd == "status":
+        cmd_status()
+    elif cmd == "check":
+        cmd_check()
+    elif cmd == "config":
+        print(CONFIG)
+        cfg = load_config()
+        print(json.dumps(cfg, indent=2) if cfg else "(none yet)")
+    elif cmd == "set-drive":
+        cmd_set_drive(args)
+    elif cmd == "unset-drive":
+        cmd_unset_drive(args)
+    elif cmd == "set":
+        cmd_set(args)
+    else:
+        print(__doc__)
+        sys.exit(0 if cmd in ("-h", "--help", "help") else 1)
+
+
+if __name__ == "__main__":
+    main()
