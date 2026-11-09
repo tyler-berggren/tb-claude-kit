@@ -14,7 +14,8 @@ code, only config and working state). That repo has a manifest, kit-config.json:
       {"from": "kit/BRAIN.airsqlite", "to": "{kit}/cowork/brain/BRAIN.airsqlite"},
       {"from": "kit/memory",       "to": "{kit-memory}"}
     ],
-    "settings": "settings.fragment.json"
+    "settings": "settings.fragment.json",
+    "guard": "kit/private-words.txt"
   }
 
   {kit}         the kit checkout (~/.claude-kit resolved)
@@ -29,6 +30,9 @@ Commands:
   kit-config adopt <from> <to>
                            move an existing file or folder at <to> into the repo at <from>, link it
                            back, and add it to the manifest
+
+"guard" names a private words file: `link` installs scripts/private-guard as the kit checkout's
+pre-commit hook, so a commit that adds any of those words is refused.
 
 `link` never replaces a real file or folder: it reports it as occupied, so you can `adopt` it or
 move it aside. ~/.claude/settings.json is merged, not linked, because Claude Code rewrites it: the
@@ -151,6 +155,33 @@ def merge_settings(repo, frag_name, quiet=False):
     return [f"settings + {c}" for c in changed]
 
 
+HOOK_MARK = "# installed by kit-config: private-guard"
+
+
+def install_guard(repo, words_rel):
+    """Make private-guard the kit checkout's pre-commit hook, reading the config repo's words file.
+    Never replaces a pre-commit hook someone else installed."""
+    words = os.path.join(repo, words_rel)
+    if not os.path.exists(words):
+        return f"skip   guard ({words_rel} not in the repo)"
+    git_dir = subprocess.run(["git", "-C", KIT, "rev-parse", "--git-common-dir"], capture_output=True, text=True).stdout.strip()
+    if not git_dir:
+        return "skip   guard (the kit checkout is not a git repo)"
+    hook = os.path.join(KIT, git_dir, "hooks", "pre-commit") if not os.path.isabs(git_dir) else os.path.join(git_dir, "hooks", "pre-commit")
+    body = f'#!/bin/bash\n{HOOK_MARK}\nexec "{os.path.join(KIT, "scripts", "private-guard")}" "{words}"\n'
+    if os.path.exists(hook):
+        cur = open(hook).read()
+        if cur == body:
+            return None
+        if HOOK_MARK not in cur:
+            return f"GUARD NOT INSTALLED: {hook} is someone else's hook; add this line to it: {os.path.join(KIT, 'scripts', 'private-guard')} \"{words}\" || exit 1"
+    os.makedirs(os.path.dirname(hook), exist_ok=True)
+    with open(hook, "w") as f:
+        f.write(body)
+    os.chmod(hook, 0o755)
+    return f"guard  {hook} (private words from {words_rel})"
+
+
 def cmd_link(args):
     quiet = "--quiet" in args
     args = [a for a in args if a != "--quiet"]
@@ -158,6 +189,8 @@ def cmd_link(args):
     m = manifest(repo)
     out = [link_one(repo, e, quiet) for e in m.get("links", [])]
     out += merge_settings(repo, m.get("settings", "settings.fragment.json"), quiet)
+    if m.get("guard"):
+        out.append(install_guard(repo, m["guard"]))
     os.makedirs(os.path.dirname(REMEMBER), exist_ok=True)
     if not os.path.exists(REMEMBER) or open(REMEMBER).read().strip() != repo:
         with open(REMEMBER, "w") as f:

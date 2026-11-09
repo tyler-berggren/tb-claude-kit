@@ -175,6 +175,8 @@ with `install.sh` from inside it, as above.
 - `kit-config adopt <from> <to>` moves an existing file or folder into the repo and links it back.
 - `kit-config save` snapshots the kit's brain, then commits and pushes the repo.
 - `link` never overwrites a real file: it reports `OCCUPIED` and leaves it alone.
+- `"guard": "<words file>"` in the manifest installs `scripts/private-guard` as the kit checkout's
+  pre-commit hook: a commit that adds any of your private words is refused (see CONTRIBUTING.md).
 
 Client projects keep their own brains and plans in their own repos (`sqlite_tracking`). The config
 repo is for what belongs to you and the machine, not to any one project.

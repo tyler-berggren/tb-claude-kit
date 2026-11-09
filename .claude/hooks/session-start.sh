@@ -526,6 +526,22 @@ KIT_NOTICE="${KIT_NOTICE# }"
 kit_memory
 [ "$MEM_TELL" = "yes" ] && MEMORY_NOTICE="🧠 Memory: $MEM_MSG"
 
+# --- Developing the kit itself: this checkout is public and is the template new projects copy. ---
+# Only fires in the kit's own checkout (the one ~/.claude-kit points at). Says where the owner's
+# private working state lives, or warns that it isn't linked, so no session commits it.
+KITDEV_NOTICE=""
+if [ -f install.sh ] && [ -x scripts/kit-config ] && [ -d "$HOME/.claude-kit" ] &&
+   [ "$(pwd -P)" = "$(cd "$HOME/.claude-kit" && pwd -P)" ]; then
+  cfg_repo=$(cat "$HOME/.config/claude-kit/config-repo" 2>/dev/null)
+  if [ -n "$cfg_repo" ] && [ -L .claude/kit.json ]; then
+    KITDEV_NOTICE="🧰 Developing the kit: this repo is PUBLIC, and new projects copy its CLAUDE.md. Your plans, research, brain snapshots, memory and kit.json are linked from your private config repo ($cfg_repo) and git-ignored here; save them with ~/.claude-kit/scripts/kit-config save. Commit only kit product files (skills, scripts, hooks, docs), with generic names in examples. Never write private context into CLAUDE.md or its mantra: keep it in memory. See CONTRIBUTING.md."
+    grep -q "installed by kit-config: private-guard" .git/hooks/pre-commit 2>/dev/null ||
+      KITDEV_NOTICE="$KITDEV_NOTICE The private-word commit guard is NOT installed: add a \"guard\" words file to the config repo's kit-config.json and run kit-config link."
+  else
+    KITDEV_NOTICE="⚠️ Developing the kit WITHOUT a linked private config repo: this repo is PUBLIC, and plans, brain and memory made here are local only. Tell the user before starting work, and suggest: bash install.sh --config <their config repo> (docs/install.md, \"Your own config\")."
+  fi
+fi
+
 # --- Disk: a drive below its free-space floor (/disk setup). ---
 # `disk check` reads the per-machine config and each drive's last mount point, with no diskutil
 # call, so it costs ~30 ms. It prints nothing when every drive is above its floor or no config exists.
@@ -611,7 +627,7 @@ emit() {
 
 if [ ! -f "$DB" ]; then
   # Still surface the notices and kit conventions in a project with no brain DB.
-  emit "$(join_notices "$DISK_NOTICE" "$KIT_NOTICE" "$MEMORY_NOTICE" "$MANTRA_NOTICE" "$LEGACY_NOTICE" "$KIT_RULES")"
+  emit "$(join_notices "$KITDEV_NOTICE" "$DISK_NOTICE" "$KIT_NOTICE" "$MEMORY_NOTICE" "$MANTRA_NOTICE" "$LEGACY_NOTICE" "$KIT_RULES")"
   exit 0
 fi
 
@@ -719,7 +735,7 @@ if [ "$NEW_SESSION" = "yes" ] && [ -n "$PREV_START" ] && { [ "$SOURCE" = "startu
 fi
 
 CTX="## Brain State (auto-loaded at session start)"
-NOTICES=$(join_notices "$DISK_NOTICE" "$SCHEMA_NOTICE" "$RESTORE_NOTICE" "$KIT_NOTICE" "$MEMORY_NOTICE" "$LEGACY_NOTICE" "$MANTRA_NOTICE")
+NOTICES=$(join_notices "$KITDEV_NOTICE" "$DISK_NOTICE" "$SCHEMA_NOTICE" "$RESTORE_NOTICE" "$KIT_NOTICE" "$MEMORY_NOTICE" "$LEGACY_NOTICE" "$MANTRA_NOTICE")
 [ -n "$NOTICES" ] && CTX="$CTX
 
 $NOTICES"
