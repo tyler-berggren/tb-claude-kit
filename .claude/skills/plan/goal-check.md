@@ -65,7 +65,7 @@ Be blunt. Do not soften a verdict because the off-goal work was well done.
 
 ## What the session does with it
 
-1. **Write it in the plan** under `## Goal checks` (below `## Work ahead`), newest first: the date, the
+1. **Write it in the plan** under `## Goal checks` (directly below `## Goal`), newest first: the date, the
    verdict, the measure, and the agent's points 2-4 in a line each. Keep the last five; fold older
    ones into one line each.
 2. **Update Pace** in the goal block from point 1.
