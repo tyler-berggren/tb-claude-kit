@@ -755,3 +755,92 @@ Lid sleep: ON — Mac sleeps normally when the lid closes
   `BIN_DIR=<dir>` installs somewhere else; `--uninstall` removes the link.
 - **With lid sleep off, don't put the Mac in a bag.** It can't cool itself there, and on battery
   it drains without ever sleeping.
+
+---
+
+## Disk (`/disk`)
+
+`/disk` shows where your Mac's disk space went, on every drive, internal and external. It says what
+created each big item, then wins the space back the way that lasts. Nothing is deleted or moved
+unless you pick it.
+
+### How it works
+
+- **One map per machine.** `/disk setup` asks a few questions about each drive and writes
+  `~/.config/claude-kit/disk.json`:
+  - its role: `hot` for active work, `warm` for things moved off a hot drive, `archive`;
+  - the free space it must keep (its floor);
+  - whether it is always attached, like a desktop's dock drive, or comes and goes.
+
+  Drives are keyed by volume UUID, so renaming one changes nothing. It is not a project setting,
+  so it never sits in a repo. Keep it in your [own config repo](install.md#your-own-config-one-private-repo-every-machine)
+  to carry it between machines.
+- **A known-items list.** `.claude/skills/disk/known-items.json` names about 50 things that fill
+  Macs. For each one it says what creates it, whether it comes back on its own, and its best
+  action:
+  - development caches;
+  - Xcode, simulators, Docker and Colima;
+  - model caches;
+  - app caches;
+  - leftover device-restore files;
+  - worktrees.
+
+  Add your own entries under `knownItems` in `disk.json`. One with the same `id` replaces the
+  shipped entry.
+- **`/disk report`** changes nothing. It lists:
+  - each drive's free space against its floor;
+  - recommendations grouped by drive, with the drive under the most pressure first;
+  - things that are yours to judge (browser profiles, app data, Downloads);
+  - big folders the list doesn't know, named by app;
+  - worktrees in every project.
+- **`/disk`** shows the report, then carries out the recommendations you pick. In order of
+  preference:
+  1. Delete what regenerates.
+  2. Redirect the tool that makes it to the warm drive (an env var or the tool's own setting).
+  3. Move a folder there with a symlink left in its place.
+- **A warning at session start.** When a drive drops below its floor, the next session says so in
+  one line and names the biggest win from the last report. It costs about 30 ms and is silent
+  otherwise.
+
+### Worktrees on an external drive
+
+Every git worktree an agent makes is a full checkout, usually with its own `node_modules`. A long
+swarm leaves dozens behind. When a `warm` drive is always attached, `/disk setup` offers to put
+every worktree there:
+- **Claude Code's own** (`--worktree`, subagents with `isolation: "worktree"`): through a
+  `WorktreeCreate`/`WorktreeRemove` hook pair, since Claude Code has no setting for the location
+  and refuses a symlinked `.claude/worktrees`.
+- **The kit's own** (`/plan` and `/swarm`): through `scripts/wt-path`.
+
+Both go to `<drive>/worktrees/<repo>-<hash>/<name>`, and both fall back to the repo when the drive
+isn't mounted.
+
+`scripts/worktree-sweep` holds the cleanup rules that `/prune`, `/swarm` and `/disk` share. A
+worktree is removed only when all of these hold:
+- its work has landed, whether by merge, cherry-pick or rebase;
+- it has no uncommitted changes;
+- nothing is running in it;
+- it has been idle for 2 hours;
+- it is not held by a live session's lock.
+
+Worktrees named `slot-*` or `pool-*`, pools a project's own tooling reuses, are never removed.
+Change that with `worktreeKeep` in `disk.json`.
+
+### Commands
+
+```bash
+~/.claude-kit/scripts/disk status                   # drives, free space, floors
+~/.claude-kit/scripts/disk report                   # the full report (a few minutes on a full disk)
+~/.claude-kit/scripts/disk env HF_HOME /Volumes/External/caches/huggingface   # one marked block in ~/.zshenv
+~/.claude-kit/scripts/disk move ~/Movies --dry-run  # copy, verify, symlink; --dry-run first
+~/.claude-kit/scripts/worktree-sweep [repo]         # what can go, and why; --apply removes it
+```
+
+### Setup notes
+
+- **Full Disk Access.** Mail, Messages and some app containers can't be measured without it. The
+  report marks those folders. To measure them, give your terminal or editor Full Disk Access in
+  System Settings → Privacy & Security.
+- **`projectRoots`** in `disk.json` lists where your projects live, on any drive.
+  `/clear-cache` and `worktree-sweep` read it too, and it takes precedence over
+  `clearCache.projectRoots` in a project's `kit.json`.

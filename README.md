@@ -167,8 +167,10 @@ Twenty-three skills. Claude Code lists them in every session, so no project need
 | `/1password` | Secrets out of repos and transcripts: one read-only service account per vault, `.env` files converted to `op://` references. [More](docs/skills.md#secrets-1password) |
 | `/claude-switcher` | Several Claude accounts on one machine, each one a VS Code profile switch away. [More](docs/skills.md#claude-switcher-claude-switcher) |
 | `/cross-artifact` | Read claude.ai artifacts that were shared with your *other* Claude account, live. [More](docs/skills.md#cross-artifact-cross-artifact) |
+| `/disk` | Where your disk went on every drive, what made it, and the lasting fix: clear it, point the tool at another drive, or move it. Worktrees can live on an external drive. [More](docs/skills.md#disk-disk) |
 | `/clear-cache` | Wins back disk from npm, pnpm, uv, pip, Homebrew and stale browser copies. |
 | `/prune` | Reviews a repo's worktrees and removes only the ones you pick. |
+| `kit-config` | Your own configuration in a private repo, linked into place on any machine with one command. [More](docs/install.md#your-own-config-one-private-repo-every-machine) |
 | `lidsleep` | A terminal toggle for sleep-on-lid-close, so long jobs survive a closed laptop. [More](docs/skills.md#lid-sleep-lidsleep) |
 
 ---

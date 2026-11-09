@@ -147,7 +147,7 @@
   "_note_writing": "Adjusts writing rule sets by name without a file (docs/customization.md, Writing rules). add: lines appended to the set here. applies: a different scope here. off: true drops the set here. A whole set of the project's own goes in .claude/writing/<name>.md instead.",
   "writing": {},
 
-  "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Skills that read one: 1password, brain, brainstorm, bridge, claude-switcher, clear-cache, commit, cto, kill, look, parse, pbar, plan, prune, push, report, research, swarm, vibe-audit, video-editor, web, wiki. rules.plan is where a team repo's ship command and policy, branch conventions, priority tiers and CI path map go; rules.look names the base URL and how a fresh headless profile signs in. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
+  "_note_rules": "Short project-specific instructions, keyed by skill name. Each skill reads its own entry and applies it. Skills that read one: 1password, brain, brainstorm, bridge, claude-switcher, clear-cache, commit, cto, disk, kill, look, parse, pbar, plan, prune, push, report, research, swarm, vibe-audit, video-editor, web, wiki. rules.plan is where a team repo's ship command and policy, branch conventions, priority tiers and CI path map go; rules.look names the base URL and how a fresh headless profile signs in. Keep these to a sentence or two — a rule that needs more room belongs in a project-owned skill with its own name, or upstream in the kit.",
   "rules": {
     "push": "Example: if the post-commit hook reports undeployed worker changes, ask before pushing — never auto-deploy."
   }

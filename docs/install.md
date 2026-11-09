@@ -218,7 +218,9 @@ Other keys are documented with the skill that reads them: `plan.issues` under [P
 [Secrets](skills.md#secrets-1password). Smaller ones:
 
 - **`clearCache`** — `projectRoots` (where your projects live, default `~/dev`) and `staleDays`
-  (default 30), for `/clear-cache`'s deep tier.
+  (default 30), for `/clear-cache`'s deep tier. A machine-wide `projectRoots` in `/disk`'s
+  `~/.config/claude-kit/disk.json` takes precedence. `/disk` keeps all its settings in that file,
+  because drives belong to the machine, not to a project.
 - **`prune`** — `staleDays` (default 14) and `keep` (branch-name globs `/prune` never offers to remove).
 - **`web`** — `roots` (where the built site is), `baseUrl` (the canonical origin) and `ignore`, for `/web`.
 - **`subtrees`** — `{ "<name>": { "prefix": "app", "remote": "app", "branch": "main" } }`. With it,
