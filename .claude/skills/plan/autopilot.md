@@ -49,11 +49,20 @@ A long job (a load, a deploy, a CI run, a batch of agents) is never a reason to 
 4. **When everything runnable is done and only waits remain,** keep the session awake: a background
    heartbeat (`sleep 1800`, `run_in_background`; restarted on each wake) or, inside `/loop`, a
    `ScheduleWakeup` of 1200 to 1800 s. Each wake reads the jobs, advances whatever they unblocked,
-   and refills the queue.
+   refills the queue, and runs the goal check when one is due.
+
+## The goal check
+
+Autopilot keeps work moving; the goal check keeps it pointed at the goal. Every plan carries a
+`## Goal` block (goal, finish line, measure, pace), and an agent with none of the session's context
+reads the plan's record against it: at each milestone, before a new Work ahead item when the last
+check is over four hours old, at least daily (the heartbeat runs it), and when the owner asks. The
+session writes its verdict in the plan, reorders Work ahead by it and leads the next status with it.
+The full rules and the agent's brief are in `goal-check.md`.
 
 ## Ending a turn
 
-A turn ends with a short status: what moved, what is running (with its watcher), and what is next
+A turn ends with a short status: the last goal check's verdict when one ran since the last status, what moved, what is running (with its watcher), and what is next
 from the queue. Never a question asking the owner what to work on. The only questions are the
 plan's open questions and critical parks, asked as **Batches** says.
 

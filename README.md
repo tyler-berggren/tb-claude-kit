@@ -26,6 +26,7 @@ wrong.
 | Long work dies when the session does. | **Plans** are numbered files in the repo. Resuming one re-reads it against the code and reports drift, instead of trusting what the last session claimed. |
 | You babysit every step. | **Batches run without you.** Questions are asked once, up front. During the run Claude decides as a senior engineer would and records each call for you to overrule. Only critical issues stop it: irreversible actions, security, money, or reversing your decisions. |
 | You keep asking "what next?" while a long job runs. | **Autopilot** keeps the plan moving. Each plan has a ranked `## Work ahead` queue; while a load, deploy or agent batch runs, Claude starts the next item that doesn't touch it, wakes itself every half hour when only waits remain, and stops only when everything left needs you. |
+| A long session drifts into side tasks and loses the goal. | **Goal check.** Each plan carries a `## Goal` block (goal, finish line, measure, pace). At each milestone and at least daily, an agent with none of the session's context reads the plan's record and the measure, says where the time went (on the goal, supporting it, off it) and gives a verdict; the session reorders its queue by it and leads its status with it. |
 | One agent, one thing at a time. | **`/swarm`** finishes a whole plan with parallel agents in isolated worktrees. Each runs on a model tier matched to its task, and every unit is reviewed before it merges. |
 | "Done" means "it compiled". | **Claude checks its own work.** It inspects a real browser through the DOM, each agent gets a private headless browser, and audits cover code health, architecture drift and SEO. |
 | Research means plausible-sounding guesses. | **`/research`** runs parallel agents under an anti-fabrication contract. Each one writes down what it could *not* verify. |
@@ -91,6 +92,17 @@ notification, only when everything left is yours: a critical item, an open quest
 release the plan reserves for you. Turn it off per project with `autopilot: off` (or
 `autopilot: ask`, which asks before each new item) in `rules."plan"` in `.claude/kit.json`. The
 rules are in [`.claude/skills/plan/autopilot.md`](.claude/skills/plan/autopilot.md).
+
+**Goal check.** Autopilot keeps work moving; the goal check keeps it pointed at the goal. Every plan
+carries a `## Goal` block: the goal in your words, the finish line, how to measure progress, and the
+pace so far. At each milestone, before a new queue item when the last check is over four hours old,
+and at least once a day, Claude hands the plan's record to a fresh agent that knows nothing of the
+session's reasoning. It runs the measure itself, says where the time went since the last check (on
+the goal, supporting it, or off it), names queue items that no longer serve the goal, and gives a
+verdict: on track, drifting or stalled. Claude writes it in the plan's `## Goal checks`, reorders the
+queue by it, and leads its next status with it; two drifting verdicts in a row come to you as a
+question. The rules and the agent's brief are in
+[`.claude/skills/plan/goal-check.md`](.claude/skills/plan/goal-check.md).
 
 **Ship.** `/commit` and `/push`. In someone else's repo, `/plan pr` cuts the work into small
 pull requests that merge the same day. Each PR body is a decision record that credits prior work

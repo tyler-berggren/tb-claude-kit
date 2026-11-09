@@ -498,8 +498,10 @@ On by default for every resumed plan and every swarm run; a project turns it off
 R3 confirmation approves the plan's whole build order. The plan keeps a short ranked `## Work ahead`
 queue; while a long job runs, the session starts the top item that does not touch it; when only waits
 remain, a background heartbeat keeps it awake; a turn ends with status, never "what next?". It stops
-only when everything left is the owner's. The full rules are in `<this skill's folder>/autopilot.md`:
-read it at Resume's R3, before the batch starts.
+only when everything left is the owner's. A **goal check** keeps it pointed: every plan carries a
+`## Goal` block, and a fresh agent with none of the session's context reads the plan's record against
+it at milestones and at least daily. The full rules are in `<this skill's folder>/autopilot.md` and
+`goal-check.md`: read both at Resume's R3, before the batch starts.
 
 ---
 
