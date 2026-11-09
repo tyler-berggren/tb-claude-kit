@@ -5,3 +5,10 @@
 .DS_Store
 __pycache__/
 scripts/wiki-build/node_modules/
+
+# Personal working state. It lives in your own private config repo and is linked in by
+# scripts/kit-config (see docs/install.md, "Your own config"). Nothing personal is committed here.
+/.claude/kit.json
+/cowork/plans
+/cowork/research
+/cowork/brain/*.airsqlite

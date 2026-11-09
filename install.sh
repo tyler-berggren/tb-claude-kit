@@ -27,6 +27,10 @@ set -euo pipefail
 #   --dry-run               Report what would change without touching anything
 #   --replace               In outside mode, replace occupied paths with symlinks
 #                           (DESTRUCTIVE — commit first; see "occupied" below)
+#   --config <repo>         Machine setup, not a project install: link your private
+#                           config repo into place (scripts/kit-config link) and
+#                           point ~/.claude-kit at this kit when it doesn't exist yet.
+#                           Runs from anywhere; see docs/install.md, "Your own config".
 #   --help                  This message
 #
 # Kit path resolution (where symlinks point), first hit wins:
@@ -68,6 +72,7 @@ INTEGRATION_MODE="prompt"
 DRIFT_MODE="prompt"
 REPLACE="no"
 DRY_RUN="no"
+CONFIG_REPO=""
 
 usage() { sed -n '3,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -79,6 +84,8 @@ while [ $# -gt 0 ]; do
     --dry-run|--no-mcps)
                 INTEGRATION_MODE="no"; DRIFT_MODE="skip"; DRY_RUN="yes"; shift ;;
     --replace)  REPLACE="yes"; shift ;;
+    --config)   CONFIG_REPO="${2:?--config needs the path to your config repo}"; shift 2 ;;
+    --config=*) CONFIG_REPO="${1#*=}"; shift ;;
     --help|-h)  usage; exit 0 ;;
     *)          echo "Unknown flag: $1" >&2; echo "Try --help" >&2; exit 1 ;;
   esac
@@ -97,6 +104,14 @@ fi
 
 KIT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET_DIR="$(pwd)"
+
+# Machine setup: link the owner's private config repo, then stop. No project is touched.
+if [ -n "$CONFIG_REPO" ]; then
+  if [ ! -e "$HOME/.claude-kit" ]; then
+    ln -s "$KIT_DIR" "$HOME/.claude-kit" && echo "  [link] ~/.claude-kit -> $KIT_DIR"
+  fi
+  exec "$KIT_DIR/scripts/kit-config" link "$CONFIG_REPO"
+fi
 KIT_JSON="$TARGET_DIR/.claude/kit.json"
 
 if [ "$KIT_DIR" = "$TARGET_DIR" ]; then

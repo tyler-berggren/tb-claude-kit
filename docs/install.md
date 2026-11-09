@@ -130,6 +130,57 @@ committed and pushed with everything else:
 
 ---
 
+## Your own config: one private repo, every machine
+
+The kit holds no one's configuration. Yours goes in a **private repo of your own**, holding config
+and working state but no code. `scripts/kit-config` links it into place, so a new machine is two
+clones and one command:
+
+```bash
+git clone https://github.com/<you>/tb-claude-kit.git ~/dev/tb-claude-kit       # or the public kit
+git clone https://github.com/<you>/my-claude-config.git ~/dev/my-claude-config  # private
+bash ~/dev/tb-claude-kit/install.sh --config ~/dev/my-claude-config
+```
+
+`--config` links `~/.claude-kit` to the kit when that link doesn't exist yet, then runs
+`kit-config link`. It sets up the machine and touches no project. Each project is still installed
+with `install.sh` from inside it, as above.
+
+**What goes in it.** The repo's `kit-config.json` lists every entry and where it is linked:
+
+```json
+{
+  "links": [
+    {"from": "writing",   "to": "~/.claude/writing"},
+    {"from": "disk.json", "to": "~/.config/claude-kit/disk.json"}
+  ],
+  "settings": "settings.fragment.json"
+}
+```
+
+- **`~`** is your home folder. **`{kit}`** is the kit checkout. **`{kit-memory}`** is Claude Code's
+  memory folder for the kit checkout.
+- **Typical entries:**
+  - your writing rules, `~/.claude/writing`;
+  - your drive map, `~/.config/claude-kit/disk.json` (`/disk setup` writes it);
+  - if you develop the kit itself, its working state: `{kit}/.claude/kit.json`, `{kit}/cowork/plans`,
+    `{kit}/cowork/research` and `{kit}/cowork/brain/BRAIN.airsqlite` (the brain's snapshots).
+    The kit's `.gitignore` already ignores all four, so nothing of yours can be committed to the kit.
+- **`settings.fragment.json`** is merged into `~/.claude/settings.json`, never linked, because
+  Claude Code rewrites that file. Hooks and permission rules are added when missing, and nothing of
+  yours is removed. A `~/` in it becomes your home folder.
+
+**Day to day:**
+- `kit-config status` shows each entry as linked, missing or occupied.
+- `kit-config adopt <from> <to>` moves an existing file or folder into the repo and links it back.
+- `kit-config save` snapshots the kit's brain, then commits and pushes the repo.
+- `link` never overwrites a real file: it reports `OCCUPIED` and leaves it alone.
+
+Client projects keep their own brains and plans in their own repos (`sqlite_tracking`). The config
+repo is for what belongs to you and the machine, not to any one project.
+
+---
+
 ## Configuration — `.claude/kit.json`
 
 One file per project holds both its mode and its customizations. Every key is optional; skills

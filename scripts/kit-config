@@ -1,0 +1,228 @@
+#!/usr/bin/env -S python3 -I
+"""kit-config — link your private config repo into place, so the kit works the same on every machine.
+
+The kit is public and holds no one's configuration. Yours lives in a private repo of your own (no
+code, only config and working state). That repo has a manifest, kit-config.json:
+
+  {
+    "links": [
+      {"from": "writing",          "to": "~/.claude/writing"},
+      {"from": "disk.json",        "to": "~/.config/claude-kit/disk.json"},
+      {"from": "kit/kit.json",     "to": "{kit}/.claude/kit.json"},
+      {"from": "kit/plans",        "to": "{kit}/cowork/plans"},
+      {"from": "kit/research",     "to": "{kit}/cowork/research"},
+      {"from": "kit/BRAIN.airsqlite", "to": "{kit}/cowork/brain/BRAIN.airsqlite"},
+      {"from": "kit/memory",       "to": "{kit-memory}"}
+    ],
+    "settings": "settings.fragment.json"
+  }
+
+  {kit}         the kit checkout (~/.claude-kit resolved)
+  {kit-memory}  Claude Code's memory folder for the kit checkout (~/.claude/projects/<slug>/memory)
+  ~             your home folder
+
+Commands:
+  kit-config link <repo>   link every entry and merge the settings fragment; remembers <repo>
+  kit-config link          the same, for the remembered repo
+  kit-config status        each entry: linked, missing, or occupied by something else
+  kit-config save [msg]    snapshot the kit's brain into the repo, then commit and push the repo
+  kit-config adopt <from> <to>
+                           move an existing file or folder at <to> into the repo at <from>, link it
+                           back, and add it to the manifest
+
+`link` never replaces a real file or folder: it reports it as occupied, so you can `adopt` it or
+move it aside. ~/.claude/settings.json is merged, not linked, because Claude Code rewrites it: the
+fragment's hooks and permissions are added when missing; nothing of yours is removed.
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+REMEMBER = os.path.join(HOME, ".config/claude-kit/config-repo")
+KIT = os.path.realpath(os.environ.get("TB_CLAUDE_KIT") or os.path.join(HOME, ".claude-kit"))
+CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude")
+
+
+def kit_memory():
+    slug = re.sub(r"[^A-Za-z0-9]", "-", KIT)
+    return os.path.join(CLAUDE_DIR, "projects", slug, "memory")
+
+
+def expand(p):
+    p = p.replace("{kit-memory}", kit_memory()).replace("{kit}", KIT)
+    return os.path.expanduser(p)
+
+
+def repo_path(arg=None):
+    if arg:
+        return os.path.realpath(os.path.expanduser(arg))
+    try:
+        return open(REMEMBER).read().strip()
+    except OSError:
+        sys.exit("No config repo yet: kit-config link <path-to-your-config-repo>")
+
+
+def manifest(repo):
+    p = os.path.join(repo, "kit-config.json")
+    try:
+        return json.load(open(p))
+    except FileNotFoundError:
+        sys.exit(f"{p} not found")
+
+
+def state(src, dst):
+    if os.path.islink(dst):
+        return "linked" if os.path.realpath(dst) == os.path.realpath(src) else "linked elsewhere"
+    if os.path.exists(dst):
+        return "occupied"
+    return "missing"
+
+
+def link_one(repo, entry, quiet=False):
+    src = os.path.join(repo, entry["from"])
+    dst = expand(entry["to"])
+    if not os.path.exists(src):
+        return f"skip   {entry['from']} (not in the repo)"
+    st = state(src, dst)
+    if st == "linked":
+        return None if quiet else f"ok     {dst}"
+    if st == "occupied":
+        return f"OCCUPIED {dst} holds a real file or folder; `kit-config adopt {entry['from']} {entry['to']}` or move it aside"
+    if st == "linked elsewhere":
+        old = os.readlink(dst)
+        os.remove(dst)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        os.symlink(src, dst)
+        return f"relink {dst} (was → {old})"
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    os.symlink(src, dst)
+    return f"link   {dst} → {src}"
+
+
+def merge_settings(repo, frag_name, quiet=False):
+    frag_path = os.path.join(repo, frag_name)
+    if not os.path.exists(frag_path):
+        return []
+    frag = json.loads(open(frag_path).read().replace("~/", HOME + "/"))
+    target = os.path.join(CLAUDE_DIR, "settings.json")
+    cur = json.load(open(target)) if os.path.exists(target) else {}
+    changed = []
+
+    hooks = cur.setdefault("hooks", {})
+    for event, groups in frag.get("hooks", {}).items():
+        have = {h.get("command") for g in hooks.get(event, []) for h in g.get("hooks", [])}
+        for g in groups:
+            cmds = [h.get("command") for h in g.get("hooks", [])]
+            if not all(c in have for c in cmds):
+                hooks.setdefault(event, []).append(g)
+                changed.append(f"hook {event}")
+    if not hooks:
+        cur.pop("hooks")
+
+    for key in ("allow", "deny", "ask"):
+        want = frag.get("permissions", {}).get(key, [])
+        if want:
+            lst = cur.setdefault("permissions", {}).setdefault(key, [])
+            for rule in want:
+                if rule not in lst:
+                    lst.append(rule)
+                    changed.append(f"permissions.{key} {rule}")
+
+    for k, v in frag.items():
+        if k in ("hooks", "permissions"):
+            continue
+        if k not in cur:
+            cur[k] = v
+            changed.append(k)
+
+    if changed:
+        if os.path.exists(target):
+            shutil.copy2(target, f"{target}.bak-kit-config-{time.strftime('%Y%m%d%H%M%S')}")
+        tmp = target + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cur, f, indent=2)
+            f.write("\n")
+        os.replace(tmp, target)
+    return [f"settings + {c}" for c in changed]
+
+
+def cmd_link(args):
+    quiet = "--quiet" in args
+    args = [a for a in args if a != "--quiet"]
+    repo = repo_path(args[0] if args else None)
+    m = manifest(repo)
+    out = [link_one(repo, e, quiet) for e in m.get("links", [])]
+    out += merge_settings(repo, m.get("settings", "settings.fragment.json"), quiet)
+    os.makedirs(os.path.dirname(REMEMBER), exist_ok=True)
+    if not os.path.exists(REMEMBER) or open(REMEMBER).read().strip() != repo:
+        with open(REMEMBER, "w") as f:
+            f.write(repo + "\n")
+    for line in out:
+        if line:
+            print(line)
+
+
+def cmd_status(args):
+    repo = repo_path(args[0] if args else None)
+    print(f"config repo: {repo}")
+    for e in manifest(repo).get("links", []):
+        src, dst = os.path.join(repo, e["from"]), expand(e["to"])
+        print(f"  {state(src, dst):17} {dst}")
+
+
+def cmd_adopt(args):
+    if len(args) != 2:
+        sys.exit("usage: kit-config adopt <from-in-repo> <to>")
+    repo = repo_path()
+    rel, to = args
+    src, dst = os.path.join(repo, rel), expand(to)
+    if os.path.islink(dst):
+        sys.exit(f"{dst} is already a link (→ {os.readlink(dst)}). Copy its target into the repo yourself if you want it.")
+    if not os.path.exists(dst):
+        sys.exit(f"{dst} doesn't exist")
+    if os.path.exists(src):
+        sys.exit(f"{src} already exists in the repo")
+    os.makedirs(os.path.dirname(src), exist_ok=True)
+    shutil.move(dst, src)
+    os.symlink(src, dst)
+    mp = os.path.join(repo, "kit-config.json")
+    m = json.load(open(mp))
+    if not any(e["from"] == rel for e in m.setdefault("links", [])):
+        m["links"].append({"from": rel, "to": to})
+        with open(mp, "w") as f:
+            json.dump(m, f, indent=2)
+            f.write("\n")
+    print(f"adopted {dst} → {src}")
+
+
+def cmd_save(args):
+    repo = repo_path()
+    sidecar = os.path.join(KIT, "scripts/sqlite-sidecar.sh")
+    if os.path.exists(os.path.join(KIT, ".claude/kit.json")) and os.access(sidecar, os.X_OK):
+        subprocess.run([sidecar], cwd=KIT, check=False)  # writes BRAIN.airsqlite, linked into the repo
+    git = lambda *a: subprocess.run(["git", "-C", repo, *a], capture_output=True, text=True)
+    git("add", "-A")
+    if not git("status", "--porcelain").stdout.strip():
+        print("config repo: nothing to save")
+        return
+    msg = " ".join(args) or f"save {time.strftime('%Y-%m-%d %H:%M')}"
+    r = git("commit", "-q", "-m", msg)
+    if r.returncode:
+        sys.exit(r.stderr)
+    p = git("push", "-q")
+    print("config repo: committed" + ("" if p.returncode == 0 else f", push failed: {p.stderr.strip()}"))
+
+
+def main():
+    cmd, args = (sys.argv[1] if len(sys.argv) > 1 else "status"), sys.argv[2:]
+    {"link": cmd_link, "status": cmd_status, "save": cmd_save, "adopt": cmd_adopt}.get(
+        cmd, lambda a: (print(__doc__), sys.exit(0 if cmd in ("-h", "--help", "help") else 1)))(args)
+
+
+if __name__ == "__main__":
+    main()
