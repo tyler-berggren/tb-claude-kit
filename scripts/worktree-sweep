@@ -1,0 +1,270 @@
+#!/usr/bin/env -S python3 -I
+"""worktree-sweep — find git worktrees that can go, and remove them on request.
+
+  worktree-sweep [repo ...]            report (default: every repo under the /disk projectRoots)
+  worktree-sweep --apply [repo ...]    remove the ones marked "remove"
+  worktree-sweep --apply-ask [repo ...] also remove the ones marked "ask" (finished agents a live session still locks)
+  worktree-sweep --json [repo ...]     machine-readable report
+
+Shared by /prune, /swarm and /disk, so the rules live in one place. A worktree is removable when
+nothing would be lost and nothing is using it:
+  - its work has landed: the branch tip is on the base branch, or every commit is already there
+    by content (git cherry, which catches cherry-picks and rebases);
+  - it has no uncommitted or untracked changes (ignored files such as node_modules don't count);
+  - no process has its working directory inside it;
+  - it isn't locked, or its lock belongs to a session that is gone (pid dead, or the pid now
+    belongs to a different process).
+  - nothing in it has changed for IDLE_HOURS (default 2): a worktree an agent just created is
+    landed and clean too.
+A worktree locked by a LIVE Claude session, landed, clean and idle for IDLE_HOURS is a finished
+agent the session never released: it is marked "ask", not "remove".
+Branches are deleted with `git branch -d`, which refuses anything unmerged.
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime
+
+IDLE_HOURS = float(os.environ.get("WORKTREE_SWEEP_IDLE_HOURS", "2"))
+CONFIG = os.environ.get("CLAUDE_KIT_DISK_CONFIG") or os.path.expanduser("~/.config/claude-kit/disk.json")
+LOCK_RE = re.compile(r"\(pid (\d+) start (.+?)\)")
+
+
+def git(repo, *args, check=False):
+    r = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+    if check and r.returncode:
+        raise RuntimeError(r.stderr.strip())
+    return r
+
+
+def repos_from_config():
+    try:
+        roots = json.load(open(CONFIG)).get("projectRoots") or ["~/dev"]
+    except (OSError, ValueError):
+        roots = ["~/dev"]
+    found = []
+    for root in roots:
+        root = os.path.expanduser(root)
+        if not os.path.isdir(root):
+            continue
+        for dirpath, dirnames, _ in os.walk(root):
+            depth = dirpath[len(root):].count(os.sep)
+            if ".git" in dirnames or os.path.isfile(os.path.join(dirpath, ".git")):
+                if os.path.isdir(os.path.join(dirpath, ".git")):  # a main checkout, not a worktree
+                    found.append(dirpath)
+                dirnames[:] = []
+                continue
+            dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in ("node_modules", "worktrees")]
+            if depth >= 2:
+                dirnames[:] = []
+    return found
+
+
+def worktrees(repo):
+    out = git(repo, "worktree", "list", "--porcelain").stdout
+    items, cur = [], {}
+    for line in out.splitlines() + [""]:
+        if not line:
+            if cur:
+                items.append(cur)
+            cur = {}
+            continue
+        key, _, val = line.partition(" ")
+        cur[key] = val if val else True
+    return items
+
+
+def base_refs(main):
+    refs = []
+    head = git(main, "symbolic-ref", "--short", "HEAD").stdout.strip()
+    if head:
+        refs.append(head)
+    origin = git(main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").stdout.strip()
+    if origin:
+        refs.append(origin)
+    return refs or ["main"]
+
+
+def landed(main, branch, tip, bases):
+    for b in bases:
+        if git(main, "merge-base", "--is-ancestor", tip, b).returncode == 0:
+            return True, f"on {b}"
+    for b in bases:
+        r = git(main, "cherry", b, tip)
+        if r.returncode == 0 and not any(l.startswith("+") for l in r.stdout.splitlines()):
+            return True, f"its commits are on {b} (cherry-picked or rebased)"
+    ahead = git(main, "rev-list", "--count", f"{bases[0]}..{tip}").stdout.strip()
+    return False, f"{ahead} commit(s) not on {bases[0]}"
+
+
+def lock_state(reason):
+    """('none'|'dead'|'live', text)."""
+    if reason is None:
+        return "none", ""
+    reason = reason if isinstance(reason, str) else ""
+    m = LOCK_RE.search(reason)
+    if not m:
+        return "live", f"locked: {reason or 'no reason given'}"
+    pid, start = m.group(1), m.group(2)
+    ps = subprocess.run(["ps", "-o", "lstart=", "-p", pid], capture_output=True, text=True).stdout.strip()
+    if not ps:
+        return "dead", f"lock from session pid {pid}, which has ended"
+    if not same_start(ps, start):
+        return "dead", f"lock from session pid {pid}, which has ended (the pid is now another process)"
+    return "live", f"locked by live session pid {pid}"
+
+
+def same_start(ps_start, lock_start):
+    """Claude Code writes the lock's start time in UTC; ps prints local time. Same process when the
+    two differ by a whole number of hours (a timezone offset), within a couple of seconds."""
+    fmt = "%a %b %d %H:%M:%S %Y"
+    try:
+        a = datetime.strptime(" ".join(ps_start.split()), fmt)
+        b = datetime.strptime(" ".join(lock_start.split()), fmt)
+    except ValueError:
+        return True  # can't tell: treat the lock as live, the safe side
+    diff = abs((a - b).total_seconds())
+    return diff <= 14 * 3600 and min(diff % 3600, 3600 - diff % 3600) <= 2
+
+
+def cwds():
+    out = subprocess.run(["lsof", "-a", "-d", "cwd", "-Fn"], capture_output=True, text=True).stdout
+    return [l[1:] for l in out.splitlines() if l.startswith("n")]
+
+
+def idle_hours(path):
+    newest = 0
+    for dirpath, dirnames, filenames in os.walk(path):
+        dirnames[:] = [d for d in dirnames if d not in ("node_modules", ".git", "target", "dist", ".next")]
+        for f in filenames:
+            try:
+                newest = max(newest, os.lstat(os.path.join(dirpath, f)).st_mtime)
+            except OSError:
+                pass
+        if dirpath.count(os.sep) - path.count(os.sep) >= 3:
+            dirnames[:] = []
+    return (time.time() - newest) / 3600 if newest else 1e9
+
+
+def size_gb(path):
+    out = subprocess.run(["du", "-sk", path], capture_output=True, text=True).stdout.split()
+    return round(int(out[0]) / 1024 / 1024, 2) if out else 0.0
+
+
+def assess(repo, running):
+    wts = worktrees(repo)
+    if not wts:
+        return []
+    main = wts[0]["worktree"]
+    bases = base_refs(main)
+    rows = []
+    for wt in wts[1:]:
+        path = wt["worktree"]
+        branch = wt.get("branch", "").replace("refs/heads/", "") or None
+        row = {"repo": main, "path": path, "branch": branch}
+        if wt.get("prunable") or not os.path.isdir(path):
+            row.update(verdict="remove", why="folder already gone (git worktree prune)", gb=0.0)
+            rows.append(row)
+            continue
+        row["gb"] = size_gb(path)
+        reasons_keep = []
+        if git(path, "status", "--porcelain").stdout.strip():
+            reasons_keep.append("uncommitted changes")
+        ok, land_why = landed(main, branch, wt.get("HEAD", "HEAD"), bases)
+        if not ok:
+            reasons_keep.append(land_why)
+        if any(c == path or c.startswith(path + "/") for c in running):
+            reasons_keep.append("a process is running in it")
+        lock, lock_why = lock_state(wt.get("locked"))
+        if reasons_keep:
+            row.update(verdict="keep", why="; ".join(reasons_keep + ([lock_why] if lock_why else [])))
+        elif lock == "live":
+            idle = idle_hours(path)
+            if idle >= IDLE_HOURS:
+                row.update(verdict="ask", why=f"landed ({land_why}), clean, idle {idle:.0f} h, but {lock_why}: likely a finished agent")
+            else:
+                row.update(verdict="keep", why=f"{lock_why}, active {idle:.1f} h ago")
+        else:
+            idle = idle_hours(path)
+            if idle < IDLE_HOURS:
+                # A worktree an agent just made is "landed and clean" too: wait until it goes quiet.
+                row.update(verdict="keep", why=f"landed and clean, but active {idle:.1f} h ago" + (f"; {lock_why}" if lock_why else ""))
+            else:
+                row.update(verdict="remove", why=f"landed ({land_why}), clean, idle {idle:.0f} h" + (f"; {lock_why}" if lock_why else ""))
+        rows.append(row)
+    return rows
+
+
+def remove(row):
+    main, path = row["repo"], row["path"]
+    if not os.path.isdir(path):
+        git(main, "worktree", "prune")
+        return "pruned" + (", " + delete_branch(main, row["branch"]) if row.get("branch") else "")
+    git(main, "worktree", "unlock", path)
+    r = git(main, "worktree", "remove", path)  # never --force: it refuses a dirty tree
+    if r.returncode:
+        return "failed: " + r.stderr.strip()
+    try:
+        os.rmdir(os.path.dirname(path))  # the hook's per-repo folder, once empty
+    except OSError:
+        pass
+    if row.get("branch"):
+        return "removed, " + delete_branch(main, row["branch"])
+    return "removed"
+
+
+def delete_branch(main, branch):
+    if git(main, "branch", "-d", branch).returncode == 0:
+        return "branch deleted"
+    # -d only knows ancestry. A cherry-picked or rebased branch has landed by content: delete it
+    # only when git cherry confirms every one of its commits is on a base branch.
+    for b in base_refs(main):
+        r = git(main, "cherry", b, branch)
+        if r.returncode == 0 and r.stdout.strip() and not any(l.startswith("+") for l in r.stdout.splitlines()):
+            git(main, "branch", "-D", branch)
+            return f"branch deleted (its commits are on {b})"
+    return "branch kept (it has commits that aren't on the base branch)"
+
+
+def main():
+    args = sys.argv[1:]
+    apply = "--apply" in args or "--apply-ask" in args
+    apply_ask = "--apply-ask" in args
+    as_json = "--json" in args
+    if "-h" in args or "--help" in args:
+        print(__doc__)
+        return
+    repos = [os.path.abspath(os.path.expanduser(a)) for a in args if not a.startswith("--")] or repos_from_config()
+    running = cwds()
+    rows = []
+    for repo in repos:
+        if git(repo, "rev-parse", "--git-dir").returncode == 0:
+            rows.extend(assess(repo, running))
+    if apply:
+        for row in rows:
+            if row["verdict"] == "remove" or (apply_ask and row["verdict"] == "ask"):
+                row["result"] = remove(row)
+        for repo in {r["repo"] for r in rows}:
+            git(repo, "worktree", "prune")
+    if as_json:
+        print(json.dumps(rows, indent=2))
+        return
+    if not rows:
+        print("No worktrees besides the main checkouts.")
+        return
+    for verdict in ("remove", "ask", "keep"):
+        group = [r for r in rows if r["verdict"] == verdict]
+        if not group:
+            continue
+        total = sum(r["gb"] for r in group)
+        print(f"\n{verdict.upper()} — {len(group)} worktree(s), {total:.1f} GB")
+        for r in sorted(group, key=lambda r: -r["gb"]):
+            res = f"  → {r['result']}" if r.get("result") else ""
+            print(f"  {r['gb']:6.2f} GB  {r['path']}  [{r['branch'] or 'detached'}]\n             {r['why']}{res}")
+
+
+if __name__ == "__main__":
+    main()

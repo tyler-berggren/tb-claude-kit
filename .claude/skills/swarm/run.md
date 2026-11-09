@@ -60,7 +60,10 @@ Event-driven, until every unit is terminal (`merged`, `failed`, or `skipped`):
    - append the unit's **Calls**, **Unverified** items and any **Critical** park to the plan's `## Review` block (`/plan`, **Batches**) — the orchestrator is its only writer;
    - update `swarm_units` (`merged`, `result` = one-line summary);
    - remove the unit's worktree, **in the background** (`run_in_background`), never inline in the
-     dispatch loop, or release its slot when the project has a pool. First check no running agent was handed a path
+     dispatch loop, or release its slot when the project has a pool. Use the path the Agent tool
+     returned: a `WorktreeCreate` hook (`/disk`) may have put it outside the repo. Claude Code locks
+     agent worktrees to this session, so unlock first: `git worktree unlock <path> && git worktree
+     remove <path>`, then `git branch -d <branch>`. Never `--force`: a refusal means unsaved work. First check no running agent was handed a path
      inside it (**Point other agents only at the integration worktree**); if one was, message it the integration
      path and remove the worktree once it reports. The plan edits stay uncommitted in the primary checkout;
    - loop back to 1, because a merge may unblock dependents.
@@ -98,6 +101,10 @@ has no integration branch to verify: skip to R4, then continue into **Landing**.
    - Follow-ups and loose ends, routed like `/plan carry` would
 5. **Retro to the brain.** Log 2–4 `insight` entries tagged `swarm-retro`: which unit slicings merge-conflicted despite disjoint territories, how each tier fared in review (a tier that kept escalating was too low for its tasks; an Opus tier that never found anything to fix may have been more than needed; whether narrow ★ units built on Sonnet passed their Opus review), and which **Model tiers** signals (from `model_reason`) predicted a failure or turned out unneeded, actual wall-clock vs. the setup profile, anything that would change the next setup's slicing. This is what S1 reads next time — the heuristics improve from your runs, not from guesses.
 6. Set run status `done` (`completed_at`), remove the remaining unit worktrees, delete merged unit branches, and keep the integration branch.
+   - **Sweep what's left:** `~/.claude-kit/scripts/worktree-sweep --apply-ask <primary>`. It removes
+     every worktree in the repo whose work has landed, that is clean, idle for 2 h and not in use,
+     including finished agents this session still locks, and keeps everything else with its reason.
+     Put its KEEP list in REPORT.md under **Loose ends**.
    - **Commit the bookkeeping** in the primary checkout, limited to its paths: `git -C <primary> commit --only -- <plan> cowork/swarm/<plan_id>/`. The owner's other staged and unstaged work stays as it was. The review marks in the plan go in with it. Skip the commit, and say so, when the primary checkout is not on the merge target or is mid-merge, mid-rebase or mid-cherry-pick.
    - **Merged:** also remove the integration worktree, never with `--force`. A dirty one means something was written there by mistake: report it and leave it.
    - **Left for review:** keep the integration worktree, so the owner can open it without switching their IDE's branch.

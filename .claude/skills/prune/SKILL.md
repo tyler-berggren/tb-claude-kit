@@ -99,11 +99,19 @@ sqlite3 cowork/brain/BRAIN.db "select plan_id, status from swarm_runs where stat
 
 ### 2. Sort each worktree into one of four groups
 
+**Locks.** Claude Code locks every agent worktree to the session that made it, and the lock outlives
+the agent: a long session can hold dozens of finished agents' worktrees. Read the lock with
+`~/.claude-kit/scripts/worktree-sweep --json <repo>`. Each worktree's `why` says either "lock from
+session pid N, which has ended" (a dead lock, ignored here) or "locked by live session pid N". It
+returns `verdict: ask` for a worktree that is landed, clean and idle but still locked by a live
+session: a finished agent nobody released. Put those in **Ask**, not Keep. Unlock before removing
+(`git worktree unlock <path>`).
+
 Apply the first rule that fits, top to bottom:
 
 | Group | Rule | Why |
 |---|---|---|
-| **Keep** | `busy=yes`, `locked`, the current session's own folder, a branch of a running swarm, or a branch matching `prune.keep` | Something is using it, or you said so. |
+| **Keep** | `busy=yes`, a **live** lock (below), the current session's own folder, a branch of a running swarm, or a branch matching `prune.keep` | Something is using it, or you said so. |
 | **Keep** | `dirty` > 0 or `unpushed` > 0 | It holds work that exists nowhere else. Say which files or commits, so the user can decide to push or discard them first. |
 | **Keep** | PR is `OPEN`, or last touched within `staleDays` | Still in play. |
 | **Remove** | `folder-gone` | The folder was deleted by hand; git still lists it. Costs nothing to clean. |
@@ -159,8 +167,9 @@ each removed worktree back (`git worktree add <path> <branch>`).
 
 - **Never remove without the user's pick**, not even the obvious ones. `report` changes nothing.
 - **Never `--force`**, never `git clean`, never `reset`. If git refuses, report it.
-- **Never touch the main checkout**, the session's own worktree, a locked worktree, a running
-  swarm's worktrees, or one with a process running in it.
+- **Never touch the main checkout**, the session's own worktree, a worktree locked by a live
+  session (unless the user picks it from **Ask**), a running swarm's worktrees, or one with a
+  process running in it.
 - **Never delete a remote branch.** Local cleanup only.
 - **Uncommitted or unpushed work is always Keep.** Tell the user what it is. If they then want
   it gone, they push it or discard it themselves, and `/prune` runs again.
