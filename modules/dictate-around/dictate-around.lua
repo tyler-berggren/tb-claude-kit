@@ -1,29 +1,35 @@
 -- dictate-around — dictate into one text field while you click and navigate anywhere else.
 --
--- A Hammerspoon module, installed by scripts/install-dictate-around.
+-- A Hammerspoon module, installed by install.sh. https://github.com/tyler-berggren/dictate-around
 --
 --   hotkey          remember the focused text field, start recording from the configured mic
 --   (move around)   click, scroll, switch apps; nothing is typed while you talk
 --   hotkey again    stop, transcribe on this Mac with whisper.cpp, paste into the field
 --                   where you started, restore the clipboard
 --
--- Settings: ~/.config/claude-kit/dictate-around.json (every key optional)
+-- Settings: ~/.config/dictate-around/config.json (every key optional)
 --   hotkey           "double-fn" (default), "double-rightcmd", "double-ctrl", ... or a combination
 --                    such as "ctrl+alt+d" or "f13"; see bindHotkey below
 --   mic              input device name, as in System Settings > Sound; default: the system input
 --   model            whisper.cpp model file; default: ~/.local/share/whisper/ggml-large-v3-turbo-q5_0.bin
 --   language         spoken language code; default "en"
 --   returnToCurrent  after pasting, go back to where you were when you stopped; default false
+--   duck             while recording, turn other audio down like macOS Dictation does, on any
+--                    output device: "min", "mid" (default), "max", or "off"
 --   tapMax           longest Fn press, in seconds, that counts as a tap; default 0.30
 --   doubleTapWindow  longest gap, in seconds, between the two taps; default 0.40
 --   ffmpeg, whisper  binary paths; default /opt/homebrew/bin/ffmpeg and /opt/homebrew/bin/whisper-cli
+--   duckHelper       default ~/.local/share/dictate-around/dictate-around-duck (built by the installer)
 
-require("hs.ipc") -- lets `hs -c` (and install-dictate-around --status) talk to Hammerspoon
+require("hs.ipc") -- lets `hs -c` (and install.sh --status) talk to Hammerspoon
 
 local M = {}
 
 local HOME = os.getenv("HOME")
-M.configPath = HOME .. "/.config/claude-kit/dictate-around.json"
+M.configPath = HOME .. "/.config/dictate-around/config.json"
+if not hs.fs.attributes(M.configPath) and hs.fs.attributes(HOME .. "/.config/claude-kit/dictate-around.json") then
+  M.configPath = HOME .. "/.config/claude-kit/dictate-around.json" -- older location, until install.sh moves it
+end
 
 local defaults = {
   hotkey          = "double-fn",
@@ -31,10 +37,12 @@ local defaults = {
   model           = HOME .. "/.local/share/whisper/ggml-large-v3-turbo-q5_0.bin",
   language        = "en",
   returnToCurrent = false,
+  duck            = "mid",
   tapMax          = 0.30,
   doubleTapWindow = 0.40,
   ffmpeg          = "/opt/homebrew/bin/ffmpeg",
   whisper         = "/opt/homebrew/bin/whisper-cli",
+  duckHelper      = HOME .. "/.local/share/dictate-around/dictate-around-duck",
 }
 
 local function loadConfig()
@@ -48,7 +56,9 @@ local function loadConfig()
       hs.alert.show("dictate-around: couldn't read " .. M.configPath .. ", using defaults", 4)
     end
   end
-  if type(cfg.model) == "string" then cfg.model = cfg.model:gsub("^~", HOME) end
+  for _, k in ipairs({ "model", "duckHelper" }) do
+    if type(cfg[k]) == "string" then cfg[k] = cfg[k]:gsub("^~", HOME) end
+  end
   return cfg
 end
 
@@ -57,6 +67,22 @@ local wav = (os.getenv("TMPDIR") or "/tmp/") .. "dictate-around.wav"
 local state = "idle"   -- idle | recording | stopping | transcribing
 local origin = nil     -- { app, win, el } captured when recording starts
 local recTask, indicator = nil, nil
+local duckTask = nil   -- the dictate-around-duck process while other audio is turned down
+
+-- Turn other audio down while recording. The helper runs Apple's voice-processing path, whose
+-- ducking lowers everything else playing (as macOS Dictation does) without touching device
+-- volume, so it also works on outputs with no volume control. It records nothing; ffmpeg does.
+local function duck()
+  local level = tostring(cfg.duck or "off"):lower()
+  if level == "off" or level == "false" or duckTask then return end
+  if not hs.fs.attributes(cfg.duckHelper) then return end -- not built; record without ducking
+  duckTask = hs.task.new(cfg.duckHelper, function() duckTask = nil end, { "--level", level })
+  if not duckTask:start() then duckTask = nil end
+end
+
+local function unduck()
+  if duckTask then duckTask:interrupt(); duckTask = nil end
+end
 
 local function micName()
   if cfg.mic and cfg.mic ~= "" then return cfg.mic end
@@ -81,6 +107,7 @@ local function hideIndicator()
 end
 
 local function reset(msg)
+  unduck()
   state, origin, recTask = "idle", nil, nil
   hideIndicator()
   if msg then hs.alert.show(msg, 3) end
@@ -180,10 +207,14 @@ local function startRecording()
   if not recTask:start() then return reset("dictate-around: couldn't start ffmpeg") end
   showIndicator("🎙")
   hs.sound.getByName("Tink"):play()
+  hs.timer.doAfter(0.25, function()
+    if state == "recording" then duck() end -- after the tink, so it plays at full volume
+  end)
 end
 
 local function stopRecording()
   state = "stopping"
+  unduck()
   hs.sound.getByName("Pop"):play()
   recTask:interrupt() -- SIGINT lets ffmpeg finish writing the file
 end
@@ -287,17 +318,18 @@ end
 local bindError
 M.tap, bindError = bindHotkey(cfg.hotkey)
 
--- One-line health report, for `install-dictate-around --status`.
+-- One-line health report, for `install.sh --status`.
 function M.status()
   local listening = false
   if M.tap then
     -- an eventtap reports isEnabled(); a bound hs.hotkey is live as long as it exists
     if M.tap.isEnabled then listening = M.tap:isEnabled() else listening = true end
   end
-  return string.format("listening=%s hotkey=%s accessibility=%s state=%s mic=%s model=%s",
+  return string.format("listening=%s hotkey=%s accessibility=%s state=%s mic=%s model=%s duck=%s",
     tostring(listening), bindError and ("ERROR " .. bindError) or cfg.hotkey,
     tostring(hs.accessibilityState()), state,
-    tostring(micName()), hs.fs.attributes(cfg.model) and "ok" or "missing")
+    tostring(micName()), hs.fs.attributes(cfg.model) and "ok" or "missing",
+    tostring(cfg.duck) .. ((tostring(cfg.duck) ~= "off" and not hs.fs.attributes(cfg.duckHelper)) and " (helper not built)" or ""))
 end
 
 if bindError then

@@ -760,52 +760,19 @@ Lid sleep: ON — Mac sleeps normally when the lid closes
 
 ## Dictate Around (`dictate-around`)
 
-macOS Dictation types live into whatever has focus, and a click anywhere ends it. `dictate-around`
-lets you talk into one text field while you click, scroll and switch apps: it records while you
-move around, then pastes the text where you started. It's a Hammerspoon module, not a skill.
+Dictate into one text field while you click, scroll and switch apps anywhere else: press a hotkey
+in the field, talk while you move around, press it again, and the text is transcribed on your Mac
+and pasted where you started. Any hotkey (double-tap Fn by default), any mic without changing the
+system input, and other audio turned down while you talk. It's a Hammerspoon module, not a skill.
 
 ```bash
-~/.claude-kit/scripts/install-dictate-around                       # once per machine
-~/.claude-kit/scripts/install-dictate-around --list-mics           # inputs connected right now
-~/.claude-kit/scripts/install-dictate-around --mic "<device>"       # record from this input
-~/.claude-kit/scripts/install-dictate-around --hotkey ctrl+alt+d    # any hotkey (see below)
-~/.claude-kit/scripts/install-dictate-around --status              # installed, listening, which mic
+~/.claude-kit/scripts/install-dictate-around            # once per machine
+~/.claude-kit/scripts/install-dictate-around --status   # installed, listening, which mic
 ```
 
-1. **Press the hotkey** in a text field (double-tap Fn by default). A tink, and 🎙 in the menu
-   bar: it's recording.
-2. **Move around.** Nothing is typed while you talk, so clicks can't interrupt it.
-3. **Press the hotkey again.** A pop and ✍︎ while it transcribes, then the text is pasted into the
-   field where you started and your clipboard is put back.
-
-- **Any hotkey.** Two forms:
-  - **Double-tap a modifier:** `double-fn` (default), `double-cmd`, `double-alt`, `double-ctrl`,
-    `double-shift`, or one side only: `double-rightcmd`, `double-leftalt`, `double-rightshift`...
-    A tap only counts if nothing else is pressed with it, so normal shortcuts still work.
-  - **A key combination**, pressed once to start and again to stop: `ctrl+alt+d`,
-    `cmd+shift+space`, `f13`. Modifiers are `cmd`, `alt` (or `option`), `ctrl`, `shift`, `fn`.
-
-  A spec it can't read shows an alert and `--status` reports the error.
-- **Any mic, without changing the system input.** `--mic` records from that device by name while
-  everything else keeps the default input. Without it, or with `--mic default`, it records from the
-  system input. `--list-mics` prints the exact names.
-- **Transcription runs on your Mac** with whisper.cpp (`ggml-large-v3-turbo-q5_0`, about 550 MB,
-  in `~/.local/share/whisper/`): no account, no network, about a second for a sentence on Apple
-  silicon. Text lands when you stop, not word by word.
-- **Settings** are in `~/.config/claude-kit/dictate-around.json`, every key optional: `hotkey`,
-  `mic`, `model`, `language`, `returnToCurrent` (after pasting, go back to where you were; default
-  off), `tapMax` and `doubleTapWindow` (double-tap timing). `--mic` and `--hotkey` write it for you
-  and reload; edit it by hand and use Hammerspoon's Reload Config. Keep the file in your config repo
-  with `kit-config` if you want it on every machine.
-- **What only you can do**, which the installer prints: turn on Hammerspoon under Privacy &
-  Security > Accessibility, allow the microphone on first use, and tick *Launch Hammerspoon at
-  login*. With an Fn hotkey, also set Keyboard > *Press 🌐 key to* to **Do Nothing** (unset means
-  Emoji, which opens on every tap) and turn the Dictation shortcut off.
-- **If it can't get back to the original app**, it leaves the text on your clipboard and says so,
-  rather than pasting somewhere else.
-- **The installer makes a link, not a copy**, so pulling the kit updates the module. It adds
-  Hammerspoon, ffmpeg and whisper-cpp with Homebrew when they're missing, and a marked block to
-  `~/.hammerspoon/init.lua`. `--uninstall` removes the block and the link and leaves the rest.
+It ships with the kit in `modules/dictate-around/` and is also published on its own as
+[dictate-around](https://github.com/tyler-berggren/dictate-around). Every option, the settings,
+troubleshooting and how it works are in [its README](../modules/dictate-around/README.md).
 
 ---
 

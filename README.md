@@ -170,7 +170,7 @@ Twenty-three skills. Claude Code lists them in every session, so no project need
 | `/disk` | Where your disk went on every drive, what made it, and the lasting fix: clear it, point the tool at another drive, or move it. Worktrees can live on an external drive. [More](docs/skills.md#disk-disk) |
 | `/clear-cache` | Wins back disk from npm, pnpm, uv, pip, Homebrew and stale browser copies. |
 | `/prune` | Reviews a repo's worktrees and removes only the ones you pick. |
-| `dictate-around` | Dictate into one text field while you click and move around anywhere else. Any hotkey (double-tap Fn by default), any mic, transcribed on your Mac. [More](docs/skills.md#dictate-around-dictate-around) |
+| `dictate-around` | Dictate into one text field while you click and move around anywhere else. Any hotkey, any mic, other audio turned down, transcribed on your Mac. Also [its own repo](https://github.com/tyler-berggren/dictate-around). [More](modules/dictate-around/README.md) |
 | `kit-config` | Your own configuration in a private repo, linked into place on any machine with one command. [More](docs/install.md#your-own-config-one-private-repo-every-machine) |
 | `lidsleep` | A terminal toggle for sleep-on-lid-close, so long jobs survive a closed laptop. [More](docs/skills.md#lid-sleep-lidsleep) |
 
