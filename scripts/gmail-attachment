@@ -1,0 +1,184 @@
+#!/usr/bin/env -S python3 -I
+"""gmail-attachment — save an email's attachments to a folder, by Gmail message id.
+
+The Gmail connector Claude uses reads mail but cannot hand over an attachment's file. This reads the
+message through the Gmail API instead, read-only, and writes each attachment to disk.
+
+  gmail-attachment setup                     one-time: Tyler approves read-only Gmail access in the browser;
+                                             the long-lived token is saved into the 1Password item
+  gmail-attachment list <message-id>         the message's attachments: name, type, size
+  gmail-attachment get <message-id> [dir]    save them all into dir (default: current folder);
+                                             --name <part> saves only those whose name contains it
+
+The message id is the one the Gmail connector shows (e.g. 1a1c21864e38a880): the API uses the same id.
+
+Nothing private is in this file. Which Google sign-in and which 1Password item hold the secrets is in
+~/.config/claude-kit/gmail.json (keep it in your config repo; see kit-config adopt):
+
+  {
+    "op_account": "<1Password account id>",
+    "item": "<1Password item id>",
+    "vault": "<vault id>",
+    "client_id_field": "oauth_client_id",
+    "client_secret_field": "oauth_client_secret",
+    "refresh_token_field": "gmail_refresh_token"
+  }
+
+The item needs an OAuth client of type Desktop (or Web, with http://127.0.0.1:8765/ allowed as a redirect)
+in a Google Cloud project with the Gmail API turned on. Secrets are read with `op read` each run, never
+printed or written to disk; the access token lives only in this process.
+"""
+import base64, http.server, json, os, re, secrets, subprocess, sys, threading, urllib.parse, urllib.request, webbrowser
+
+CONFIG = os.path.expanduser("~/.config/claude-kit/gmail.json")
+SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+PORT = 8765
+REDIRECT = f"http://127.0.0.1:{PORT}/"
+API = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+
+def config() -> dict:
+    try:
+        with open(CONFIG) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        sys.exit(f"No {CONFIG}: see `gmail-attachment --help` for what it holds.")
+
+
+def op_read(c: dict, field: str) -> str:
+    ref = f"op://{c['vault']}/{c['item']}/{field}"
+    p = subprocess.run(["op", "read", "--account", c["op_account"], ref], capture_output=True, text=True)
+    if p.returncode != 0:
+        sys.exit(f"1Password could not read {field}: {p.stderr.strip()}")
+    return p.stdout.strip()
+
+
+def post(url: str, data: dict) -> dict:
+    req = urllib.request.Request(url, data=urllib.parse.urlencode(data).encode(), method="POST")
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        sys.exit(f"Google refused: {e.code} {e.read().decode()[:500]}")
+
+
+def setup() -> None:
+    c = config()
+    cid, secret = op_read(c, c["client_id_field"]), op_read(c, c["client_secret_field"])
+    state = secrets.token_urlsafe(16)
+    got: dict = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 (the stdlib's name)
+            q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query))
+            if q.get("state") == state:
+                got.update(q)
+            self.send_response(200)
+            self.send_header("content-type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write("Done. You can close this tab.".encode() if "code" in got else b"Waiting...")
+
+        def log_message(self, *a):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", PORT), Handler)
+    threading.Thread(target=lambda: [server.handle_request() for _ in range(5) if "code" not in got], daemon=True).start()
+    # access_type=offline + prompt=consent: Google only returns a refresh token on a fresh consent.
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
+        "client_id": cid, "redirect_uri": REDIRECT, "response_type": "code", "scope": SCOPE,
+        "access_type": "offline", "prompt": "consent", "state": state})
+    print("Approve read-only Gmail access in the browser tab that opened (or open this):\n" + url, flush=True)
+    webbrowser.open(url)
+    import time
+    for _ in range(600):
+        if "code" in got or "error" in got:
+            break
+        time.sleep(0.5)
+    if "code" not in got:
+        sys.exit(f"No approval came back: {got.get('error', 'timed out after 5 minutes')}")
+    tok = post("https://oauth2.googleapis.com/token", {
+        "code": got["code"], "client_id": cid, "client_secret": secret, "redirect_uri": REDIRECT, "grant_type": "authorization_code"})
+    if "refresh_token" not in tok:
+        sys.exit("Google gave no refresh token; remove the app's access at myaccount.google.com/permissions and run setup again.")
+    field = f"{c['refresh_token_field']}[password]={tok['refresh_token']}"
+    p = subprocess.run(["op", "item", "edit", c["item"], "--vault", c["vault"], "--account", c["op_account"], field], capture_output=True, text=True)
+    if p.returncode != 0:
+        sys.exit(f"Could not save the token in 1Password: {p.stderr.strip()}")
+    print(f"Saved: {c['refresh_token_field']} in the 1Password item. gmail-attachment is ready.")
+
+
+def token(c: dict) -> str:
+    return post("https://oauth2.googleapis.com/token", {
+        "client_id": op_read(c, c["client_id_field"]), "client_secret": op_read(c, c["client_secret_field"]),
+        "refresh_token": op_read(c, c["refresh_token_field"]), "grant_type": "refresh_token"})["access_token"]
+
+
+def get(tok: str, path: str) -> dict:
+    req = urllib.request.Request(f"{API}/{path}", headers={"Authorization": f"Bearer {tok}"})
+    try:
+        with urllib.request.urlopen(req) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        hint = " (turn the Gmail API on for the OAuth client's Cloud project)" if "SERVICE_DISABLED" in body or "has not been used" in body else ""
+        sys.exit(f"Gmail refused {path}: {e.code}{hint} {body[:400]}")
+
+
+def parts(payload: dict):
+    """Every part with a filename, depth first: attachments sit at any depth of a multipart message."""
+    for p in payload.get("parts", []) or []:
+        if p.get("filename"):
+            yield p
+        yield from parts(p)
+
+
+def attachments(tok: str, msg_id: str) -> list:
+    msg = get(tok, f"messages/{msg_id}?format=full")
+    return [p for p in parts(msg["payload"]) if p["body"].get("attachmentId") or p["body"].get("data")]
+
+
+def main(argv: list) -> None:
+    if not argv or argv[0] in ("-h", "--help"):
+        print(__doc__)
+        return
+    cmd = argv[0]
+    if cmd == "setup":
+        return setup()
+    if cmd not in ("list", "get") or len(argv) < 2:
+        sys.exit("usage: gmail-attachment setup | list <message-id> | get <message-id> [dir] [--name <part>]")
+    c, msg_id = config(), argv[1]
+    if not re.fullmatch(r"[0-9a-fA-F]{8,32}", msg_id):
+        sys.exit(f"Not a Gmail message id: {msg_id}")
+    tok = token(c)
+    found = attachments(tok, msg_id)
+    if cmd == "list":
+        for p in found:
+            print(f"{p['filename']}\t{p.get('mimeType')}\t{p['body'].get('size', 0)} bytes")
+        if not found:
+            print("No attachments.")
+        return
+    rest = argv[2:]
+    name = None
+    if "--name" in rest:
+        i = rest.index("--name")
+        name, rest = rest[i + 1], rest[:i] + rest[i + 2:]
+    out = os.path.abspath(os.path.expanduser(rest[0] if rest else "."))
+    os.makedirs(out, exist_ok=True)
+    saved = 0
+    for p in found:
+        if name and name.lower() not in p["filename"].lower():
+            continue
+        data = p["body"].get("data") or get(tok, f"messages/{msg_id}/attachments/{p['body']['attachmentId']}")["data"]
+        # A sender's file name is untrusted: keep only its last path part and safe characters.
+        safe = re.sub(r"[^\w.\- ]+", "_", os.path.basename(p["filename"])) or "attachment"
+        path = os.path.join(out, safe)
+        with open(path, "wb") as f:
+            f.write(base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)))
+        print(path)
+        saved += 1
+    if not saved:
+        sys.exit("Nothing saved: no attachment matched.")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
