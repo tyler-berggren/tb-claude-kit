@@ -34,6 +34,10 @@ between the line `<!-- BEGIN:mantra -->` and the line `<!-- END:mantra -->`, and
 
 ## Standing rules
 
+- **Other sessions share this Mac.** Several Claude sessions run dev servers and browsers side by side. Never kill
+  by pattern (`pkill -f`, `killall`, `pgrep … | xargs kill`): stop only processes you started or can tie to this repo
+  (the pid you launched, or a port's listener whose working directory is inside the repo). The same goes for
+  browsers: only this project's own `/look` window and the headless instances you launched.
 - **Mantra review at session start.** When the hook lists entries since the last session, check them
   against the mantra. If they surfaced something a fresh session would need, update the mantra before
   starting work, without asking. Skip it if the work was routine.

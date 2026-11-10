@@ -912,9 +912,9 @@ process.on('SIGINT', shutdown);
 
   server.listen(assignedPort, '127.0.0.1', () => {
     if (HEADLESS) {
-      // Never registered: the shared-browser lookup falls back to the
-      // registry's first entry, so a headless entry could be taken for the
-      // human's browser. The caller reads the port from this line instead.
+      // Never registered: the registry is for each project's shared window,
+      // looked up by profile name, and a headless entry there could be taken
+      // for the human's browser. The caller reads the port from this line.
       assignedPort = server.address().port;
       process.stdout.write(`${JSON.stringify({
         headless: true, port: assignedPort, pid: process.pid, userDataDir: USER_DATA_DIR,

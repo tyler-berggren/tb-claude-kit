@@ -19,11 +19,12 @@ Each project gets its own Chrome instance with an isolated profile. Instances se
 Before any command, resolve the port from the registry:
 
 ```bash
-LOOK_PORT=$(node -e "
+LOOK_PORT=$(PROFILE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)" node -e "
   const fs = require('fs'), path = require('path'), os = require('os');
   const reg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude-chrome-registry.json'), 'utf8') || '[]');
-  const profile = path.basename(process.cwd());
-  const entry = reg.find(e => e.profile === profile) || reg[0];
+  // This project's window only: the repo root's name, never another entry (it is another project's browser).
+  const profile = path.basename(process.env.PROFILE_ROOT);
+  const entry = reg.find(e => e.profile === profile);
   if (entry) { try { process.kill(entry.pid, 0); console.log(entry.port); } catch { console.log(''); } }
   else console.log('');
 " 2>/dev/null)
@@ -31,16 +32,23 @@ LOOK_PORT=$(node -e "
 
 If `$LOOK_PORT` is empty, the server isn't running — launch it (see below). Use `$LOOK_PORT` in place of a hardcoded port in all curl commands.
 
+**Never drive another project's window.** The registry lists every project's cobrowser on this Mac, and other
+sessions are often working in them. Look up only this project's own entry (the repo root's directory name, as
+above): no fallback to the first entry, no port from memory or from another project. An empty `$LOOK_PORT` means
+launch this project's own, from the repo root. Never stop, kill or restart a browser server or Chrome you did not
+launch: find yours by its pid in the registry or the stdout line it printed, and `kill` that pid only (SIGTERM).
+
 ## Prerequisites
 
 Check if a server is already running for this project:
 
 ```bash
-LOOK_PORT=$(node -e "
+LOOK_PORT=$(PROFILE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)" node -e "
   const fs = require('fs'), path = require('path'), os = require('os');
   const reg = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.claude-chrome-registry.json'), 'utf8') || '[]');
-  const profile = path.basename(process.cwd());
-  const entry = reg.find(e => e.profile === profile) || reg[0];
+  // This project's window only: the repo root's name, never another entry (it is another project's browser).
+  const profile = path.basename(process.env.PROFILE_ROOT);
+  const entry = reg.find(e => e.profile === profile);
   if (entry) { try { process.kill(entry.pid, 0); console.log(entry.port); } catch { console.log(''); } }
   else console.log('');
 " 2>/dev/null)
