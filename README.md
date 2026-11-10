@@ -170,6 +170,7 @@ Twenty-three skills. Claude Code lists them in every session, so no project need
 | `/disk` | Where your disk went on every drive, what made it, and the lasting fix: clear it, point the tool at another drive, or move it. Worktrees can live on an external drive. [More](docs/skills.md#disk-disk) |
 | `/clear-cache` | Wins back disk from npm, pnpm, uv, pip, Homebrew and stale browser copies. |
 | `/prune` | Reviews a repo's worktrees and removes only the ones you pick. |
+| `dictate-around` | Dictate into one text field while you click and move around anywhere else. Any hotkey (double-tap Fn by default), any mic, transcribed on your Mac. [More](docs/skills.md#dictate-around-dictate-around) |
 | `kit-config` | Your own configuration in a private repo, linked into place on any machine with one command. [More](docs/install.md#your-own-config-one-private-repo-every-machine) |
 | `lidsleep` | A terminal toggle for sleep-on-lid-close, so long jobs survive a closed laptop. [More](docs/skills.md#lid-sleep-lidsleep) |
 
@@ -219,7 +220,7 @@ opt in.
 | [docs/workflow.md](docs/workflow.md) | The loop in depth: batches, decide-and-continue, the review block, team repos |
 | [docs/install.md](docs/install.md) | Modes, automatic adoption, `.gitignore`, memory, every `kit.json` key, the brain DB, a project's layout after install |
 | [docs/plan-and-swarm.md](docs/plan-and-swarm.md) | `/plan` and `/swarm` in full: PR mode, epics, model tiers, machine budget, reviews mid-run |
-| [docs/skills.md](docs/skills.md) | Research, parse, look, cto, wiki, video, 1Password, Claude switcher, cross-artifact, lidsleep |
+| [docs/skills.md](docs/skills.md) | Research, parse, look, cto, wiki, video, 1Password, Claude switcher, cross-artifact, lidsleep, dictate-around |
 | [docs/customization.md](docs/customization.md) | Writing rules, extra MCP servers, and per-project skills worth adding |
 
 ---
