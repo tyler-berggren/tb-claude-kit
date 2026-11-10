@@ -53,8 +53,30 @@ A long job (a load, a deploy, a CI run, a batch of agents) is never a reason to 
    goal check names.
 5. **When everything runnable is done and only waits remain,** keep the session awake: a background
    heartbeat (`sleep 1800`, `run_in_background`; restarted on each wake) or, inside `/loop`, a
-   `ScheduleWakeup` of 1200 to 1800 s. Each wake reads the jobs, advances whatever they unblocked,
-   refills the queue, and runs the goal check when one is due.
+   `ScheduleWakeup` of 1200 to 1800 s (the owner starts it with `/loop`). Each wake runs **the sweep**
+   first, then advances whatever the jobs unblocked, refills the queue, and runs the goal check when
+   one is due.
+
+## The sweep
+
+Jobs fail quietly: a run stops moving without closing, a hold outlives its run, a nightly build skips
+the same thing every day, and nothing tells anyone. A session that only waits on the jobs it started
+finds none of it. So a plan with long-running work carries a **sweep**: one read-only command, named on
+the goal block's `**Sweep:**` line, that asks the systems themselves and prints only what needs action
+(a quiet sweep is one line).
+
+- **What it asks**, at least: runs that have not moved in the time a step takes (open, nothing
+  running); failures since the last sweep, each with its failed step; leftovers (locks, holds, pins,
+  claims) whose run has closed; scheduled outputs that did not appear (a build skipped, a report not
+  sent); prep depth against the two-batches rule; and the session's own background workers alive.
+  It never trusts a run's own status row alone: an orchestrator can give up and leave the row open.
+- **When it runs:** on every wake, before a status, and before taking a Work ahead item when the last
+  sweep is over an hour old.
+- **What happens to a finding:** it goes to the top of Work ahead the same turn, ahead of planned work
+  (a stuck run holds capacity the plan counted on), and is fixed or handed to an agent then. A finding
+  that is the owner's goes to them as a critical park.
+- **Keep it honest:** a line that fires on something already handled is noise; fix the check so a
+  quiet sweep means quiet. Add a check whenever a by-hand look finds something the sweep missed.
 
 ## The goal check
 

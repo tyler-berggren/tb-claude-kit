@@ -18,6 +18,7 @@ Every plan carries `## Goal` directly under its title and banners, before `## Ha
 **Measure:** <how to read progress now: a query, a command, a count in the plan>
 **Pace:** <latest reading, its date, and the rate since the plan opened> (updated by each goal check)
 **Not this plan:** <what looks related and is out of scope, one line>
+**Sweep:** <the read-only command that prints what needs action now (`autopilot.md` "The sweep"); plans with long-running work>
 ```
 
 - **Generate** writes it with the plan. **Resume** adds it at R3 when it is missing, drafted from the
@@ -51,6 +52,7 @@ Last goal check: <date-time, or "none"> (its note is in the plan's ## Goal check
 Since then: `git log --since="<last check>" --stat -- <the plan's paths>` and the plan's own dated
 log lines (Review, ledger, Work ahead) since that time.
 Measure: <the Measure line, as a command you can run read-only>
+Sweep: <the Sweep line's command, if the plan has one: a finding still open counts against the pace>
 
 Answer, in at most 12 lines:
 1. The measure now, against the last check's reading and the plan's start. Run it yourself.
