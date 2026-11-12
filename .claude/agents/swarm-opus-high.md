@@ -3,6 +3,7 @@ name: swarm-opus-high
 description: A /swarm unit, fix or reviewer agent on opus at high effort. Dispatched only by the /swarm orchestrator, which picks the tier per unit; not for general use.
 model: opus
 effort: high
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, AskUserQuestion, ScheduleWakeup, ReportFindings, ListAgents, ReadNotifications, mcp__claude_ai_Claude_Docs, mcp__claude_ai_Intuit_QuickBooks_Labs, mcp__claude_ai_Gmail, mcp__claude_ai_Slack, mcp__claude_ai_Google_Drive, mcp__claude_ai_Google_Docs, mcp__claude_ai_Google_Sheets, mcp__claude_ai_Google_Calendar, mcp__claude_ai_DocuSeal, mcp__fathom, mcp__easel, mcp__claude-vscode
 hooks:
   PreToolUse:
     - matcher: "Bash"

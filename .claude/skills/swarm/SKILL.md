@@ -219,6 +219,10 @@ Every agent a run spawns (builder, fixer, reviewer) is dispatched as one of five
 agent type in `.claude/agents/` that fixes both the model and the reasoning effort. The Agent tool has
 no per-call effort, so the agent type is the only way to set it. The definitions name models by
 alias (`sonnet`, `opus`), so they always get the newest model the running Claude Code knows.
+Their `disallowedTools` line keeps out tools no unit uses (artifacts, workflows, questions to the
+owner, the owner's mail, calendar, accounting and chat connectors): their definitions cost about 35k
+tokens on every turn of every agent (measured 2026-11-12: 121k → 87k at the start). Research tools
+(Firecrawl, web search, Monitor) stay. If a unit ever needs a blocked tool, take it off that line.
 
 | Tier (`subagent_type`) | Model · effort | For a task that is… |
 |---|---|---|
